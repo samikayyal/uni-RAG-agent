@@ -255,18 +255,36 @@ location_type=timestamp, location_value=00:12:34
 
 SQLite FTS5 table for keyword search.
 
+`chunk_fts` is a denormalized search projection, not an external-content FTS table over `chunks`. SQLite remains authoritative through `chunks`, `files`, and `courses`; `chunk_fts` stores the searchable text needed for keyword ranking plus the `chunk_id` needed to join back to authoritative rows.
+
 ```sql
 CREATE VIRTUAL TABLE chunk_fts USING fts5(
+    chunk_id UNINDEXED,
     text,
     title,
     course_name,
     file_path,
-    content='chunks',
-    content_rowid='id'
+    source_type UNINDEXED,
+    tokenize='unicode61'
 );
 ```
 
-The app should keep this table synchronized with `chunks`.
+The app should populate this table from a joined projection of `chunks`, `files`, and `courses`:
+
+```sql
+SELECT
+    chunks.id AS chunk_id,
+    chunks.text,
+    chunks.title,
+    courses.name AS course_name,
+    files.path AS file_path,
+    chunks.source_type
+FROM chunks
+JOIN files ON files.id = chunks.file_id
+LEFT JOIN courses ON courses.id = files.course_id;
+```
+
+For the MVP, keyword indexing may rebuild `chunk_fts` from this projection. Incremental synchronization can be added later, but it must preserve this denormalized search contract.
 
 ### embeddings
 
@@ -476,7 +494,8 @@ Outputs:
 Rules:
 
 - keep title, text, course name, and file path searchable;
-- update FTS whenever chunks are added/updated.
+- rebuild `chunk_fts` from the joined `chunks`/`files`/`courses` projection for the MVP;
+- add incremental FTS updates later only if they preserve the same projection fields.
 
 ### Stage 4: Embedding
 

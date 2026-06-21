@@ -16,7 +16,7 @@ Build reliable exact-term retrieval over extracted chunks using SQLite FTS5. Key
 
 - Create and maintain the `chunk_fts` FTS5 table.
 - Index chunk text, title, course name, and file path.
-- Rebuild the FTS table from `chunks`.
+- Rebuild the FTS table from a joined projection of `chunks`, `files`, and `courses`.
 - Incrementally sync new/updated chunks when practical.
 - Implement keyword search with filters and ranking.
 - Return chunk IDs and enough metadata for retrieval merging.
@@ -79,13 +79,13 @@ Read:
 - `files`
 - `courses`
 
-The implementation should keep `chunk_fts` content synchronized with `chunks`. It may use rebuild-first behavior for MVP, then add incremental updates later if needed.
+`chunk_fts` is a denormalized FTS projection keyed by `chunk_id`; it is not an external-content FTS table directly bound to `chunks`. The implementation should populate it from `chunks` joined to `files` and `courses` so keyword search can match chunk text, titles, course names, and file paths. It may use rebuild-first behavior for MVP, then add incremental updates later if needed.
 
 ## Workflow
 
 1. Validate SQLite FTS5 availability.
-2. For rebuilds, clear and repopulate `chunk_fts` from all current chunks.
-3. Include course name and file path terms in searchable fields.
+2. For rebuilds, clear and repopulate `chunk_fts` from all current chunks joined to their file and course rows.
+3. Include chunk text, title, course name, and file path terms in searchable fields.
 4. Translate logical index filters to chunk source types.
 5. Execute FTS query safely.
 6. Return top K ranked results with chunk and file metadata.
@@ -105,6 +105,7 @@ The implementation should keep `chunk_fts` content synchronized with `chunks`. I
 - Verify exact term matches rank above unrelated chunks.
 - Verify course and source-type filters work.
 - Verify file path and title terms are searchable.
+- Verify course name terms are searchable even though course names live in `courses`, not `chunks`.
 - Verify invalid query syntax is handled.
 - Verify rebuild creates one FTS row per eligible chunk.
 - Optional smoke: keyword search over a tiny extracted fixture database.
