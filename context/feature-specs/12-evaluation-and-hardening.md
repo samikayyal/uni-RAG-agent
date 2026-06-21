@@ -1,0 +1,111 @@
+# Feature Spec 12: Evaluation and Hardening
+
+## Purpose
+
+Create a small, repeatable evaluation harness that checks retrieval quality, citation quality, weak-retrieval reporting, and safety boundaries as the MVP is implemented.
+
+## Depends On
+
+- [03-inventory-and-file-classification.md](03-inventory-and-file-classification.md)
+- [04-text-extraction-and-chunking.md](04-text-extraction-and-chunking.md)
+- [08-query-routing-and-hybrid-retrieval.md](08-query-routing-and-hybrid-retrieval.md)
+- [09-evidence-packets-and-coverage.md](09-evidence-packets-and-coverage.md)
+- [10-answering-and-citations.md](10-answering-and-citations.md)
+- DEC-022, DEC-026
+
+## In Scope
+
+- Create 15-20 hand-curated evaluation questions.
+- Cover each query type and major source type.
+- Store expected courses/files or expected absence for each eval item.
+- Run evals against fixture data automatically.
+- Support optional smoke evals against the real `Courses` archive.
+- Check citation validity, evidence packet completeness, and weak retrieval reporting.
+- Record performance and failure summaries.
+
+## Out of Scope
+
+- Large-scale benchmark infrastructure.
+- Model-vs-model leaderboard.
+- Automatic grading that trusts an LLM as the only judge.
+- Full archive traversal during normal automated tests.
+
+## Public Interfaces
+
+Command:
+
+```powershell
+uv run -m uni_rag_agent eval run
+uv run -m uni_rag_agent eval run --fixtures
+uv run -m uni_rag_agent eval run --smoke-real-archive
+```
+
+Eval item shape:
+
+```text
+id
+query
+query_type
+expected_courses
+expected_files
+expected_indexes
+must_include_terms
+expected_weaknesses
+notes
+```
+
+Internal interfaces:
+
+```python
+load_eval_set(path: Path) -> list[EvalItem]
+run_eval_item(item: EvalItem, config: Config) -> EvalResult
+score_retrieval(item: EvalItem, packet: EvidencePacket) -> RetrievalScore
+score_citations(packet: EvidencePacket, answer: AnswerResult) -> CitationScore
+write_eval_report(results: list[EvalResult]) -> Path
+```
+
+## Storage and Schema Impact
+
+No required new tables for MVP. Eval reports should be written under:
+
+```text
+data/runs/eval/
+```
+
+If later persistence is useful, add an explicit architecture update before introducing eval tables.
+
+## Workflow
+
+1. Maintain a committed eval set for fixture data.
+2. Optionally maintain a local-only eval set for the real course archive if paths are personal or too large to guarantee.
+3. For each eval item, run route, retrieval, evidence packet, and answer generation.
+4. Score whether expected courses/files/indexes appear in searched and evidence fields.
+5. Validate citations map to packet evidence.
+6. Check weak-retrieval explanations when expected evidence is missing.
+7. Write a JSON and Markdown report under `data/runs/eval/`.
+
+## Failure and Safety Rules
+
+- Normal automated evals must use fixtures only.
+- Real archive smoke evals require an explicit `--smoke-real-archive` flag.
+- Eval runs must not mutate `Courses`.
+- Do not use LLM judging as the sole pass/fail mechanism.
+- Missing provider credentials should not block fake-adapter evals.
+- Reports should avoid storing secrets or full environment values.
+
+## Tests
+
+- Automated tests for eval item loading and validation.
+- Verify fixture evals can run without real API keys.
+- Verify retrieval scoring catches missing expected files/courses.
+- Verify citation scoring catches citations not present in packets.
+- Verify weak-retrieval expected cases pass only when limitations are reported.
+- Verify reports are written under a temporary runs directory in tests.
+- Optional smoke: `uv run -m uni_rag_agent eval run --smoke-real-archive` after a real local index exists.
+
+## Acceptance Criteria
+
+- The repo contains a small committed fixture eval set.
+- `uv run -m uni_rag_agent eval run --fixtures` produces a useful report.
+- Eval results cover retrieval, evidence packets, citations, and safety boundaries.
+- Real archive eval is explicit and never part of the default automated test path.
