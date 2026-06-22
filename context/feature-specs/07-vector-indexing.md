@@ -64,6 +64,17 @@ data_schema_index
 transcript_index
 ```
 
+Source types map to Chroma collections as follows:
+
+```text
+document -> document_index
+slides -> slides_index
+notebook -> notebook_index
+code -> code_index
+data_schema -> data_schema_index
+transcript -> transcript_index
+```
+
 Result fields:
 
 ```text

@@ -294,7 +294,7 @@ Example shape:
     {
       "course": "High Preformance Computing for Big Data",
       "file": "path/to/slides.pptx",
-      "source_type": "pptx",
+      "source_type": "slides",
       "location": "slide 14",
       "text": "relevant extracted chunk",
       "score": 0.82
@@ -345,6 +345,28 @@ Expected behavior:
 ## Indexes
 
 Use separate indexes rather than one mixed index.
+
+Chunk `source_type` values are logical categories, not file extensions:
+
+```text
+document
+slides
+notebook
+code
+data_schema
+transcript
+```
+
+The original file extension remains file metadata. Map source types to indexes as follows:
+
+```text
+document -> document_index
+slides -> slides_index
+notebook -> notebook_index
+code -> code_index
+data_schema -> data_schema_index
+transcript -> transcript_index
+```
 
 ### Metadata Index
 
@@ -551,7 +573,7 @@ Build first:
 1. File inventory into SQLite.
 2. File classification: indexed vs skipped with reason.
 3. Text extraction for PDFs, PPTX, DOCX, TXT, MD, notebooks, code, and existing VTT.
-4. Separate indexes by source type.
+4. Separate indexes by logical source type.
 5. Keyword search over extracted text.
 6. Vector search over ChromaDB collections by logical index.
 7. Simple query router.

@@ -73,6 +73,8 @@ score
 retrieval_method
 ```
 
+`source_type` in each evidence item must be the logical chunk category (`document`, `slides`, `notebook`, `code`, `data_schema`, or `transcript`). If the UI or answer needs the original file format, derive it from the evidence file path or joined `files.extension` metadata.
+
 ## Storage and Schema Impact
 
 Populate:

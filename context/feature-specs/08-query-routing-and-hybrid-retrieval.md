@@ -95,7 +95,7 @@ Writing `search_runs` and `search_results` belongs to spec 09. This spec should 
 
 1. Normalize the query for routing while preserving original text.
 2. Match exact course names and common aliases from `courses`.
-3. Detect file extensions, source-type hints, assignment/project terms, and code/data terms.
+3. Detect file extensions, logical source-type hints, assignment/project terms, and code/data terms.
 4. Select candidate logical indexes.
 5. If rule-based routing is ambiguous or empty and LLM fallback is configured, call the LangChain router adapter.
 6. Run metadata search for course/file/path matches.

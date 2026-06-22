@@ -67,6 +67,8 @@ snippet
 retrieval_method=keyword
 ```
 
+`source_type` filters use logical chunk categories from `context/architecture.md`, not file extensions. For example, a query scoped to `slides_index` filters chunks with `source_type=slides`; the `.pptx` or `.ppt` extension remains in the joined `files` row.
+
 ## Storage and Schema Impact
 
 Maintain:
@@ -86,7 +88,7 @@ Read:
 1. Validate SQLite FTS5 availability.
 2. For rebuilds, clear and repopulate `chunk_fts` from all current chunks joined to their file and course rows.
 3. Include chunk text, title, course name, and file path terms in searchable fields.
-4. Translate logical index filters to chunk source types.
+4. Translate logical index filters to logical chunk source types.
 5. Execute FTS query safely.
 6. Return top K ranked results with chunk and file metadata.
 7. Log keyword query terms and result counts for later search coverage.

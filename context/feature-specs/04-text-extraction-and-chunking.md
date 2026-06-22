@@ -83,6 +83,8 @@ location_value
 metadata_json
 ```
 
+`source_type` must use the logical chunk vocabulary from `context/architecture.md`: `document`, `slides`, `notebook`, `code`, `data_schema`, or `transcript`. Do not store file extensions such as `.pdf` or `.pptx` in `source_type`; those remain in `files.extension`.
+
 ## Storage and Schema Impact
 
 Populate:

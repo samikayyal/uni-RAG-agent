@@ -219,6 +219,19 @@ CREATE INDEX idx_extracted_documents_file_id ON extracted_documents(file_id);
 
 Atomic retrieval units. A chunk may come from a PDF page, slide, notebook cell, code section, transcript timestamp, or data schema summary.
 
+`chunks.source_type` is a logical retrieval category, not the original file extension. Store only these values:
+
+```text
+document
+slides
+notebook
+code
+data_schema
+transcript
+```
+
+Use `files.extension` for the original extension such as `.pdf`, `.pptx`, `.ipynb`, `.py`, `.csv`, or `.vtt`.
+
 ```sql
 CREATE TABLE chunks (
     id INTEGER PRIMARY KEY,
@@ -244,11 +257,12 @@ CREATE INDEX idx_chunks_location ON chunks(location_type, location_value);
 Examples:
 
 ```text
-location_type=page, location_value=12
-location_type=slide, location_value=8
-location_type=notebook_cell, location_value=23
-location_type=function, location_value=train_model
-location_type=timestamp, location_value=00:12:34
+source_type=document, location_type=page, location_value=12
+source_type=slides, location_type=slide, location_value=8
+source_type=notebook, location_type=notebook_cell, location_value=23
+source_type=code, location_type=function, location_value=train_model
+source_type=data_schema, location_type=schema, location_value=Sheet1
+source_type=transcript, location_type=timestamp, location_value=00:12:34
 ```
 
 ### chunk_fts
@@ -417,18 +431,18 @@ CREATE TABLE answers (
 Keep indexes logically separate even if stored in the same physical database.
 
 ```text
-metadata_index: all files and course folders
-document_index: PDF/DOCX/DOC/TXT/MD chunks
-slides_index: PPTX/PPT slide chunks
-notebook_index: IPYNB markdown/code cells
-code_index: PY/R/CPP/H/M code sections
-data_schema_index: CSV/XLSX/JSON/JSONL/SQLite/DB summaries
-transcript_index: VTT transcript chunks
+metadata_index: all files and course folders; no chunk source_type
+document -> document_index: PDF/DOCX/DOC/TXT/MD chunks
+slides -> slides_index: PPTX/PPT slide chunks
+notebook -> notebook_index: IPYNB markdown/code cells
+code -> code_index: PY/R/CPP/H/M code sections
+data_schema -> data_schema_index: CSV/XLSX/JSON/JSONL/SQLite/DB summaries
+transcript -> transcript_index: VTT transcript chunks
 ```
 
 The router chooses candidate logical indexes for each query.
 
-Each logical index maps to a separate ChromaDB collection. The router selects which collections to search per query. Cross-index queries search multiple collections and merge results.
+Each logical chunk `source_type` maps to one logical index, and each logical index maps to a separate ChromaDB collection. The router selects which collections to search per query. Cross-index queries search multiple collections and merge results.
 
 ## Ingestion Pipeline
 
@@ -603,7 +617,7 @@ The packet should be JSON-serializable and stored exactly as passed to the answe
       "file_id": 123,
       "chunk_id": 456,
       "file": "D:\\Projects\\Uni RAG Agent\\Courses\\High Preformance Computing for Big Data\\...",
-      "source_type": "pptx",
+      "source_type": "slides",
       "location": "slide 14",
       "text": "Relevant extracted chunk text.",
       "score": 0.82,

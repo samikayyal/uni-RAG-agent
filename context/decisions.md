@@ -84,7 +84,7 @@ The archive is approximately `27,978` files and `24.4 GB`. It includes useful co
 
 ### Decision
 
-Index only source types that are likely to contain useful course knowledge:
+Index only file extensions that are likely to contain useful course knowledge:
 
 ```text
 .pdf, .pptx, .ppt, .docx, .doc, .txt, .md, .ipynb,

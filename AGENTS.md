@@ -10,7 +10,7 @@ or making any architectural decision:
 5. `context/progress_tracker.md` — current phase, completed work, open questions, and next steps
 
 Update `context/progress_tracker.md` after each
-meaningful implementation change.
+meaningful implementation change. Also update `context/decisions.md` if applicable
 
 If implementation changes the architecture, scope, or
 decisions/standards documented in the context files, update the
