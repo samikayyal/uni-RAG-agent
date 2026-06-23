@@ -65,11 +65,11 @@ The file scan found `18,633 .png`, `7,840 .jpg`, `92 .jpeg`, and `47 .tif` files
 
 ### Decision
 
-Do not OCR, caption, embed, or semantically index images by default. Store image files in the metadata inventory only.
+Do not OCR, caption, embed, or semantically index standalone image files by default. Store image files in the metadata inventory only. Scanned-PDF OCR is a separate PDF extraction fallback covered by DEC-015.
 
 ### Consequences
 
-The system can still answer metadata questions about image-heavy folders and datasets. It will not answer from image contents unless a later opt-in OCR/captioning workflow is added for selected folders.
+The system can still answer metadata questions about image-heavy folders and datasets. It will not answer from standalone image contents unless a later opt-in OCR/captioning workflow is added for selected folders.
 
 ---
 
@@ -320,11 +320,11 @@ University PDFs vary: text-based, scanned images, exported slides, password-prot
 
 ### Decision
 
-Use PyMuPDF as the primary PDF extractor. If text extraction yields little or no text (likely a scanned document), fall back to Tesseract OCR via pytesseract. Tesseract is an optional system dependency; extraction works without it but skips scanned PDFs.
+Use PyMuPDF as the primary PDF extractor. If text extraction yields little or no text (likely a scanned document), fall back to Tesseract OCR via pytesseract only when `UNI_RAG_OCR_ENABLED` is true and Tesseract is installed. Tesseract is an optional system dependency; extraction works without it but skips scanned PDFs.
 
 ### Consequences
 
-Tesseract must be installed separately on Windows (not a pip package). OCR should be optional: if Tesseract is not installed, log a warning and mark scanned PDFs as `failed` with reason "scanned PDF, OCR not available."
+Tesseract must be installed separately on Windows (not a pip package). OCR should be optional: if OCR is disabled or Tesseract is not installed, log a warning and mark scanned PDFs as `failed` with reason "scanned PDF, OCR not available." This decision does not permit OCR/captioning of standalone image files; DEC-002 keeps those metadata-only by default.
 
 ---
 

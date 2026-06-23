@@ -143,7 +143,7 @@ Image files should be:
 
 - kept in the metadata inventory;
 - excluded from semantic/text RAG;
-- not OCR'd by default;
+- not OCR'd or captioned by default as standalone image files;
 - searchable only as file/folder metadata.
 
 This applies primarily to:
@@ -157,6 +157,8 @@ The system may still answer metadata questions such as:
 - which course folders contain image datasets;
 - where image-heavy folders are located;
 - which projects used image data.
+
+This image rule is separate from scanned-PDF extraction. If a PDF has very low text yield because it is scanned, the PDF extractor may use Tesseract OCR only when `UNI_RAG_OCR_ENABLED` is true and Tesseract is installed. If OCR is disabled or unavailable, the scanned PDF should fail per file with reason `scanned PDF, OCR not available`.
 
 ### Do Not Embed Everything
 
@@ -583,8 +585,8 @@ Build first:
 
 Defer:
 
-- OCR;
-- image captioning;
+- standalone image OCR/captioning;
+- bulk OCR over image datasets;
 - full video transcription;
 - knowledge graph;
 - automatic old-code execution;

@@ -20,6 +20,7 @@ The project has not yet implemented ingestion, indexing, retrieval, or answering
   - [x] Align context docs around accepted stack and MVP boundaries.
   - [x] Add module-level feature specifications under `context/feature-specs/`.
   - [x] Clarify chunk `source_type` as a logical category and map source types to logical indexes.
+  - [x] Clarify OCR scope: standalone images stay metadata-only, scanned PDFs may use configured Tesseract fallback.
   - [x] Align Feature 01 foundation package layout and fixture contracts with architecture.
 
 - [ ] **Phase 1: Inventory Foundation**
@@ -69,7 +70,7 @@ The project has not yet implemented ingestion, indexing, retrieval, or answering
 
 - [ ] **Later / Optional**
   - [ ] Opt-in video/audio transcription.
-  - [ ] Opt-in OCR for selected non-dataset image folders.
+  - [ ] Opt-in standalone image OCR/captioning for selected non-dataset folders.
   - [ ] Knowledge graph over courses, topics, assignments, projects, datasets, and code.
   - [ ] Portfolio/resume mode.
   - [ ] Study/quiz mode.
@@ -90,5 +91,6 @@ The project has not yet implemented ingestion, indexing, retrieval, or answering
 * [x] Review and patch planning-doc drift before module spec creation.
 * [x] Create `context/feature-specs/` with MVP module implementation contracts.
 * [x] Clarify logical `source_type` values across architecture and MVP specs.
+* [x] Clarify OCR wording across overview, architecture, decisions, and feature specs.
 * [x] Align Feature 01 package layout, fixture contract, and logging helper naming with `context/architecture.md`.
 * [ ] Implement Phase 1 inventory foundation.

@@ -29,7 +29,7 @@ This spec creates the foundation for extraction, search coverage reporting, and 
 - Extracting text or chunks.
 - Opening unsafe artifacts.
 - Decompressing archives.
-- OCR, transcription, or image analysis.
+- Standalone image OCR/captioning, transcription, or image analysis.
 - Full hard-delete purge behavior beyond documenting the future command.
 
 ## Public Interfaces

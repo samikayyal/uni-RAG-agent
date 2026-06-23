@@ -29,7 +29,7 @@ Extract text-like course knowledge from pending inventory files and store retrie
 ## Out of Scope
 
 - Legacy `.doc` and `.ppt` conversion.
-- Image OCR or captioning.
+- Standalone image OCR or captioning.
 - Full video/audio transcription.
 - Executing notebooks or old course scripts.
 - Loading pickle/joblib/model artifacts.
@@ -137,7 +137,7 @@ subchunk
 - Do not execute course code, notebooks, installers, archives, or media files.
 - Do not mutate source files under `Courses`.
 - Password-protected, corrupted, or unsupported files fail per file with a detailed error.
-- OCR is disabled unless explicitly configured. If a scanned PDF needs OCR and OCR is unavailable, mark it failed with reason `scanned PDF, OCR not available`.
+- OCR is disabled unless explicitly configured. If a scanned PDF needs OCR and OCR is disabled or unavailable, mark it failed with reason `scanned PDF, OCR not available`.
 - Do not include notebook image/binary outputs.
 - Truncate long text outputs and long error tracebacks.
 

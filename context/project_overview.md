@@ -49,7 +49,7 @@ Core flow:
 
 ## Out-of-Scope (By Design)
 
-* **Image RAG/OCR by default**: Images are almost entirely data and should be metadata-only. Do not OCR or semantically index `.png`, `.jpg`, `.jpeg`, `.tif`, or `.jfif` by default.
+* **Standalone image RAG/OCR by default**: Images are almost entirely data and should be metadata-only. Do not OCR, caption, or semantically index standalone `.png`, `.jpg`, `.jpeg`, `.tif`, or `.jfif` files by default. This does not prohibit the optional scanned-PDF OCR fallback described under document extraction.
 * **Full-folder embedding**: Do not blindly embed the whole archive. The folder contains large datasets, model artifacts, installers, archives, media, and binaries that would pollute retrieval.
 * **Automatic video/audio transcription**: Videos and audio are metadata-only initially. Existing `.vtt` transcripts can be indexed. Transcription should be opt-in later.
 * **Automatic old-code execution**: The agent must not run course scripts, notebooks, installers, or arbitrary code unless the user explicitly approves a specific action.
@@ -64,7 +64,7 @@ Core flow:
 * **Metadata Store**: SQLite.
 * **Keyword Search**: SQLite FTS5 with default unicode61 tokenizer.
 * **Vector Store**: ChromaDB with separate collections per logical index (documents, slides, notebooks, code, data schemas, transcripts).
-* **Document Extraction**: PyMuPDF for PDFs (with optional Tesseract OCR fallback for scanned documents), `python-pptx` for PPTX, `python-docx` for DOCX, `nbformat` for notebooks, pandas/openpyxl for tabular summaries.
+* **Document Extraction**: PyMuPDF for PDFs, with optional Tesseract OCR fallback for scanned PDFs only when `UNI_RAG_OCR_ENABLED` is true and Tesseract is installed; `python-pptx` for PPTX; `python-docx` for DOCX; `nbformat` for notebooks; pandas/openpyxl for tabular summaries.
 * **App/API Layer**: FastAPI backend with a simple HTML/JS frontend.
 * **LLM Provider**: Multi-provider via LangChain. LLM and embedding providers/models are configuration values loaded from environment variables, with deterministic fake adapters for tests. Do not hardcode a paid or cloud provider as required.
 * **Configuration**: Environment variables loaded from a `.env` file via `python-dotenv`.

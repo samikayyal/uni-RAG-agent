@@ -84,7 +84,7 @@ Each spec uses these sections:
 
 These are intentionally outside the MVP specs unless a future decision changes scope:
 
-- Image OCR or captioning.
+- Standalone image OCR or captioning.
 - Full video/audio transcription.
 - Knowledge graph construction.
 - Portfolio/resume mode beyond evidence-backed answering support.

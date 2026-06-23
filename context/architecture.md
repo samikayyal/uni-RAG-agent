@@ -491,7 +491,7 @@ Extractor responsibilities:
 
 Extractor-specific rules:
 
-- **PDFs**: PyMuPDF for text extraction. If text yield is very low (likely scanned), fall back to Tesseract OCR via pytesseract. Tesseract is an optional system dependency.
+- **PDFs**: PyMuPDF for text extraction. If text yield is very low (likely scanned), fall back to Tesseract OCR via pytesseract only when `UNI_RAG_OCR_ENABLED` is true and Tesseract is installed. Tesseract is an optional system dependency. If OCR is disabled or unavailable, fail that scanned PDF with reason `scanned PDF, OCR not available`.
 - **PPTX slides**: One chunk per slide. Concatenate all text shapes on the slide. Include slide title as chunk title. Append speaker notes to slide text.
 - **Notebooks**: One chunk per cell (markdown or code). Include truncated text outputs (max ~500 chars) appended to code cells. Skip image/binary outputs.
 - **Python code**: AST-based extraction using the `ast` module. Extract functions, classes, docstrings, and imports as separate chunks.
@@ -682,7 +682,7 @@ Tools should be exposed through LangChain tool interfaces for integration with t
 - Do not load pickle/joblib/model artifacts by default.
 - Do not run installers or archives.
 - Do not mutate files under `Courses`.
-- Do not transcribe media or OCR images without explicit opt-in.
+- Do not transcribe media or OCR/caption standalone image files without explicit opt-in. Scanned-PDF OCR is allowed only through the configured PDF extraction fallback.
 - Do not answer from memory when the evidence packet lacks support.
 
 ## MVP Milestones
