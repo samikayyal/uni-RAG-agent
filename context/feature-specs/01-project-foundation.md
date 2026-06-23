@@ -17,7 +17,7 @@ No feature spec depends on this one being fully implemented at runtime, but all 
 
 ## In Scope
 
-- Create `src/uni_rag_agent/` with module folders for config, storage, inventory, extraction, indexing, retrieval, answering, tools, app, and evaluation.
+- Create `src/uni_rag_agent/` with `config.py`, `logging_config.py`, and module folders for storage, inventory, extraction, indexing, retrieval, answering, tools, app, and evaluation.
 - Create `tests/` with small fixture data under `tests/fixtures/`.
 - Add a module entrypoint so commands use `uv run -m uni_rag_agent ...`.
 - Define a small command registry or CLI dispatcher for future commands.
@@ -57,7 +57,7 @@ src/uni_rag_agent/
 |-- __main__.py
 |-- cli.py
 |-- config.py
-|-- logging.py
+|-- logging_config.py
 |-- storage/
 |-- inventory/
 |-- extraction/
@@ -75,10 +75,30 @@ Test layout:
 tests/
 |-- fixtures/
 |   |-- courses_small/
+|   |   |-- High Preformance Computing for Big Data/
+|   |   |   |-- lecture_notes.md
+|   |   |   |-- assignment.py
+|   |   |   |-- dataset.csv
+|   |   |   |-- diagram.png
+|   |   |   |-- archive.zip
+|   |   |   `-- setup.exe
+|   |   `-- Information Retrieval/
+|   |       |-- syllabus.txt
+|   |       |-- search_demo.ipynb
+|   |       |-- transcript.vtt
+|   |       |-- model.pkl
+|   |       |-- lecture.mp4
+|   |       `-- vectors.bin
 |   `-- extracted_samples/
+|       |-- README.md
+|       `-- sample_chunk.json
 |-- test_cli.py
-`-- test_logging.py
+`-- test_logging_config.py
 ```
+
+`tests/fixtures/courses_small/` is the committed synthetic course archive used by inventory and later ingestion tests. It must stay tiny, use exact folder names as shown above, and include both extractable files (`.md`, `.py`, `.csv`, `.txt`, `.ipynb`, `.vtt`) and metadata-only files (`.png`, `.zip`, `.exe`, `.pkl`, `.mp4`, `.bin`). The misspelled `High Preformance Computing for Big Data` folder is intentional and tests exact path preservation.
+
+`tests/fixtures/extracted_samples/` is separate from the course archive. It stores small expected-output examples that later extraction, indexing, and evidence-packet tests can extend without pretending those files came directly from `Courses`.
 
 The CLI should dispatch to module functions and return process exit codes. Long-running commands should log progress to console and JSONL under `data/runs/`.
 
@@ -93,7 +113,7 @@ It should ensure `data/` is never committed and `.env.example` is committed whil
 1. Create the package and test directories.
 2. Add a minimal `__main__.py` that delegates to `cli.py`.
 3. Add a CLI skeleton with help text and stub command groups.
-4. Add logging helpers for console output and JSONL run logs.
+4. Add `logging_config.py` helpers for console output and JSONL run logs.
 5. Add fixture folders with tiny representative files for later specs.
 6. Update `README.md` with `uv` commands and the MVP module order.
 7. Add `.env.example` with expected variables but no secrets.
@@ -108,7 +128,7 @@ It should ensure `data/` is never committed and `.env.example` is committed whil
 
 ## Tests
 
-- Automated: `uv run -m pytest tests/test_cli.py tests/test_logging.py`.
+- Automated: `uv run -m pytest tests/test_cli.py tests/test_logging_config.py`.
 - Verify `uv run -m uni_rag_agent --help` exits successfully.
 - Verify unknown commands return a non-zero exit code and useful message.
 - Verify JSONL logging writes valid JSON objects to a temporary run directory.

@@ -37,14 +37,19 @@ D:\Projects\Uni RAG Agent
 |-- src\
 |   `-- uni_rag_agent\
 |       |-- __init__.py
+|       |-- __main__.py
+|       |-- cli.py
 |       |-- config.py
+|       |-- logging_config.py
+|       |-- storage\
 |       |-- inventory\
 |       |-- extraction\
 |       |-- indexing\
 |       |-- retrieval\
-|       |-- tools\
 |       |-- answering\
-|       `-- app\
+|       |-- tools\
+|       |-- app\
+|       `-- evaluation\
 |-- tests\
 |-- pyproject.toml
 |-- .env                             # Configuration and API keys, gitignored

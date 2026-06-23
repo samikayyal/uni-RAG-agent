@@ -20,6 +20,7 @@ The project has not yet implemented ingestion, indexing, retrieval, or answering
   - [x] Align context docs around accepted stack and MVP boundaries.
   - [x] Add module-level feature specifications under `context/feature-specs/`.
   - [x] Clarify chunk `source_type` as a logical category and map source types to logical indexes.
+  - [x] Align Feature 01 foundation package layout and fixture contracts with architecture.
 
 - [ ] **Phase 1: Inventory Foundation**
   - [ ] Create project package structure.
@@ -89,4 +90,5 @@ The project has not yet implemented ingestion, indexing, retrieval, or answering
 * [x] Review and patch planning-doc drift before module spec creation.
 * [x] Create `context/feature-specs/` with MVP module implementation contracts.
 * [x] Clarify logical `source_type` values across architecture and MVP specs.
+* [x] Align Feature 01 package layout, fixture contract, and logging helper naming with `context/architecture.md`.
 * [ ] Implement Phase 1 inventory foundation.
