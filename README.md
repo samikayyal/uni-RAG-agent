@@ -1,0 +1,77 @@
+# Uni RAG Agent
+
+Uni RAG Agent is a local course archive intelligence system for `Courses/`.
+It is designed to inventory a mixed university archive, selectively extract useful
+course knowledge, retrieve source-grounded evidence, and answer only from that
+evidence.
+
+The implementation contract lives in `context/`. Start with:
+
+1. `context/project_overview.md`
+2. `context/architecture.md`
+3. `context/decisions.md`
+4. `context/feature-specs/`
+5. `context/progress_tracker.md`
+
+## Setup
+
+Use `uv` for all Python workflows.
+
+```powershell
+uv sync
+uv run -m uni_rag_agent --help
+uv run -m uni_rag_agent config check
+```
+
+Runtime configuration is loaded from `.env` with non-secret defaults documented
+in `.env.example`. The `.env` file, `Courses/`, and generated `data/` directory
+are ignored by git.
+
+## Developer Commands
+
+```powershell
+uv run -m uni_rag_agent --help
+uv run -m uni_rag_agent config check
+uv run -m pytest tests/test_cli.py tests/test_logging_config.py
+```
+
+Foundation command shapes are registered for later specs:
+
+```powershell
+uv run -m uni_rag_agent storage init
+uv run -m uni_rag_agent inventory run
+uv run -m uni_rag_agent extract run
+uv run -m uni_rag_agent index keyword
+uv run -m uni_rag_agent index vector
+uv run -m uni_rag_agent retrieve "query text"
+uv run -m uni_rag_agent eval run
+uv run -m uni_rag_agent app serve
+```
+
+Commands beyond `config check` are stubs until their feature specs are
+implemented. They should fail clearly and must not scan or mutate `Courses/`.
+
+## MVP Module Order
+
+1. Project foundation
+2. Configuration and storage
+3. Inventory and file classification
+4. Text extraction and chunking
+5. Data schema summaries
+6. Keyword indexing
+7. Vector indexing
+8. Query routing and hybrid retrieval
+9. Evidence packets and coverage
+10. Answering and citations
+11. FastAPI HTML UI
+12. Evaluation and hardening
+
+## Fixtures
+
+`tests/fixtures/courses_small/` is a tiny synthetic course archive for later
+inventory and ingestion tests. It intentionally includes the misspelled course
+folder `High Preformance Computing for Big Data` so path-preservation behavior
+can be tested exactly.
+
+`tests/fixtures/extracted_samples/` contains expected-output examples that do
+not pretend to be source files from `Courses/`.

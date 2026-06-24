@@ -2,10 +2,10 @@
 
 ## Current Status
 
-* **Current Phase**: Phase 0: Design and Context Setup
-* **Current Goal**: Convert the project idea into implementation-ready context documents and architecture notes.
+* **Current Phase**: Phase 1: Inventory Foundation
+* **Current Goal**: Build the project foundation, then implement storage and inventory behavior.
 
-The project has not yet implemented ingestion, indexing, retrieval, or answering code. The current work is design scaffolding.
+The project now has the Feature 01 foundation package, CLI dispatcher, configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, and focused foundation tests. It has not yet implemented storage schema initialization, inventory crawling, extraction, indexing, retrieval, or answering behavior.
 
 ## Project Roadmap
 
@@ -24,8 +24,8 @@ The project has not yet implemented ingestion, indexing, retrieval, or answering
   - [x] Align Feature 01 foundation package layout and fixture contracts with architecture.
 
 - [ ] **Phase 1: Inventory Foundation**
-  - [ ] Create project package structure.
-  - [ ] Add dependencies with `uv`.
+  - [x] Create project package structure.
+  - [x] Add dependencies with `uv`.
   - [ ] Implement filesystem crawler for `Courses`.
   - [ ] Create SQLite metadata database.
   - [ ] Classify files into indexed vs metadata-only categories.
@@ -93,4 +93,6 @@ The project has not yet implemented ingestion, indexing, retrieval, or answering
 * [x] Clarify logical `source_type` values across architecture and MVP specs.
 * [x] Clarify OCR wording across overview, architecture, decisions, and feature specs.
 * [x] Align Feature 01 package layout, fixture contract, and logging helper naming with `context/architecture.md`.
-* [ ] Implement Phase 1 inventory foundation.
+* [x] Implement Feature 01 project foundation: package skeleton, CLI stubs, config loader, JSONL logging helper, fixtures, `.env.example`, README, and tests.
+* [ ] Implement Feature 02 configuration and storage.
+* [ ] Implement Feature 03 inventory and file classification.

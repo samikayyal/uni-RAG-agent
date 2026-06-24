@@ -1,0 +1,2 @@
+Information Retrieval covers crawling, indexing, ranking, BM25, vector search,
+and evaluation.

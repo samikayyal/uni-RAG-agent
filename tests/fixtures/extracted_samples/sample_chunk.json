@@ -1,0 +1,8 @@
+{
+  "course": "Information Retrieval",
+  "file": "tests/fixtures/courses_small/Information Retrieval/syllabus.txt",
+  "source_type": "document",
+  "location_type": "line",
+  "location_value": "1",
+  "text": "Information Retrieval covers crawling, indexing, ranking, BM25, vector search, and evaluation."
+}
