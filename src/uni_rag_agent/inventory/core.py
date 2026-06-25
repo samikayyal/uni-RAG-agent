@@ -100,6 +100,10 @@ METADATA_ONLY_REASONS = {
 }
 
 MISSING_REASON = "missing from latest inventory run"
+TRANSIENT_INVENTORY_FAILURE_PREFIXES = (
+    "metadata read failed:",
+    "hashing failed:",
+)
 HASH_CHUNK_SIZE = 1024 * 1024
 
 
@@ -723,16 +727,25 @@ def _next_inventory_status(
     if classification.category in METADATA_ONLY_CATEGORIES:
         return classification.index_status, classification.reason_not_indexed
 
+    existing_status = existing["index_status"]
+    existing_reason = existing["reason_not_indexed"]
+    if _is_transient_inventory_failure(existing_status, existing_reason):
+        return classification.index_status, classification.reason_not_indexed
+
     if not unchanged:
         return classification.index_status, classification.reason_not_indexed
 
-    existing_status = existing["index_status"]
-    existing_reason = existing["reason_not_indexed"]
     if existing_status == "skipped" and existing_reason == MISSING_REASON:
         return classification.index_status, classification.reason_not_indexed
     if existing_status in {"pending", "indexed", "failed", "skipped"}:
         return str(existing_status), existing_reason
     return classification.index_status, classification.reason_not_indexed
+
+
+def _is_transient_inventory_failure(status: str, reason: str | None) -> bool:
+    if status != "failed" or reason is None:
+        return False
+    return reason.startswith(TRANSIENT_INVENTORY_FAILURE_PREFIXES)
 
 
 def _discover_course_entries(

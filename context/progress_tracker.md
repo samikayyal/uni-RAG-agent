@@ -5,7 +5,7 @@
 * **Current Phase**: Phase 2: Text Extraction
 * **Current Goal**: Implement text extraction and natural-boundary chunking for pending inventory files.
 
-The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, pytest discovery constrained to this project's `tests/` directory, and Feature 03 inventory/file classification with CLI commands, SQLite upserts, idempotent reruns, timestamp-first/hash-on-change behavior, metadata-only skip reasons, missing-file soft marking, current course-total resets, explicit SQLite connection closing, accurate inventory run metrics, inventory summaries, and regression tests for stat/hash/listing failure diagnostics. It has not yet implemented text extraction, indexing, retrieval, or answering behavior.
+The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, pytest discovery constrained to this project's `tests/` directory, and Feature 03 inventory/file classification with CLI commands, SQLite upserts, idempotent reruns, timestamp-first/hash-on-change behavior, metadata-only skip reasons, missing-file soft marking, current course-total resets, explicit SQLite connection closing, accurate inventory run metrics, inventory summaries, and regression tests for stat/hash/listing failure diagnostics and recovery. It has not yet implemented text extraction, indexing, retrieval, or answering behavior.
 
 ## Project Roadmap
 
@@ -23,7 +23,7 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
   - [x] Clarify OCR scope: standalone images stay metadata-only, scanned PDFs may use configured Tesseract fallback.
   - [x] Align Feature 01 foundation package layout and fixture contracts with architecture.
 
-- [ ] **Phase 1: Inventory Foundation**
+- [x] **Phase 1: Inventory Foundation**
   - [x] Create project package structure.
   - [x] Add dependencies with `uv`.
   - [x] Implement Feature 02 configuration and storage initialization.
@@ -99,4 +99,5 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
 * [x] Implement Feature 03 inventory and file classification: course discovery, streaming file crawl, spec category mapping, SQLite course/file upserts, inventory run records, metadata-only reasons, idempotent unchanged-file reruns, hash-on-change behavior, missing-file soft marking, summary CLI, and focused tests.
 * [x] Address Feature 03 review findings: close SQLite connections explicitly, reset stale course totals when course folders disappear, keep inventory run `files_indexed` metrics accurate, and add regression tests.
 * [x] Add Feature 03 inventory failure-path regression tests for file stat failures, hash failures, nested directory listing diagnostics, and failed root-listing run records.
+* [x] Run Brooks full sweep on Features 01-03: fix transient hash-failure recovery, align the Feature 02 runs-dir environment variable contract, and verify the current safety net.
 * [ ] Implement Feature 04 text extraction and chunking.

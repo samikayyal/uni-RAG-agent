@@ -404,6 +404,47 @@ def test_hash_failure_marks_file_failed_and_continues(
     assert run["files_failed"] == 1
 
 
+def test_hash_failure_recovers_when_later_hash_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    source_file = course_dir / "syllabus.txt"
+    source_file.write_text("BM25", encoding="utf-8")
+    original_hash = inventory_core.sha256_file
+
+    def failing_hash(path: Path) -> str:
+        if path == source_file:
+            raise OSError("hash denied")
+        return original_hash(path)
+
+    monkeypatch.setattr(inventory_core, "sha256_file", failing_hash)
+    first = inventory_courses(config)
+
+    monkeypatch.setattr(inventory_core, "sha256_file", original_hash)
+    second = inventory_courses(config)
+
+    assert first.files_failed == 1
+    assert second.files_failed == 0
+    assert second.files_pending == 1
+
+    with closing(connect_sqlite(config)) as connection:
+        row = connection.execute(
+            """
+            SELECT content_hash, index_status, reason_not_indexed
+            FROM files
+            WHERE filename = ?
+            """,
+            ("syllabus.txt",),
+        ).fetchone()
+
+    assert row["content_hash"] is not None
+    assert row["index_status"] == "pending"
+    assert row["reason_not_indexed"] is None
+
+
 def test_nested_directory_listing_failure_records_diagnostic_and_continues(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
