@@ -23,6 +23,8 @@ uv run -m uni_rag_agent --help
 uv run -m uni_rag_agent config check
 uv run -m uni_rag_agent storage init
 uv run -m uni_rag_agent storage check
+uv run -m uni_rag_agent inventory run
+uv run -m uni_rag_agent inventory summary
 ```
 
 Runtime configuration is loaded from `.env` with non-secret defaults documented
@@ -36,7 +38,9 @@ uv run -m uni_rag_agent --help
 uv run -m uni_rag_agent config check
 uv run -m uni_rag_agent storage init
 uv run -m uni_rag_agent storage check
-uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py
+uv run -m uni_rag_agent inventory run
+uv run -m uni_rag_agent inventory summary
+uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py
 ```
 
 Feature 02 storage commands create the generated local data layout:
@@ -50,10 +54,18 @@ data/
 `-- runs/
 ```
 
-Remaining MVP command shapes are registered for later specs:
+Inventory commands crawl `Courses/`, classify every discovered file, and write
+course/file metadata into SQLite without extracting content or mutating source
+files:
 
 ```powershell
 uv run -m uni_rag_agent inventory run
+uv run -m uni_rag_agent inventory summary
+```
+
+Remaining MVP command shapes are registered for later specs:
+
+```powershell
 uv run -m uni_rag_agent extract run
 uv run -m uni_rag_agent index keyword
 uv run -m uni_rag_agent index vector
@@ -62,9 +74,9 @@ uv run -m uni_rag_agent eval run
 uv run -m uni_rag_agent app serve
 ```
 
-Commands beyond `config check` and `storage init/check` are stubs until their
-feature specs are implemented. They should fail clearly and must not scan or
-mutate `Courses/`.
+Commands beyond `config check`, `storage init/check`, and `inventory run/summary`
+are stubs until their feature specs are implemented. They should fail clearly
+and must not scan or mutate `Courses/`.
 
 ## MVP Module Order
 

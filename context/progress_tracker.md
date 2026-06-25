@@ -2,10 +2,10 @@
 
 ## Current Status
 
-* **Current Phase**: Phase 1: Inventory Foundation
-* **Current Goal**: Implement inventory crawling and file classification on top of the initialized storage layer.
+* **Current Phase**: Phase 2: Text Extraction
+* **Current Goal**: Implement text extraction and natural-boundary chunking for pending inventory files.
 
-The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, and pytest discovery constrained to this project's `tests/` directory. It has not yet implemented inventory crawling, extraction, indexing, retrieval, or answering behavior.
+The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, pytest discovery constrained to this project's `tests/` directory, and Feature 03 inventory/file classification with CLI commands, SQLite upserts, idempotent reruns, timestamp-first/hash-on-change behavior, metadata-only skip reasons, missing-file soft marking, current course-total resets, explicit SQLite connection closing, accurate inventory run metrics, and inventory summaries. It has not yet implemented text extraction, indexing, retrieval, or answering behavior.
 
 ## Project Roadmap
 
@@ -28,9 +28,9 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
   - [x] Add dependencies with `uv`.
   - [x] Implement Feature 02 configuration and storage initialization.
   - [x] Create SQLite metadata database.
-  - [ ] Implement filesystem crawler for `Courses`.
-  - [ ] Classify files into indexed vs metadata-only categories.
-  - [ ] Store skip reasons for images, binaries, archives, media, and unsafe artifacts.
+  - [x] Implement filesystem crawler for `Courses`.
+  - [x] Classify files into indexed vs metadata-only categories.
+  - [x] Store skip reasons for images, binaries, archives, media, and unsafe artifacts.
 
 - [ ] **Phase 2: Text Extraction**
   - [ ] Extract text from PDFs (PyMuPDF + optional Tesseract OCR fallback).
@@ -96,4 +96,6 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
 * [x] Align Feature 01 package layout, fixture contract, and logging helper naming with `context/architecture.md`.
 * [x] Implement Feature 01 project foundation: package skeleton, CLI stubs, config loader, JSONL logging helper, fixtures, `.env.example`, README, and tests.
 * [x] Implement Feature 02 configuration and storage: typed config contract, safe `.env` reporting, generated data directories, SQLite MVP schema, FTS5 check, storage CLI, pytest discovery scoped to `tests/`, positive-path tests, and negative-path diagnostics tests.
-* [ ] Implement Feature 03 inventory and file classification.
+* [x] Implement Feature 03 inventory and file classification: course discovery, streaming file crawl, spec category mapping, SQLite course/file upserts, inventory run records, metadata-only reasons, idempotent unchanged-file reruns, hash-on-change behavior, missing-file soft marking, summary CLI, and focused tests.
+* [x] Address Feature 03 review findings: close SQLite connections explicitly, reset stale course totals when course folders disappear, keep inventory run `files_indexed` metrics accurate, and add regression tests.
+* [ ] Implement Feature 04 text extraction and chunking.

@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Callable
 
 from . import __version__
 from .config import ConfigError, load_config, validate_config
+from .inventory import (
+    InventoryError,
+    InventoryRunResult,
+    InventorySummary,
+    inventory_courses,
+    load_inventory_summary,
+)
 from .storage import (
     StorageCheckResult,
     StorageError,
@@ -22,6 +29,7 @@ SUCCESS = 0
 NOT_IMPLEMENTED = 1
 CONFIG_ERROR = 2
 STORAGE_ERROR = 3
+INVENTORY_ERROR = 4
 
 CommandHandler = Callable[[argparse.Namespace], int]
 
@@ -68,12 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_config_commands(subparsers)
     _add_storage_commands(subparsers)
-    _add_stub_group(
-        subparsers,
-        "inventory",
-        "Course archive inventory commands.",
-        {"run": ("inventory run", "Feature Spec 03: Inventory and File Classification")},
-    )
+    _add_inventory_commands(subparsers)
     _add_stub_group(
         subparsers,
         "extract",
@@ -143,6 +146,30 @@ def _add_storage_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Check generated storage directories, SQLite schema, and FTS5 support.",
     )
     check_parser.set_defaults(handler=_handle_storage_check)
+
+
+def _add_inventory_commands(subparsers: argparse._SubParsersAction) -> None:
+    inventory_parser = subparsers.add_parser(
+        "inventory",
+        help="Course archive inventory commands.",
+    )
+    inventory_subparsers = inventory_parser.add_subparsers(
+        dest="inventory_command",
+        metavar="subcommand",
+    )
+    inventory_subparsers.required = True
+
+    run_parser = inventory_subparsers.add_parser(
+        "run",
+        help="Inventory Courses and classify files without extracting content.",
+    )
+    run_parser.set_defaults(handler=_handle_inventory_run)
+
+    summary_parser = inventory_subparsers.add_parser(
+        "summary",
+        help="Print aggregate inventory counts from SQLite.",
+    )
+    summary_parser.set_defaults(handler=_handle_inventory_summary)
 
 
 def _add_stub_group(
@@ -222,6 +249,38 @@ def _handle_storage_check(_: argparse.Namespace) -> int:
     return SUCCESS if result.ok else STORAGE_ERROR
 
 
+def _handle_inventory_run(_: argparse.Namespace) -> int:
+    try:
+        config = load_config()
+        result = inventory_courses(config)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (StorageError, InventoryError) as exc:
+        print(f"Inventory error: {exc}", file=sys.stderr)
+        return INVENTORY_ERROR
+
+    print("Inventory run completed")
+    _print_inventory_run_result(result)
+    return SUCCESS
+
+
+def _handle_inventory_summary(_: argparse.Namespace) -> int:
+    try:
+        config = load_config()
+        summary = load_inventory_summary(config)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (StorageError, InventoryError) as exc:
+        print(f"Inventory summary error: {exc}", file=sys.stderr)
+        return INVENTORY_ERROR
+
+    print("Inventory summary")
+    _print_inventory_summary(summary)
+    return SUCCESS
+
+
 def _print_storage_result(result: StorageCheckResult) -> None:
     safe = result.as_safe_dict()
     for key in (
@@ -243,6 +302,54 @@ def _print_storage_result(result: StorageCheckResult) -> None:
         print("diagnostics:")
         for diagnostic in result.diagnostics:
             print(f"- {diagnostic}")
+
+
+def _print_inventory_run_result(result: InventoryRunResult) -> None:
+    print(f"run_id: {result.run_id}")
+    print(f"status: {result.status}")
+    print(f"started_at: {result.started_at}")
+    print(f"finished_at: {result.finished_at}")
+    print(f"courses_seen: {result.courses_seen}")
+    print(f"files_seen: {result.files_seen}")
+    print(f"files_pending: {result.files_pending}")
+    print(f"files_metadata_only: {result.files_metadata_only}")
+    print(f"files_failed: {result.files_failed}")
+    print(f"files_missing: {result.files_missing}")
+    print(f"bytes_seen: {result.bytes_seen}")
+    _print_count_mapping("by_status", result.by_status)
+    _print_count_mapping("by_category", result.by_category)
+    _print_count_mapping("by_extension", result.by_extension)
+    _print_count_mapping("by_reason", result.by_reason)
+    if result.diagnostics:
+        print("diagnostics:")
+        for diagnostic in result.diagnostics:
+            print(f"- {diagnostic}")
+
+
+def _print_inventory_summary(summary: InventorySummary) -> None:
+    print(f"latest_inventory_run_id: {summary.latest_inventory_run_id}")
+    print(f"latest_inventory_started_at: {summary.latest_inventory_started_at}")
+    print(f"courses_total: {summary.courses_total}")
+    print(f"files_total: {summary.files_total}")
+    print(f"files_missing: {summary.files_missing}")
+    print(f"bytes_total: {summary.bytes_total}")
+    if summary.by_course:
+        print("by_course:")
+        for course in summary.by_course:
+            print(f"- {course.name}: files={course.file_count}, bytes={course.total_bytes}")
+    _print_count_mapping("by_status", summary.by_status)
+    _print_count_mapping("by_category", summary.by_category)
+    _print_count_mapping("by_extension", summary.by_extension)
+    _print_count_mapping("by_reason", summary.by_reason)
+
+
+def _print_count_mapping(label: str, counts: Mapping[str, int]) -> None:
+    if not counts:
+        print(f"{label}: none")
+        return
+    print(f"{label}:")
+    for key, value in counts.items():
+        print(f"- {key}: {value}")
 
 
 def _not_implemented_handler(command_name: str, feature_spec: str) -> CommandHandler:

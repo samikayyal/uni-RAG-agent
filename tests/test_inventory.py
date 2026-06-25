@@ -1,0 +1,291 @@
+from __future__ import annotations
+
+import os
+import shutil
+from contextlib import closing
+from pathlib import Path
+
+from uni_rag_agent.config import Config, load_config
+from uni_rag_agent.inventory import (
+    MISSING_REASON,
+    classify_file,
+    inventory_courses,
+    load_inventory_summary,
+)
+from uni_rag_agent.inventory import core as inventory_core
+from uni_rag_agent.storage import connect_sqlite
+
+
+def make_config(tmp_path: Path) -> Config:
+    (tmp_path / "Courses").mkdir()
+    return load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
+
+
+def test_classify_file_uses_spec_categories_and_statuses() -> None:
+    assert classify_file(Path("lecture.pdf")).category == "document"
+    assert classify_file(Path("lecture.pdf")).index_status == "pending"
+    assert classify_file(Path("slides.pptx")).category == "slides"
+    assert classify_file(Path("notebook.ipynb")).category == "notebook"
+    assert classify_file(Path("assignment.py")).category == "code"
+    assert classify_file(Path("dataset.csv")).category == "data_schema"
+    assert classify_file(Path("captions.vtt")).category == "transcript"
+
+    image = classify_file(Path("diagram.PNG"))
+    assert image.category == "image_metadata_only"
+    assert image.index_status == "metadata_only"
+    assert image.reason_not_indexed is not None
+
+    assert classify_file(Path("archive.zip")).category == "archive_metadata_only"
+    assert classify_file(Path("setup.exe")).category == "installer_metadata_only"
+    assert classify_file(Path("vectors.bin")).category == "model_metadata_only"
+    assert classify_file(Path("unknown")).category == "unknown_metadata_only"
+
+
+def test_inventory_run_preserves_exact_paths_and_classifies_mixed_files(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "High Preformance Computing for Big Data"
+    nested_dir = course_dir / "Week 01"
+    nested_dir.mkdir(parents=True)
+    (course_dir / "lecture_notes.md").write_text("# MapReduce", encoding="utf-8")
+    (nested_dir / "diagram.png").write_bytes(b"png")
+    (course_dir / "lecture.mp4").write_bytes(b"mp4")
+    (course_dir / "archive.zip").write_bytes(b"zip")
+    (course_dir / "setup.exe").write_bytes(b"exe")
+    (course_dir / "vectors.bin").write_bytes(b"bin")
+    (course_dir / "legacy.doc").write_text("legacy", encoding="utf-8")
+    (course_dir / "unknown").write_text("unknown", encoding="utf-8")
+
+    result = inventory_courses(config)
+
+    assert result.status == "completed"
+    assert result.courses_seen == 1
+    assert result.files_seen == 8
+    assert result.files_pending == 2
+    assert result.files_metadata_only == 6
+    assert result.files_failed == 0
+    assert result.by_category["document"] == 2
+    assert result.by_category["image_metadata_only"] == 1
+    assert result.by_category["media_metadata_only"] == 1
+    assert result.by_category["archive_metadata_only"] == 1
+    assert result.by_category["installer_metadata_only"] == 1
+    assert result.by_category["model_metadata_only"] == 1
+    assert result.by_category["unknown_metadata_only"] == 1
+
+    with closing(connect_sqlite(config)) as connection:
+        course_row = connection.execute(
+            "SELECT name, path, file_count, total_bytes FROM courses"
+        ).fetchone()
+        file_rows = connection.execute(
+            """
+            SELECT relative_path, filename, extension, category, index_status,
+                   reason_not_indexed
+            FROM files
+            ORDER BY relative_path
+            """
+        ).fetchall()
+
+    assert course_row["name"] == "High Preformance Computing for Big Data"
+    assert course_row["path"] == str(course_dir)
+    assert course_row["file_count"] == 8
+
+    rows_by_name = {row["filename"]: row for row in file_rows}
+    assert rows_by_name["lecture_notes.md"]["relative_path"] == str(
+        Path("High Preformance Computing for Big Data") / "lecture_notes.md"
+    )
+    assert rows_by_name["lecture_notes.md"]["extension"] == ".md"
+    assert rows_by_name["lecture_notes.md"]["category"] == "document"
+    assert rows_by_name["lecture_notes.md"]["index_status"] == "pending"
+    assert rows_by_name["lecture_notes.md"]["reason_not_indexed"] is None
+    assert rows_by_name["legacy.doc"]["category"] == "document"
+    assert rows_by_name["legacy.doc"]["index_status"] == "pending"
+    assert rows_by_name["diagram.png"]["index_status"] == "metadata_only"
+    assert "standalone image" in rows_by_name["diagram.png"]["reason_not_indexed"]
+    assert "transcription" in rows_by_name["lecture.mp4"]["reason_not_indexed"]
+    assert "not decompressed" in rows_by_name["archive.zip"]["reason_not_indexed"]
+    assert "never executed" in rows_by_name["setup.exe"]["reason_not_indexed"]
+    assert "serialized artifact" in rows_by_name["vectors.bin"]["reason_not_indexed"]
+    assert "unsupported extension" in rows_by_name["unknown"]["reason_not_indexed"]
+
+
+def test_inventory_rerun_is_idempotent_and_skips_hash_for_unchanged_files(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    source_file = course_dir / "syllabus.txt"
+    source_file.write_text("BM25 and vector search", encoding="utf-8")
+
+    original_hash = inventory_core.sha256_file
+    hashed_paths: list[Path] = []
+
+    def tracking_hash(path: Path) -> str:
+        hashed_paths.append(path)
+        return original_hash(path)
+
+    monkeypatch.setattr(inventory_core, "sha256_file", tracking_hash)
+
+    first = inventory_courses(config)
+    assert first.files_seen == 1
+    assert hashed_paths == [source_file]
+
+    hashed_paths.clear()
+    second = inventory_courses(config)
+    assert second.files_seen == 1
+    assert second.files_missing == 0
+    assert hashed_paths == []
+
+    with closing(connect_sqlite(config)) as connection:
+        row_count = connection.execute("SELECT COUNT(*) AS count FROM files").fetchone()
+        run_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM extraction_runs"
+        ).fetchone()
+
+    assert row_count["count"] == 1
+    assert run_count["count"] == 2
+
+
+def test_changed_timestamp_triggers_hash_comparison(tmp_path: Path, monkeypatch) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    source_file = course_dir / "syllabus.txt"
+    source_file.write_text("original", encoding="utf-8")
+    inventory_courses(config)
+
+    original_hash = inventory_core.sha256_file
+    hashed_paths: list[Path] = []
+
+    def tracking_hash(path: Path) -> str:
+        hashed_paths.append(path)
+        return original_hash(path)
+
+    monkeypatch.setattr(inventory_core, "sha256_file", tracking_hash)
+    source_file.write_text("changed", encoding="utf-8")
+    current_mtime = source_file.stat().st_mtime
+    os.utime(source_file, (current_mtime + 5, current_mtime + 5))
+
+    result = inventory_courses(config)
+
+    assert result.files_seen == 1
+    assert hashed_paths == [source_file]
+
+
+def test_missing_file_is_marked_without_hard_delete(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    source_file = course_dir / "syllabus.txt"
+    source_file.write_text("BM25", encoding="utf-8")
+    inventory_courses(config)
+
+    source_file.unlink()
+    result = inventory_courses(config)
+
+    assert result.files_seen == 0
+    assert result.files_missing == 1
+
+    with closing(connect_sqlite(config)) as connection:
+        row = connection.execute(
+            "SELECT index_status, reason_not_indexed FROM files WHERE filename = ?",
+            ("syllabus.txt",),
+        ).fetchone()
+
+    assert row["index_status"] == "skipped"
+    assert row["reason_not_indexed"] == MISSING_REASON
+
+
+def test_removed_course_folder_resets_current_course_totals(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    source_file = course_dir / "syllabus.txt"
+    source_file.write_text("BM25", encoding="utf-8")
+    inventory_courses(config)
+
+    shutil.rmtree(course_dir)
+    result = inventory_courses(config)
+    summary = load_inventory_summary(config)
+
+    assert result.courses_seen == 0
+    assert result.files_seen == 0
+    assert result.files_missing == 1
+
+    assert len(summary.by_course) == 1
+    course_summary = summary.by_course[0]
+    assert course_summary.name == "Information Retrieval"
+    assert course_summary.file_count == 0
+    assert course_summary.total_bytes == 0
+
+    with closing(connect_sqlite(config)) as connection:
+        row = connection.execute(
+            "SELECT index_status, reason_not_indexed FROM files WHERE filename = ?",
+            ("syllabus.txt",),
+        ).fetchone()
+
+    assert row["index_status"] == "skipped"
+    assert row["reason_not_indexed"] == MISSING_REASON
+
+
+def test_inventory_run_record_does_not_report_pending_files_as_indexed(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    (course_dir / "syllabus.txt").write_text("BM25", encoding="utf-8")
+    (course_dir / "diagram.png").write_bytes(b"png")
+
+    result = inventory_courses(config)
+
+    with closing(connect_sqlite(config)) as connection:
+        row = connection.execute(
+            """
+            SELECT files_seen, files_indexed, files_metadata_only, files_failed
+            FROM extraction_runs
+            WHERE id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+
+    assert result.files_pending == 1
+    assert row["files_seen"] == 2
+    assert row["files_indexed"] == 0
+    assert row["files_metadata_only"] == 1
+    assert row["files_failed"] == 0
+
+
+def test_inventory_apis_close_sqlite_connections(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    (course_dir / "syllabus.txt").write_text("BM25", encoding="utf-8")
+
+    inventory_courses(config)
+    load_inventory_summary(config)
+
+    config.sqlite_path.unlink()
+    assert not config.sqlite_path.exists()
+
+
+def test_inventory_summary_reports_current_database_counts(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    (course_dir / "syllabus.txt").write_text("BM25", encoding="utf-8")
+    (course_dir / "diagram.png").write_bytes(b"png")
+    inventory_courses(config)
+
+    summary = load_inventory_summary(config)
+
+    assert summary.courses_total == 1
+    assert summary.files_total == 2
+    assert summary.files_missing == 0
+    assert summary.latest_inventory_run_id is not None
+    assert summary.by_status["pending"] == 1
+    assert summary.by_status["metadata_only"] == 1
+    assert summary.by_category["document"] == 1
+    assert summary.by_category["image_metadata_only"] == 1

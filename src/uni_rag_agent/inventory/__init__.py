@@ -1,1 +1,45 @@
-"""Inventory package placeholder for Feature Spec 03."""
+"""Inventory and file classification helpers."""
+
+from .core import (
+    EXTRACTABLE_CATEGORIES,
+    EXTENSION_CATEGORY_MAP,
+    METADATA_ONLY_CATEGORIES,
+    MISSING_REASON,
+    CourseRecord,
+    FileClassification,
+    FileRecord,
+    InventoryCourseSummary,
+    InventoryError,
+    InventoryRunResult,
+    InventorySummary,
+    classify_file,
+    inventory_courses,
+    load_inventory_summary,
+    mark_missing_files,
+    sha256_file,
+    update_course_totals,
+    upsert_course,
+    upsert_file,
+)
+
+__all__ = [
+    "EXTRACTABLE_CATEGORIES",
+    "EXTENSION_CATEGORY_MAP",
+    "METADATA_ONLY_CATEGORIES",
+    "MISSING_REASON",
+    "CourseRecord",
+    "FileClassification",
+    "FileRecord",
+    "InventoryCourseSummary",
+    "InventoryError",
+    "InventoryRunResult",
+    "InventorySummary",
+    "classify_file",
+    "inventory_courses",
+    "load_inventory_summary",
+    "mark_missing_files",
+    "sha256_file",
+    "update_course_totals",
+    "upsert_course",
+    "upsert_file",
+]
