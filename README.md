@@ -21,6 +21,8 @@ Use `uv` for all Python workflows.
 uv sync
 uv run -m uni_rag_agent --help
 uv run -m uni_rag_agent config check
+uv run -m uni_rag_agent storage init
+uv run -m uni_rag_agent storage check
 ```
 
 Runtime configuration is loaded from `.env` with non-secret defaults documented
@@ -32,13 +34,25 @@ are ignored by git.
 ```powershell
 uv run -m uni_rag_agent --help
 uv run -m uni_rag_agent config check
-uv run -m pytest tests/test_cli.py tests/test_logging_config.py
+uv run -m uni_rag_agent storage init
+uv run -m uni_rag_agent storage check
+uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py
 ```
 
-Foundation command shapes are registered for later specs:
+Feature 02 storage commands create the generated local data layout:
+
+```text
+data/
+|-- uni_rag.sqlite
+|-- extracted/
+|-- indexes/
+|   `-- vector/
+`-- runs/
+```
+
+Remaining MVP command shapes are registered for later specs:
 
 ```powershell
-uv run -m uni_rag_agent storage init
 uv run -m uni_rag_agent inventory run
 uv run -m uni_rag_agent extract run
 uv run -m uni_rag_agent index keyword
@@ -48,8 +62,9 @@ uv run -m uni_rag_agent eval run
 uv run -m uni_rag_agent app serve
 ```
 
-Commands beyond `config check` are stubs until their feature specs are
-implemented. They should fail clearly and must not scan or mutate `Courses/`.
+Commands beyond `config check` and `storage init/check` are stubs until their
+feature specs are implemented. They should fail clearly and must not scan or
+mutate `Courses/`.
 
 ## MVP Module Order
 
