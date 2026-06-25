@@ -5,8 +5,11 @@ import shutil
 from contextlib import closing
 from pathlib import Path
 
+import pytest
+
 from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.inventory import (
+    InventoryError,
     MISSING_REASON,
     classify_file,
     inventory_courses,
@@ -289,3 +292,190 @@ def test_inventory_summary_reports_current_database_counts(tmp_path: Path) -> No
     assert summary.by_status["metadata_only"] == 1
     assert summary.by_category["document"] == 1
     assert summary.by_category["image_metadata_only"] == 1
+
+
+def test_stat_failure_marks_file_failed_and_continues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    unreadable_file = course_dir / "broken.txt"
+    readable_file = course_dir / "syllabus.txt"
+    unreadable_file.write_text("cannot inspect metadata", encoding="utf-8")
+    readable_file.write_text("BM25", encoding="utf-8")
+    original_stat = Path.stat
+
+    def failing_stat(self: Path, *args, **kwargs):
+        if self == unreadable_file:
+            raise OSError("metadata denied")
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", failing_stat)
+
+    result = inventory_courses(config)
+
+    assert result.status == "completed"
+    assert result.files_seen == 2
+    assert result.files_failed == 1
+    assert result.files_pending == 1
+    assert any("Could not stat file" in item for item in result.diagnostics)
+
+    with closing(connect_sqlite(config)) as connection:
+        rows = connection.execute(
+            """
+            SELECT filename, size_bytes, index_status, reason_not_indexed
+            FROM files
+            ORDER BY filename
+            """
+        ).fetchall()
+        run = connection.execute(
+            """
+            SELECT status, files_seen, files_failed
+            FROM extraction_runs
+            WHERE id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+
+    rows_by_name = {row["filename"]: row for row in rows}
+    assert rows_by_name["broken.txt"]["size_bytes"] == 0
+    assert rows_by_name["broken.txt"]["index_status"] == "failed"
+    assert "metadata read failed" in rows_by_name["broken.txt"]["reason_not_indexed"]
+    assert rows_by_name["syllabus.txt"]["index_status"] == "pending"
+    assert run["status"] == "completed"
+    assert run["files_seen"] == 2
+    assert run["files_failed"] == 1
+
+
+def test_hash_failure_marks_file_failed_and_continues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    unreadable_file = course_dir / "broken.txt"
+    readable_file = course_dir / "syllabus.txt"
+    unreadable_file.write_text("cannot hash", encoding="utf-8")
+    readable_file.write_text("BM25", encoding="utf-8")
+    original_hash = inventory_core.sha256_file
+
+    def failing_hash(path: Path) -> str:
+        if path == unreadable_file:
+            raise OSError("hash denied")
+        return original_hash(path)
+
+    monkeypatch.setattr(inventory_core, "sha256_file", failing_hash)
+
+    result = inventory_courses(config)
+
+    assert result.status == "completed"
+    assert result.files_seen == 2
+    assert result.files_failed == 1
+    assert result.files_pending == 1
+    assert any("Could not hash file" in item for item in result.diagnostics)
+
+    with closing(connect_sqlite(config)) as connection:
+        rows = connection.execute(
+            """
+            SELECT filename, content_hash, index_status, reason_not_indexed
+            FROM files
+            ORDER BY filename
+            """
+        ).fetchall()
+        run = connection.execute(
+            """
+            SELECT status, files_seen, files_failed
+            FROM extraction_runs
+            WHERE id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+
+    rows_by_name = {row["filename"]: row for row in rows}
+    assert rows_by_name["broken.txt"]["content_hash"] is None
+    assert rows_by_name["broken.txt"]["index_status"] == "failed"
+    assert "hashing failed" in rows_by_name["broken.txt"]["reason_not_indexed"]
+    assert rows_by_name["syllabus.txt"]["index_status"] == "pending"
+    assert run["status"] == "completed"
+    assert run["files_seen"] == 2
+    assert run["files_failed"] == 1
+
+
+def test_nested_directory_listing_failure_records_diagnostic_and_continues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    blocked_dir = course_dir / "Blocked"
+    course_dir.mkdir()
+    blocked_dir.mkdir()
+    (course_dir / "syllabus.txt").write_text("BM25", encoding="utf-8")
+    (blocked_dir / "hidden.txt").write_text("hidden", encoding="utf-8")
+    original_scandir = inventory_core.os.scandir
+
+    def failing_scandir(path):
+        if Path(path) == blocked_dir:
+            raise OSError("directory denied")
+        return original_scandir(path)
+
+    monkeypatch.setattr(inventory_core.os, "scandir", failing_scandir)
+
+    result = inventory_courses(config)
+
+    assert result.status == "completed"
+    assert result.files_seen == 1
+    assert result.files_failed == 0
+    assert any("Could not list directory" in item for item in result.diagnostics)
+
+    with closing(connect_sqlite(config)) as connection:
+        filenames = [
+            row["filename"]
+            for row in connection.execute(
+                "SELECT filename FROM files ORDER BY filename"
+            ).fetchall()
+        ]
+        course_row = connection.execute(
+            "SELECT file_count FROM courses WHERE name = ?",
+            ("Information Retrieval",),
+        ).fetchone()
+
+    assert filenames == ["syllabus.txt"]
+    assert course_row["file_count"] == 1
+
+
+def test_courses_root_listing_failure_records_failed_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path)
+    original_scandir = inventory_core.os.scandir
+
+    def failing_scandir(path):
+        if Path(path) == config.courses_root:
+            raise OSError("root denied")
+        return original_scandir(path)
+
+    monkeypatch.setattr(inventory_core.os, "scandir", failing_scandir)
+
+    with pytest.raises(InventoryError, match="Could not list Courses root"):
+        inventory_courses(config)
+
+    with closing(connect_sqlite(config)) as connection:
+        row = connection.execute(
+            """
+            SELECT status, finished_at, files_seen, files_failed, error
+            FROM extraction_runs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert row["status"] == "failed"
+    assert row["finished_at"] is not None
+    assert row["files_seen"] == 0
+    assert row["files_failed"] == 0
+    assert "Could not list Courses root" in row["error"]
