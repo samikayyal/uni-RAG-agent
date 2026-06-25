@@ -5,7 +5,7 @@
 * **Current Phase**: Phase 1: Inventory Foundation
 * **Current Goal**: Implement inventory crawling and file classification on top of the initialized storage layer.
 
-The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, and pytest discovery constrained to this project's `tests/` directory. It has not yet implemented inventory crawling, extraction, indexing, retrieval, or answering behavior.
+The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, and pytest discovery constrained to this project's `tests/` directory. It has not yet implemented inventory crawling, extraction, indexing, retrieval, or answering behavior.
 
 ## Project Roadmap
 
@@ -95,5 +95,5 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
 * [x] Clarify OCR wording across overview, architecture, decisions, and feature specs.
 * [x] Align Feature 01 package layout, fixture contract, and logging helper naming with `context/architecture.md`.
 * [x] Implement Feature 01 project foundation: package skeleton, CLI stubs, config loader, JSONL logging helper, fixtures, `.env.example`, README, and tests.
-* [x] Implement Feature 02 configuration and storage: typed config contract, safe `.env` reporting, generated data directories, SQLite MVP schema, FTS5 check, storage CLI, pytest discovery scoped to `tests/`, and tests.
+* [x] Implement Feature 02 configuration and storage: typed config contract, safe `.env` reporting, generated data directories, SQLite MVP schema, FTS5 check, storage CLI, pytest discovery scoped to `tests/`, positive-path tests, and negative-path diagnostics tests.
 * [ ] Implement Feature 03 inventory and file classification.

@@ -120,6 +120,15 @@ def test_missing_courses_root_fails_validation(tmp_path: Path) -> None:
         validate_config(config)
 
 
+def test_courses_root_must_be_directory(tmp_path: Path) -> None:
+    (tmp_path / "Courses").write_text("not a directory", encoding="utf-8")
+
+    config = load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
+
+    with pytest.raises(ConfigError, match="Courses root is not a directory"):
+        validate_config(config)
+
+
 def test_generated_paths_cannot_live_under_courses(tmp_path: Path) -> None:
     courses_root = tmp_path / "Courses"
     courses_root.mkdir()
@@ -140,12 +149,48 @@ def test_generated_paths_cannot_live_under_courses(tmp_path: Path) -> None:
         validate_config(config)
 
 
-def test_safe_dict_excludes_api_key_like_fields(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("env_line", "expected_message"),
+    [
+        ("UNI_RAG_OCR_ENABLED=maybe", "UNI_RAG_OCR_ENABLED must be one of"),
+        ("UNI_RAG_KEYWORD_TOP_K=abc", "UNI_RAG_KEYWORD_TOP_K must be an integer"),
+        (
+            "UNI_RAG_KEYWORD_TOP_K=0",
+            "UNI_RAG_KEYWORD_TOP_K must be greater than zero",
+        ),
+        ("UNI_RAG_LOG_LEVEL=TRACE", "UNI_RAG_LOG_LEVEL must be one of"),
+        ("UNI_RAG_DATA_DIR=", "UNI_RAG_DATA_DIR cannot be empty"),
+    ],
+)
+def test_invalid_env_values_fail_clearly(
+    tmp_path: Path,
+    env_line: str,
+    expected_message: str,
+) -> None:
     (tmp_path / "Courses").mkdir()
+    env_file = tmp_path / ".env"
+    env_file.write_text(env_line, encoding="utf-8")
+
+    with pytest.raises(ConfigError, match=expected_message):
+        load_config(repo_root=tmp_path, env_file=env_file)
+
+
+def test_safe_dict_excludes_injected_secret_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "Courses").mkdir()
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-openai-value")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret-anthropic-value")
+    monkeypatch.setenv("GOOGLE_API_KEY", "secret-google-value")
 
     config = load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
     safe = config.as_safe_dict()
 
-    assert "api_key" not in " ".join(safe)
-    assert "OPENAI_API_KEY" not in safe
+    unsafe_name_terms = ("api_key", "apikey", "secret", "token")
+    for key in safe:
+        assert all(term not in key.lower() for term in unsafe_name_terms)
+    assert "secret-openai-value" not in safe.values()
+    assert "secret-anthropic-value" not in safe.values()
+    assert "secret-google-value" not in safe.values()
     assert safe["courses_root"] == str(tmp_path / "Courses")

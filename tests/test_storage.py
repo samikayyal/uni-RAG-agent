@@ -5,14 +5,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.storage import (
     REQUIRED_TABLES,
+    StorageError,
     check_storage,
     connect_sqlite,
     ensure_data_dirs,
     initialize_schema,
 )
+from uni_rag_agent.storage import core as storage_core
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UNI_RAG_ENV_PREFIX = "UNI_RAG_"
@@ -78,6 +82,38 @@ def test_chunk_fts_table_uses_fts5(tmp_path: Path) -> None:
     assert row is not None
     assert "USING fts5" in row[0]
     assert "tokenize='unicode61'" in row[0]
+
+
+def test_initialize_schema_reports_clear_fts5_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path)
+    ensure_data_dirs(config)
+    monkeypatch.setattr(
+        storage_core,
+        "check_fts5_available",
+        lambda _connection: (False, "no such module: fts5"),
+    )
+
+    with connect_sqlite(config) as connection:
+        with pytest.raises(StorageError, match="SQLite FTS5 is not available"):
+            initialize_schema(connection)
+
+
+def test_check_storage_reports_invalid_sqlite_file(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    ensure_data_dirs(config)
+    config.sqlite_path.write_text("not a sqlite database", encoding="utf-8")
+
+    result = check_storage(config)
+
+    assert not result.ok
+    assert result.sqlite_exists
+    assert any(
+        "SQLite database cannot be inspected" in diagnostic
+        for diagnostic in result.diagnostics
+    )
 
 
 def test_storage_init_cli_uses_temp_config_and_prints_health(tmp_path: Path) -> None:
