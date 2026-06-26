@@ -25,6 +25,7 @@ Extract text-like course knowledge from pending inventory files and store retrie
 - Parse existing VTT transcript files with timestamp locations.
 - Apply natural-boundary chunking with sub-chunking for overlarge units.
 - Persist extractor status and per-file failures.
+- Add or update the stage EDA notebook for extraction output once this feature is implemented.
 
 ## Out of Scope
 
@@ -44,6 +45,14 @@ uv run -m uni_rag_agent extract run
 uv run -m uni_rag_agent extract run --category document
 uv run -m uni_rag_agent extract status
 ```
+
+Notebook:
+
+```text
+notebooks/extraction_eda.ipynb
+```
+
+Create this notebook when extraction is implemented. It should inspect `extraction_runs`, `extracted_documents`, `chunks`, and joined `files`/`courses` metadata for extraction yield, failures, text length, chunk counts, source-type coverage, and source-location coverage.
 
 Internal interfaces:
 
@@ -131,6 +140,7 @@ subchunk
 4. Sub-chunk any unit over the configured max token limit.
 5. Persist `extracted_documents` and `chunks` transactionally per file.
 6. Continue after per-file failures and report summary counts.
+7. Keep `notebooks/extraction_eda.ipynb` aligned with extraction status fields, chunk fields, source types, location types, and command behavior.
 
 ## Failure and Safety Rules
 
@@ -140,6 +150,8 @@ subchunk
 - OCR is disabled unless explicitly configured. If a scanned PDF needs OCR and OCR is disabled or unavailable, mark it failed with reason `scanned PDF, OCR not available`.
 - Do not include notebook image/binary outputs.
 - Truncate long text outputs and long error tracebacks.
+- The EDA notebook must read generated app data only, must not mutate SQLite or `Courses`, and must not execute course files or course notebooks.
+- Notebook outputs and execution counts should be cleared before commit.
 
 ## Tests
 
@@ -149,6 +161,7 @@ subchunk
 - Verify unsupported `.doc` and `.ppt` are marked failed with the expected reason.
 - Verify no extractor executes fixture code.
 - Verify overlarge fixture content is sub-chunked.
+- Verify `notebooks/extraction_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
 - Optional smoke: extract a tiny copied subset of representative real course files into a temp database.
 
 ## Acceptance Criteria
@@ -157,4 +170,5 @@ subchunk
 - Every successful extraction has an `extracted_documents` row and one or more `chunks`.
 - Every failed extraction has a clear status and error.
 - Chunks contain enough source location metadata for citations.
+- `notebooks/extraction_eda.ipynb` exists once this feature lands and can inspect extraction/chunk coverage without mutating app data or source files.
 - Automated tests do not require the full `Courses` archive.

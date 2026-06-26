@@ -93,6 +93,30 @@ and must not scan or mutate `Courses/`.
 11. FastAPI HTML UI
 12. Evaluation and hardening
 
+## EDA Notebooks
+
+Project-owned notebooks live under `notebooks/`. They are pandas-based,
+read-only companions for generated app data, not pipeline implementation code.
+They must not mutate `Courses/`, write to SQLite, rewrite indexes, execute
+course scripts, or execute course notebooks.
+
+Notebook outputs and execution counts should be cleared before commit. When a
+stage changes the command, tables, JSON artifacts, status vocabulary, or
+interpretation rules a notebook reads, update that notebook in the same change.
+
+Create stage notebooks when the producing feature lands:
+
+| Stage | Notebook |
+| :--- | :--- |
+| Inventory | `notebooks/inventory_eda.ipynb` |
+| Text extraction | `notebooks/extraction_eda.ipynb` |
+| Data schema summaries | `notebooks/data_schema_eda.ipynb` |
+| Keyword indexing | `notebooks/keyword_index_eda.ipynb` |
+| Vector indexing | `notebooks/vector_index_eda.ipynb` |
+| Retrieval and evidence packets | `notebooks/retrieval_eda.ipynb` |
+| Answering and citations | `notebooks/answering_eda.ipynb` |
+| Evaluation and hardening | `notebooks/evaluation_eda.ipynb` |
+
 ## Fixtures
 
 `tests/fixtures/courses_small/` is a tiny synthetic course archive for later

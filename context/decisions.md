@@ -32,6 +32,7 @@ This document records the key decisions made during the design and development o
 | **DEC-024** | Skip legacy .doc and .ppt formats for MVP | `Accepted` | 2026-06-21 |
 | **DEC-025** | Schema plus sample rows for data file summarization | `Accepted` | 2026-06-21 |
 | **DEC-026** | Early hand-curated evaluation set of 15-20 questions | `Accepted` | 2026-06-21 |
+| **DEC-027** | Use read-only EDA notebooks for generated app data | `Accepted` | 2026-06-26 |
 
 ---
 
@@ -534,4 +535,40 @@ Create a small hand-curated evaluation set of 15-20 questions early in developme
 ### Consequences
 
 Retrieval quality can be tracked incrementally. Issues with chunking, indexing, or routing are caught early rather than after the full system is built.
+
+---
+
+## DEC-027: Use read-only EDA notebooks for generated app data
+
+* **Status**: Accepted
+* **Date**: 2026-06-26
+
+### Context
+
+After Feature 03, `inventory run` creates useful structured metadata in `data/uni_rag.sqlite`: course rows, file rows, category/status counts, skip reasons, run history, and the extraction backlog. Later stages will create similarly inspectable artifacts: extraction rows, chunks, data summaries, keyword indexes, embeddings, search runs, evidence packets, answers, and evaluation reports. CLI summaries are useful for quick checks, but exploratory analysis needs richer slicing before extraction, indexing, retrieval, and answer quality are tuned.
+
+### Decision
+
+Keep project-owned EDA notebooks under `notebooks/`. Use pandas for DataFrame-oriented notebook analysis. Add notebooks at stage boundaries where generated artifacts benefit from human inspection:
+
+```text
+notebooks/inventory_eda.ipynb
+notebooks/extraction_eda.ipynb
+notebooks/data_schema_eda.ipynb
+notebooks/keyword_index_eda.ipynb
+notebooks/vector_index_eda.ipynb
+notebooks/retrieval_eda.ipynb
+notebooks/answering_eda.ipynb
+notebooks/evaluation_eda.ipynb
+```
+
+Only create a notebook when its producing stage is implemented and its source artifacts exist. The first implemented notebook is `notebooks/inventory_eda.ipynb`, which reads the SQLite inventory output from `data/uni_rag.sqlite` after `uv run -m uni_rag_agent inventory run`.
+
+EDA notebooks are read-only analysis companions. They may inspect generated app data such as SQLite tables and run artifacts, but they are not the application pipeline and must not mutate `Courses`, write to SQLite, execute course scripts, execute course notebooks, load unsafe artifacts, or become the only place where production behavior exists.
+
+When an implementation change modifies a notebook's source command, source tables, JSON artifact shape, status vocabulary, or interpretation rules, update that notebook in the same change. Notebook outputs and execution counts should be cleared before commit unless a future decision explicitly accepts committed output snapshots.
+
+### Consequences
+
+Notebook analysis can guide extractor priority, performance tuning, and data-quality checks without expanding the runtime surface area. Pandas is accepted for this EDA layer. Additional notebook-specific dependencies should not be added casually unless a later decision explicitly accepts them.
 

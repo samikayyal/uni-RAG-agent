@@ -5,7 +5,7 @@
 * **Current Phase**: Phase 2: Text Extraction
 * **Current Goal**: Implement text extraction and natural-boundary chunking for pending inventory files.
 
-The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, pytest discovery constrained to this project's `tests/` directory, and Feature 03 inventory/file classification with CLI commands, SQLite upserts, idempotent reruns, timestamp-first/hash-on-change behavior, metadata-only skip reasons, missing-file soft marking, current course-total resets, explicit SQLite connection closing, accurate inventory run metrics, inventory summaries, and regression tests for stat/hash/listing failure diagnostics and recovery. It has not yet implemented text extraction, indexing, retrieval, or answering behavior.
+The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, pytest discovery constrained to this project's `tests/` directory, and Feature 03 inventory/file classification with CLI commands, SQLite upserts, idempotent reruns, timestamp-first/hash-on-change behavior, metadata-only skip reasons, missing-file soft marking, current course-total resets, explicit SQLite connection closing, accurate inventory run metrics, inventory summaries, a pandas-based read-only inventory EDA notebook under `notebooks/`, and regression tests for stat/hash/listing failure diagnostics and recovery. The notebook roadmap now names the planned EDA notebook for each later generated-artifact stage and requires existing notebooks to be updated when their source artifact contracts change. The project has not yet implemented text extraction, indexing, retrieval, or answering behavior.
 
 ## Project Roadmap
 
@@ -31,6 +31,7 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
   - [x] Implement filesystem crawler for `Courses`.
   - [x] Classify files into indexed vs metadata-only categories.
   - [x] Store skip reasons for images, binaries, archives, media, and unsafe artifacts.
+  - [x] Add a pandas-based read-only EDA notebook for analyzing SQLite inventory output after `inventory run`.
 
 - [ ] **Phase 2: Text Extraction**
   - [ ] Extract text from PDFs (PyMuPDF + optional Tesseract OCR fallback).
@@ -41,6 +42,8 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
   - [ ] Parse Python code via AST into functions/classes/imports; regex fallback for R/C++/MATLAB.
   - [ ] Parse existing VTT transcripts.
   - [ ] Generate schema summaries for CSV/XLSX/JSON/JSONL/SQLite/DB files.
+  - [ ] Add `notebooks/extraction_eda.ipynb` when text extraction lands.
+  - [ ] Add `notebooks/data_schema_eda.ipynb` when data summaries land.
 
 - [ ] **Phase 3: Indexing and Search**
   - [ ] Build chunk table and content metadata.
@@ -48,6 +51,8 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
   - [ ] Add vector embedding pipeline with ChromaDB (separate collections per logical index).
   - [ ] Keep separate logical indexes for documents, slides, notebooks, code, data schemas, and transcripts.
   - [ ] Add search run logging for searched/found/missing reporting.
+  - [ ] Add `notebooks/keyword_index_eda.ipynb` when keyword indexing lands.
+  - [ ] Add `notebooks/vector_index_eda.ipynb` when vector indexing lands.
 
 - [ ] **Phase 4: Retrieval and Evidence Packets**
   - [ ] Implement two-stage query router (rule-based pre-filter + LLM fallback).
@@ -55,15 +60,19 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
   - [ ] Implement Reciprocal Rank Fusion for result merging.
   - [ ] Implement evidence packet schema.
   - [ ] Add coverage/weakness reporting.
+  - [ ] Add `notebooks/retrieval_eda.ipynb` when retrieval/evidence traces are persisted.
 
 - [ ] **Phase 5: Answering Interface**
   - [ ] Implement answer generator that uses only evidence packets.
   - [ ] Add citation rendering.
   - [ ] Add refusal/insufficient-evidence behavior.
+  - [ ] Add `notebooks/answering_eda.ipynb` when answer traces are persisted.
   - [ ] Build FastAPI backend with HTML/JS frontend.
 
 - [ ] **Phase 6: Evaluation and Hardening**
   - [ ] Create a hand-curated eval set of 15-20 questions covering each query type (start early, run incrementally).
+  - [ ] Add `notebooks/evaluation_eda.ipynb` when evaluation reports are written.
+  - [ ] Maintain existing read-only EDA notebooks whenever their source commands, tables, JSON artifacts, status vocabulary, or interpretation rules change.
   - [ ] Measure retrieval quality and citation quality.
   - [ ] Add regression tests for ingestion and evidence packet generation.
   - [ ] Optimize slow filesystem scans.
@@ -100,4 +109,6 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
 * [x] Address Feature 03 review findings: close SQLite connections explicitly, reset stale course totals when course folders disappear, keep inventory run `files_indexed` metrics accurate, and add regression tests.
 * [x] Add Feature 03 inventory failure-path regression tests for file stat failures, hash failures, nested directory listing diagnostics, and failed root-listing run records.
 * [x] Run Brooks full sweep on Features 01-03: fix transient hash-failure recovery, align the Feature 02 runs-dir environment variable contract, and verify the current safety net.
+* [x] Add `notebooks/inventory_eda.ipynb` for pandas-based read-only EDA over `data/uni_rag.sqlite` after `inventory run`, and document the notebook strategy across `context/`.
+* [x] Expand the notebook roadmap across applicable stages and record that existing notebooks must be updated when their source artifact contracts change.
 * [ ] Implement Feature 04 text extraction and chunking.

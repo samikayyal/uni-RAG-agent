@@ -51,6 +51,10 @@ GET /api/answers/{answer_id}
 GET /
 ```
 
+Notebook:
+
+No UI-specific EDA notebook is required for the MVP. Inspect the underlying persisted traces through `notebooks/retrieval_eda.ipynb` and `notebooks/answering_eda.ipynb`; verify UI behavior through API/UI tests.
+
 `POST /api/ask` request:
 
 ```json
@@ -104,6 +108,7 @@ Session memory may be in-process for MVP and should not require cross-session pe
 - Ingestion/index/eval operations stay CLI-first for MVP.
 - Empty retrieval should return a valid insufficient-evidence answer, not a server error.
 - Long-running ask requests should report clear timeout or partial failure messages.
+- Do not add browser-driven notebooks for MVP UI validation; use tests and the retrieval/answering notebooks for trace analysis.
 
 ## Tests
 

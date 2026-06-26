@@ -23,6 +23,7 @@ This spec creates the foundation for extraction, search coverage reporting, and 
 - Use timestamp-first and hash-on-change behavior for changed files.
 - Mark missing files without hard-deleting rows.
 - Produce inventory run summaries.
+- Provide a pandas-based, read-only EDA notebook for exploring the SQLite inventory output by course, category, extension, status, size, skip reason, and freshness.
 
 ## Out of Scope
 
@@ -40,6 +41,14 @@ Command:
 uv run -m uni_rag_agent inventory run
 uv run -m uni_rag_agent inventory summary
 ```
+
+Notebook:
+
+```text
+notebooks/inventory_eda.ipynb
+```
+
+Update this notebook whenever inventory changes the `courses`, `files`, or inventory `extraction_runs` fields, status vocabulary, metadata-only reasons, summary interpretation, or `inventory run` command behavior.
 
 Internal interfaces:
 
@@ -105,6 +114,7 @@ Required status behavior:
 7. For changed files, compute SHA-256 to confirm content changes.
 8. Mark files not seen in the current run as missing/soft-deleted according to the architecture.
 9. Emit counts by course, category, extension, status, and skipped reason.
+10. Use `notebooks/inventory_eda.ipynb` after an inventory run for read-only exploratory analysis of `data/uni_rag.sqlite`.
 
 ## Failure and Safety Rules
 
@@ -113,6 +123,10 @@ Required status behavior:
 - Large file hashing should be streaming.
 - Archives, installers, binaries, and model artifacts must not be opened beyond metadata and optional streaming hash.
 - The run must tolerate unusual extensions and no-extension files.
+- The EDA notebook must open generated app data read-only and must not mutate SQLite, `Courses`, or any course file.
+- The EDA notebook must not execute course code or course notebooks.
+- The EDA notebook must be kept in sync with inventory schema, command, and status/skip-reason semantics.
+- Notebook outputs and execution counts should be cleared before commit.
 
 ## Tests
 
@@ -123,6 +137,8 @@ Required status behavior:
 - Verify rerunning inventory is idempotent.
 - Verify a changed timestamp triggers hash comparison.
 - Verify a missing file is marked without hard deletion.
+- Verify the inventory EDA notebook is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
+- Verify the inventory EDA notebook is updated when inventory output fields or interpretation rules change.
 - Optional smoke: run inventory on a tiny selected subtree copied into a temp fixture, not the full `Courses` archive.
 
 ## Acceptance Criteria
@@ -131,4 +147,5 @@ Required status behavior:
 - Every file has exactly one category and one index status.
 - Metadata-only files have useful `reason_not_indexed`.
 - Inventory summaries can explain the mixed archive without extracting content.
+- `notebooks/inventory_eda.ipynb` can be opened after `inventory run` to inspect inventory distribution and extraction backlog without mutating app data or source course files.
 - No automated test requires traversing the full `Courses` archive.

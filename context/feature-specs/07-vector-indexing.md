@@ -21,6 +21,7 @@ Embed extracted chunks into ChromaDB collections using LangChain embedding abstr
 - Store Chroma vector IDs and embedding metadata in SQLite.
 - Implement semantic search over selected collections.
 - Keep metadata-only files out of vector indexing.
+- Add or update the stage EDA notebook for vector-index output once this feature is implemented.
 
 ## Out of Scope
 
@@ -39,6 +40,14 @@ uv run -m uni_rag_agent index vector
 uv run -m uni_rag_agent index vector --collection document_index
 uv run -m uni_rag_agent search semantic "distributed computation"
 ```
+
+Notebook:
+
+```text
+notebooks/vector_index_eda.ipynb
+```
+
+Create this notebook when vector indexing is implemented. It should inspect `embeddings`, joined chunk/file/course metadata, Chroma collection metadata, model/dimension consistency, collection sizes, missing embeddings, and small semantic query smoke results.
 
 Internal interfaces:
 
@@ -121,6 +130,7 @@ SQLite remains authoritative. Chroma metadata should include chunk ID and enough
 5. Upsert vectors into ChromaDB.
 6. Store `embeddings` rows with vector backend, collection, vector ID, model, dimension, and timestamp.
 7. Implement semantic search by querying selected collections and joining result IDs back to SQLite metadata.
+8. Keep `notebooks/vector_index_eda.ipynb` aligned with embedding fields, collection names, vector metadata, model/dimension semantics, and search result shape.
 
 ## Failure and Safety Rules
 
@@ -130,6 +140,8 @@ SQLite remains authoritative. Chroma metadata should include chunk ID and enough
 - Do not embed empty or whitespace-only chunks.
 - Batch failures should be recoverable without corrupting existing embeddings.
 - Do not store secrets in Chroma metadata.
+- The EDA notebook must read generated app data only and must not mutate SQLite, ChromaDB files, or `Courses`.
+- Notebook outputs and execution counts should be cleared before commit.
 
 ## Tests
 
@@ -139,6 +151,7 @@ SQLite remains authoritative. Chroma metadata should include chunk ID and enough
 - Verify semantic search returns chunk metadata joined from SQLite.
 - Verify metadata-only files are never embedded.
 - Verify missing real provider config fails clearly when fake embeddings are disabled.
+- Verify `notebooks/vector_index_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
 - Optional smoke: vector-index a tiny fixture corpus with fake embeddings.
 
 ## Acceptance Criteria
@@ -147,3 +160,4 @@ SQLite remains authoritative. Chroma metadata should include chunk ID and enough
 - Semantic search works across selected logical collections.
 - The implementation is provider-configurable and testable without API keys.
 - SQLite remains the source of truth for chunk text, paths, and citation metadata.
+- `notebooks/vector_index_eda.ipynb` exists once this feature lands and can inspect embedding/vector coverage without mutating generated or source data.

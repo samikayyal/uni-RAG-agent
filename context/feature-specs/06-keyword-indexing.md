@@ -20,6 +20,7 @@ Build reliable exact-term retrieval over extracted chunks using SQLite FTS5. Key
 - Incrementally sync new/updated chunks when practical.
 - Implement keyword search with filters and ranking.
 - Return chunk IDs and enough metadata for retrieval merging.
+- Add or update the stage EDA notebook for keyword-index output once this feature is implemented.
 
 ## Out of Scope
 
@@ -38,6 +39,14 @@ uv run -m uni_rag_agent index keyword
 uv run -m uni_rag_agent index keyword --rebuild
 uv run -m uni_rag_agent search keyword "mapreduce"
 ```
+
+Notebook:
+
+```text
+notebooks/keyword_index_eda.ipynb
+```
+
+Create this notebook when keyword indexing is implemented. It should inspect `chunk_fts`, joined `chunks`/`files`/`courses` metadata, source-type coverage, index row counts, missing FTS rows, and small keyword query smoke results.
 
 Internal interfaces:
 
@@ -92,6 +101,7 @@ Read:
 5. Execute FTS query safely.
 6. Return top K ranked results with chunk and file metadata.
 7. Log keyword query terms and result counts for later search coverage.
+8. Keep `notebooks/keyword_index_eda.ipynb` aligned with FTS projection fields, query behavior, filter semantics, and ranking output.
 
 ## Failure and Safety Rules
 
@@ -100,6 +110,8 @@ Read:
 - Empty indexes should return no results with a clear diagnostic.
 - Keyword indexing must not read source files under `Courses`; it reads extracted chunks only.
 - Keyword search must not mutate source or generated content except optional search logs in later specs.
+- The EDA notebook must read generated app data only and must not mutate `chunk_fts`, SQLite, or `Courses`.
+- Notebook outputs and execution counts should be cleared before commit.
 
 ## Tests
 
@@ -110,6 +122,7 @@ Read:
 - Verify course name terms are searchable even though course names live in `courses`, not `chunks`.
 - Verify invalid query syntax is handled.
 - Verify rebuild creates one FTS row per eligible chunk.
+- Verify `notebooks/keyword_index_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
 - Optional smoke: keyword search over a tiny extracted fixture database.
 
 ## Acceptance Criteria
@@ -118,3 +131,4 @@ Read:
 - `keyword_search()` returns stable result objects with chunk/file metadata.
 - Search supports exact course and logical-index filters.
 - The implementation uses SQLite FTS5, not a separate keyword engine.
+- `notebooks/keyword_index_eda.ipynb` exists once this feature lands and can inspect keyword-index coverage without mutating generated or source data.

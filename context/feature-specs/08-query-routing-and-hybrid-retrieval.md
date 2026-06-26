@@ -21,6 +21,7 @@ Turn a user query into a structured retrieval plan, run metadata, keyword, and s
 - Merge result lists with RRF.
 - Deduplicate by chunk ID and file ID where appropriate.
 - Return a retrieval result set ready for evidence packet assembly.
+- Add or update the retrieval EDA notebook once retrieval/search traces are persisted by spec 09.
 
 ## Out of Scope
 
@@ -38,6 +39,14 @@ Command:
 uv run -m uni_rag_agent retrieve "Explain MapReduce from my courses"
 uv run -m uni_rag_agent retrieve "Find my database normalization assignment" --debug
 ```
+
+Notebook:
+
+```text
+notebooks/retrieval_eda.ipynb
+```
+
+Create this notebook when specs 08-09 are implemented enough to persist retrieval traces. It should inspect router outputs, `search_runs`, `search_results`, RRF behavior, retrieval-method mix, searched courses/indexes, and weaknesses.
 
 Internal interfaces:
 
@@ -103,6 +112,7 @@ Writing `search_runs` and `search_results` belongs to spec 09. This spec should 
 8. Run semantic search when enabled by route.
 9. Merge and deduplicate results with RRF.
 10. Return final top K results plus debug coverage fields.
+11. Keep `notebooks/retrieval_eda.ipynb` aligned with router fields, retrieval result shape, RRF parameters, and persisted search trace fields.
 
 ## Failure and Safety Rules
 
@@ -111,6 +121,8 @@ Writing `search_runs` and `search_results` belongs to spec 09. This spec should 
 - If the LLM router returns invalid JSON, fall back to rule-based output and record a weakness.
 - Do not execute code even when `needs_python=true`; this flag only informs later safe-inspection decisions.
 - RRF is the only MVP merge algorithm. Do not add reranking in this spec.
+- The EDA notebook must read generated app data only and must not mutate SQLite, indexes, or `Courses`.
+- Notebook outputs and execution counts should be cleared before commit.
 
 ## Tests
 
@@ -120,6 +132,7 @@ Writing `search_runs` and `search_results` belongs to spec 09. This spec should 
 - Verify code and data queries select code/data schema indexes.
 - Verify ambiguous queries use fake LLM fallback only when enabled.
 - Verify RRF ranking is deterministic and does not normalize scores from different systems.
+- Verify `notebooks/retrieval_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
 - Optional smoke: run retrieval against a tiny fixture database with keyword and fake vector results.
 
 ## Acceptance Criteria
@@ -129,3 +142,4 @@ Writing `search_runs` and `search_results` belongs to spec 09. This spec should 
 - LLM fallback is config-driven and testable with a fake adapter.
 - Hybrid retrieval uses metadata, keyword, and semantic search where appropriate.
 - No reranker is required or invoked for MVP.
+- `notebooks/retrieval_eda.ipynb` exists once retrieval traces are persisted and can inspect route/retrieval behavior without mutating generated or source data.

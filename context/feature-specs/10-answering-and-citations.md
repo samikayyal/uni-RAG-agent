@@ -20,6 +20,7 @@ Generate final user-facing answers strictly from evidence packets, with inline c
 - Refuse or qualify answers when evidence is insufficient.
 - Store final answer traces.
 - Support per-session conversation context for follow-up routing while keeping each packet self-contained.
+- Add or update the answering EDA notebook for persisted answer and citation traces.
 
 ## Out of Scope
 
@@ -37,6 +38,14 @@ Command:
 uv run -m uni_rag_agent answer --evidence-packet-id 1
 uv run -m uni_rag_agent ask "Explain MapReduce from my courses"
 ```
+
+Notebook:
+
+```text
+notebooks/answering_eda.ipynb
+```
+
+Create this notebook when answering is implemented. It should inspect `answers`, joined `evidence_packets`, citation JSON, limitations, model/fake-adapter traces, and insufficient-evidence behavior.
 
 Internal interfaces:
 
@@ -89,6 +98,7 @@ Populate:
 5. Validate that every citation maps to packet evidence.
 6. Add or repair references section when possible.
 7. Store answer text, citations, limitations, and model name.
+8. Keep `notebooks/answering_eda.ipynb` aligned with answer fields, citation JSON shape, limitation semantics, model trace fields, and fake-answerer behavior.
 
 ## Failure and Safety Rules
 
@@ -97,6 +107,8 @@ Populate:
 - If citation validation fails, return a safe insufficient-evidence response or retry with stricter instructions.
 - Do not include API keys or internal prompts in stored answers.
 - Conversation memory may help interpret follow-up queries, but evidence packets remain self-contained.
+- The EDA notebook must read generated app data only and must not mutate SQLite, evidence packets, answers, or `Courses`.
+- Notebook outputs and execution counts should be cleared before commit.
 
 ## Tests
 
@@ -105,6 +117,7 @@ Populate:
 - Verify references section includes full file paths and locations.
 - Verify answers with empty evidence do not invent facts.
 - Verify fake model mode requires no API keys.
+- Verify `notebooks/answering_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
 - Optional smoke: run `uv run -m uni_rag_agent ask "query"` against a tiny fixture index using fake adapters.
 
 ## Acceptance Criteria
@@ -113,3 +126,4 @@ Populate:
 - Answers cite course, file, and location where available.
 - Insufficient evidence is explicit and useful.
 - Stored answer traces are auditable back to the exact packet.
+- `notebooks/answering_eda.ipynb` exists once this feature lands and can inspect answer/citation traces without mutating generated or source data.

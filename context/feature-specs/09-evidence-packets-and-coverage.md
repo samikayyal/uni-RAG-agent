@@ -18,6 +18,7 @@ Create the auditable boundary between retrieval and answering: a structured evid
 - Generate searched/found/missing coverage details.
 - Generate weaknesses for skipped source types, empty indexes, unsupported formats, and low confidence.
 - Store evidence packets exactly as passed to the answer generator.
+- Add or update the retrieval/evidence EDA notebook for persisted search and evidence traces.
 
 ## Out of Scope
 
@@ -34,6 +35,14 @@ Command:
 uv run -m uni_rag_agent evidence build "Explain MapReduce from my courses"
 uv run -m uni_rag_agent evidence show --search-run-id 1
 ```
+
+Notebook:
+
+```text
+notebooks/retrieval_eda.ipynb
+```
+
+This notebook is shared with spec 08. Once evidence packets are implemented, it should also inspect `evidence_packets`, selected evidence, packet weaknesses, searched/found/missing coverage, and result-selection behavior.
 
 Internal interfaces:
 
@@ -99,6 +108,7 @@ Evidence packet JSON must be stored exactly as given to the answer generator. Do
 6. Generate weaknesses from router/retrieval/index metadata.
 7. Store the packet JSON and evidence count.
 8. Return the packet to the answer generator.
+9. Keep `notebooks/retrieval_eda.ipynb` aligned with `search_runs`, `search_results`, `evidence_packets`, packet JSON shape, weakness semantics, and selected-evidence rules.
 
 ## Failure and Safety Rules
 
@@ -107,6 +117,8 @@ Evidence packet JSON must be stored exactly as given to the answer generator. Do
 - Do not cite files absent from the packet.
 - If total evidence text is too large, select highest-scoring evidence and record that lower-scoring evidence was omitted.
 - Do not read or mutate source files under `Courses` during packet assembly.
+- The EDA notebook must read generated app data only and must not mutate SQLite, evidence packet JSON, or `Courses`.
+- Notebook outputs and execution counts should be cleared before commit.
 
 ## Tests
 
@@ -116,6 +128,7 @@ Evidence packet JSON must be stored exactly as given to the answer generator. Do
 - Verify evidence items include course, file, source type, location, text, score, and retrieval method.
 - Verify weaknesses include metadata-only images/media when relevant.
 - Verify packet JSON round-trips exactly.
+- Verify `notebooks/retrieval_eda.ipynb`, once evidence persistence lands, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
 - Optional smoke: build an evidence packet from a tiny fixture retrieval run.
 
 ## Acceptance Criteria
@@ -124,3 +137,4 @@ Evidence packet JSON must be stored exactly as given to the answer generator. Do
 - Search coverage can explain courses, indexes, keywords, semantic queries, found evidence, and missing coverage.
 - Packets are persisted exactly and can be reloaded by ID.
 - Answer generation never needs to inspect retrieval internals directly.
+- `notebooks/retrieval_eda.ipynb` can inspect persisted evidence and coverage traces without mutating generated or source data.

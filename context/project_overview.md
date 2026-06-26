@@ -45,6 +45,7 @@ Core flow:
 * **Source-grounded answers**: Cite course, file path, source type, and location such as page, slide, notebook cell, row sample, or timestamp where available.
 * **Code and notebook inspection**: Search and inspect `.ipynb`, `.py`, `.r`, `.cpp`, `.h`, and `.m` files without automatically executing old course code.
 * **Data schema summaries**: Summarize CSV, Excel, JSON/JSONL, SQLite, and DB files through schema/sample metadata rather than embedding full datasets.
+* **Exploratory analysis notebooks**: Keep read-only EDA notebooks under `notebooks/` for inspecting generated inventory, extraction, data-summary, indexing, retrieval, answering, and evaluation artifacts where that stage produces useful analysis data. These notebooks analyze app data such as `data/uni_rag.sqlite`, `data/runs/`, and index metadata; they must not mutate `Courses` or execute old course files.
 * **Weak retrieval reporting**: Clearly state searched courses, indexes, keywords, semantic queries, evidence found, and missing coverage.
 
 ## Out-of-Scope (By Design)
@@ -72,6 +73,7 @@ Core flow:
 ## Key System Constraints
 
 * Use `uv add package_name` for dependency management and `uv run -m uni_rag_agent ...` for project commands.
+* Use pandas-based EDA notebooks as read-only analysis companions for generated app data. Notebooks should document the command that produces their input data, should be updated when the source artifact contract changes, and should avoid adding additional runtime dependencies unless the project explicitly accepts them.
 * Keep `Courses` as source data; do not mutate course files during ingestion.
 * Store generated metadata, extracted text, indexes, and run artifacts outside `Courses`.
 * Treat `context/feature-specs/` as the implementation contract for MVP module work.

@@ -34,6 +34,9 @@ D:\Projects\Uni RAG Agent
 |   |-- indexes\
 |   |   `-- vector\                  # ChromaDB persistence
 |   `-- runs\                        # Optional JSON artifacts for ingestion/search/debug runs
+|-- notebooks\                       # Read-only EDA notebooks over generated app data
+|   |-- inventory_eda.ipynb          # Stage 1 inventory SQLite exploration
+|   `-- <stage>_eda.ipynb            # Added as later stages produce inspectable artifacts
 |-- src\
 |   `-- uni_rag_agent\
 |       |-- __init__.py
@@ -59,6 +62,8 @@ D:\Projects\Uni RAG Agent
 
 `Courses` should remain source data. Generated files should live under `data\` and should be ignored by git. SQLite FTS5 lives inside `data\uni_rag.sqlite`; do not create a separate keyword index unless a later decision changes the storage design.
 
+`notebooks\` contains committed exploratory analysis notebooks for humans to inspect generated app data. Notebooks may read `data\uni_rag.sqlite`, JSON run artifacts, extracted-text caches, evaluation reports, or vector-index metadata, but they must not mutate `Courses` and must not execute old course code or notebooks. Notebook outputs should be lightweight enough for review, and large generated analysis artifacts should stay under `data\runs\` or another gitignored generated-data path.
+
 ## Storage Strategy
 
 Use SQLite as the system of record for:
@@ -78,6 +83,47 @@ Recommended MVP:
 
 - SQLite for metadata and FTS5 keyword search (unicode61 default tokenizer).
 - ChromaDB for vector embeddings, with separate collections per logical index.
+
+## Exploratory Notebook Strategy
+
+Use notebooks as a read-only EDA layer over generated local app data, not as the application runtime or pipeline implementation.
+
+Stage notebooks are created when the producing stage is implemented. Do not add empty placeholder notebooks; document planned notebooks until their source artifacts exist.
+
+| Stage / Specs | Notebook | Status | Primary Inputs | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| Config/storage / 02 | None required for MVP | Not applicable | `uv run -m uni_rag_agent storage check` output | CLI checks are enough until schema migrations or storage drift require richer inspection. |
+| Inventory / 03 | `notebooks/inventory_eda.ipynb` | Implemented | `courses`, `files`, inventory rows in `extraction_runs` | File volume, categories, statuses, skip reasons, extraction backlog, freshness. |
+| Text extraction / 04 | `notebooks/extraction_eda.ipynb` | Planned when Feature 04 lands | `extraction_runs`, `extracted_documents`, `chunks`, `files` | Extraction yield, failures, text length, chunk counts, source-location coverage. |
+| Data summaries / 05 | `notebooks/data_schema_eda.ipynb` | Planned when Feature 05 lands | `data_summaries`, `chunks`, `files` | Dataset summary coverage, row/column/table counts, sample availability, large/failed data files. |
+| Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Planned when Feature 06 lands | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
+| Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Planned when Feature 07 lands | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |
+| Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Planned when Features 08-09 land | `search_runs`, `search_results`, `evidence_packets` | Router behavior, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
+| Answering / 10 | `notebooks/answering_eda.ipynb` | Planned when Feature 10 lands | `answers`, `evidence_packets` | Citation validity, limitations, model/fake-adapter traces, insufficient-evidence behavior. |
+| UI / 11 | None required for MVP | Not applicable | FastAPI responses and UI tests | UI correctness is covered by API/UI tests; use retrieval/answering notebooks for underlying traces. |
+| Evaluation / 12 | `notebooks/evaluation_eda.ipynb` | Planned when Feature 12 lands | `data/runs/eval/` reports, optional answer/search traces | Eval score trends, failures, citation quality, retrieval quality, runtime summaries. |
+
+`inventory_eda.ipynb` uses pandas to read `data/uni_rag.sqlite` after `uv run -m uni_rag_agent inventory run` and explores:
+
+- latest inventory run status;
+- course-level file and byte distribution;
+- category, extension, and index-status counts;
+- metadata-only reasons;
+- pending extraction backlog;
+- failed/skipped inventory rows;
+- inventory freshness.
+
+Rules:
+
+- open SQLite in read-only/query-only mode;
+- do not write to SQLite from notebooks;
+- do not mutate files under `Courses`;
+- do not execute course scripts or course notebooks;
+- use pandas for DataFrame-oriented notebook EDA;
+- avoid additional notebook-specific dependencies unless a later decision explicitly accepts them;
+- keep notebooks aligned with the schema and commands documented in `context/architecture.md` and `context/feature-specs/`;
+- update the relevant notebook in the same implementation change whenever a stage changes its source command, source tables, JSON artifact shape, status vocabulary, or interpretation rules;
+- clear notebook outputs and execution counts before committing unless a future decision explicitly allows committed output snapshots.
 
 ## File Classification
 

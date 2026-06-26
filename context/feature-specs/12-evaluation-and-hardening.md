@@ -22,6 +22,7 @@ Create a small, repeatable evaluation harness that checks retrieval quality, cit
 - Support optional smoke evals against the real `Courses` archive.
 - Check citation validity, evidence packet completeness, and weak retrieval reporting.
 - Record performance and failure summaries.
+- Add or update the evaluation EDA notebook for eval reports and quality trends.
 
 ## Out of Scope
 
@@ -39,6 +40,14 @@ uv run -m uni_rag_agent eval run
 uv run -m uni_rag_agent eval run --fixtures
 uv run -m uni_rag_agent eval run --smoke-real-archive
 ```
+
+Notebook:
+
+```text
+notebooks/evaluation_eda.ipynb
+```
+
+Create this notebook when evaluation reporting is implemented. It should inspect `data/runs/eval/` JSON/Markdown reports, retrieval/citation scores, expected-vs-found source coverage, weak-retrieval cases, failures, and runtime summaries.
 
 Eval item shape:
 
@@ -83,6 +92,7 @@ If later persistence is useful, add an explicit architecture update before intro
 5. Validate citations map to packet evidence.
 6. Check weak-retrieval explanations when expected evidence is missing.
 7. Write a JSON and Markdown report under `data/runs/eval/`.
+8. Keep `notebooks/evaluation_eda.ipynb` aligned with eval item fields, report JSON shape, scoring fields, and runtime summary semantics.
 
 ## Failure and Safety Rules
 
@@ -92,6 +102,8 @@ If later persistence is useful, add an explicit architecture update before intro
 - Do not use LLM judging as the sole pass/fail mechanism.
 - Missing provider credentials should not block fake-adapter evals.
 - Reports should avoid storing secrets or full environment values.
+- The EDA notebook must read generated eval reports and app traces only; it must not mutate reports, SQLite, indexes, or `Courses`.
+- Notebook outputs and execution counts should be cleared before commit.
 
 ## Tests
 
@@ -101,6 +113,7 @@ If later persistence is useful, add an explicit architecture update before intro
 - Verify citation scoring catches citations not present in packets.
 - Verify weak-retrieval expected cases pass only when limitations are reported.
 - Verify reports are written under a temporary runs directory in tests.
+- Verify `notebooks/evaluation_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
 - Optional smoke: `uv run -m uni_rag_agent eval run --smoke-real-archive` after a real local index exists.
 
 ## Acceptance Criteria
@@ -109,3 +122,4 @@ If later persistence is useful, add an explicit architecture update before intro
 - `uv run -m uni_rag_agent eval run --fixtures` produces a useful report.
 - Eval results cover retrieval, evidence packets, citations, and safety boundaries.
 - Real archive eval is explicit and never part of the default automated test path.
+- `notebooks/evaluation_eda.ipynb` exists once this feature lands and can inspect evaluation reports without mutating generated or source data.
