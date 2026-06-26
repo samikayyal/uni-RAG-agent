@@ -84,6 +84,184 @@ def test_chunk_fts_table_uses_fts5(tmp_path: Path) -> None:
     assert "tokenize='unicode61'" in row[0]
 
 
+def test_search_results_chunk_reference_nulls_when_chunk_is_deleted(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    ensure_data_dirs(config)
+    with connect_sqlite(config) as connection:
+        initialize_schema(connection)
+        rows = connection.execute("PRAGMA foreign_key_list(search_results)").fetchall()
+
+    chunk_reference = next(
+        row
+        for row in rows
+        if row["table"] == "chunks" and row["from"] == "chunk_id"
+    )
+    assert chunk_reference["on_delete"] == "SET NULL"
+
+
+def test_initialize_schema_migrates_existing_search_results_chunk_reference(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    ensure_data_dirs(config)
+    with connect_sqlite(config) as connection:
+        initialize_schema(connection)
+        connection.execute("DROP TABLE search_results")
+        connection.execute(
+            """
+            CREATE TABLE search_results (
+                id INTEGER PRIMARY KEY,
+                search_run_id INTEGER NOT NULL REFERENCES search_runs(id),
+                chunk_id INTEGER REFERENCES chunks(id),
+                file_id INTEGER REFERENCES files(id),
+                retrieval_method TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                score REAL,
+                selected_for_evidence INTEGER NOT NULL DEFAULT 0,
+                result_json TEXT
+            )
+            """
+        )
+        file_id = connection.execute(
+            """
+            INSERT INTO files (
+                path,
+                relative_path,
+                filename,
+                extension,
+                size_bytes,
+                category,
+                index_status,
+                discovered_at,
+                last_seen_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(config.courses_root / "notes.md"),
+                "notes.md",
+                "notes.md",
+                ".md",
+                1,
+                "document",
+                "indexed",
+                "2026-06-27T00:00:00+00:00",
+                "2026-06-27T00:00:00+00:00",
+            ),
+        ).lastrowid
+        extraction_run_id = connection.execute(
+            """
+            INSERT INTO extraction_runs (started_at, status, config_json)
+            VALUES (?, ?, ?)
+            """,
+            ("2026-06-27T00:00:00+00:00", "completed", "{}"),
+        ).lastrowid
+        extracted_document_id = connection.execute(
+            """
+            INSERT INTO extracted_documents (
+                file_id,
+                extraction_run_id,
+                extractor_name,
+                status,
+                text_length,
+                chunk_count,
+                extracted_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                file_id,
+                extraction_run_id,
+                "markdown-text",
+                "indexed",
+                4,
+                1,
+                "2026-06-27T00:00:00+00:00",
+            ),
+        ).lastrowid
+        chunk_id = connection.execute(
+            """
+            INSERT INTO chunks (
+                file_id,
+                extracted_document_id,
+                chunk_uid,
+                source_type,
+                chunk_index,
+                text,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                file_id,
+                extracted_document_id,
+                "file-1-chunk-0",
+                "document",
+                0,
+                "BM25",
+                "2026-06-27T00:00:00+00:00",
+            ),
+        ).lastrowid
+        search_run_id = connection.execute(
+            """
+            INSERT INTO search_runs (
+                query,
+                router_output_json,
+                searched_courses_json,
+                searched_indexes_json,
+                keyword_terms_json,
+                semantic_queries_json,
+                started_at,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "bm25",
+                "{}",
+                "[]",
+                "[]",
+                '["bm25"]',
+                "[]",
+                "2026-06-27T00:00:00+00:00",
+                "completed",
+            ),
+        ).lastrowid
+        search_result_id = connection.execute(
+            """
+            INSERT INTO search_results (
+                search_run_id,
+                chunk_id,
+                file_id,
+                retrieval_method,
+                rank
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (search_run_id, chunk_id, file_id, "keyword", 1),
+        ).lastrowid
+        connection.commit()
+
+        initialize_schema(connection)
+        rows = connection.execute("PRAGMA foreign_key_list(search_results)").fetchall()
+        chunk_reference = next(
+            row
+            for row in rows
+            if row["table"] == "chunks" and row["from"] == "chunk_id"
+        )
+        connection.execute("DELETE FROM chunks WHERE id = ?", (chunk_id,))
+        historical_result = connection.execute(
+            "SELECT chunk_id, file_id FROM search_results WHERE id = ?",
+            (search_result_id,),
+        ).fetchone()
+
+    assert chunk_reference["on_delete"] == "SET NULL"
+    assert historical_result["chunk_id"] is None
+    assert historical_result["file_id"] == file_id
+
+
 def test_initialize_schema_reports_clear_fts5_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

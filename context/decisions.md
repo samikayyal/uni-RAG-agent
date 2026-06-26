@@ -33,6 +33,7 @@ This document records the key decisions made during the design and development o
 | **DEC-025** | Schema plus sample rows for data file summarization | `Accepted` | 2026-06-21 |
 | **DEC-026** | Early hand-curated evaluation set of 15-20 questions | `Accepted` | 2026-06-21 |
 | **DEC-027** | Use read-only EDA notebooks for generated app data | `Accepted` | 2026-06-26 |
+| **DEC-028** | Null stale search-result chunk references on chunk deletion | `Accepted` | 2026-06-27 |
 
 ---
 
@@ -571,4 +572,23 @@ When an implementation change modifies a notebook's source command, source table
 ### Consequences
 
 Notebook analysis can guide extractor priority, performance tuning, and data-quality checks without expanding the runtime surface area. Pandas is accepted for this EDA layer. Additional notebook-specific dependencies should not be added casually unless a later decision explicitly accepts them.
+
+---
+
+## DEC-028: Null stale search-result chunk references on chunk deletion
+
+* **Status**: Accepted
+* **Date**: 2026-06-27
+
+### Context
+
+Feature 04 re-extraction deletes stale chunks for files whose content changes, then writes fresh chunks. The planned retrieval schema already has `search_results.chunk_id` references to `chunks.id`. Without an explicit delete policy, a historical search result that points at an old chunk can block re-extraction with a SQLite foreign-key failure.
+
+### Decision
+
+Use `ON DELETE SET NULL` for `search_results.chunk_id`. Historical search result rows are retained, but their obsolete chunk pointer becomes `NULL` when stale chunks are deleted. `search_results.file_id` remains available for source-file traceability, and evidence packets store the exact evidence payload separately.
+
+### Consequences
+
+Changed-file re-extraction can replace chunks without being blocked by historical retrieval rows. Future retrieval and EDA code must treat `search_results.chunk_id` as nullable and should join chunk details with a left join when inspecting historical results. Historical rows whose chunks were deleted can still identify the source file and retrieval metadata, but they cannot rehydrate the exact old chunk text from `chunks`.
 

@@ -93,6 +93,7 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
         raise StorageError(f"SQLite FTS5 is not available: {diagnostic}")
 
     connection.executescript(MVP_SCHEMA_SQL)
+    _ensure_search_results_chunk_delete_policy(connection)
     connection.commit()
 
 
@@ -179,6 +180,74 @@ def _required_tables_present(connection: sqlite3.Connection) -> tuple[str, ...]:
     ).fetchall()
     names = {row[0] for row in rows}
     return tuple(table for table in REQUIRED_TABLES if table in names)
+
+
+def _ensure_search_results_chunk_delete_policy(connection: sqlite3.Connection) -> None:
+    """Keep stale chunk cleanup from blocking on historical search result rows."""
+    rows = connection.execute("PRAGMA foreign_key_list(search_results)").fetchall()
+    for row in rows:
+        if row["table"] == "chunks" and row["from"] == "chunk_id":
+            if str(row["on_delete"]).upper() == "SET NULL":
+                return
+            break
+    else:
+        return
+
+    connection.execute("ALTER TABLE search_results RENAME TO search_results_old")
+    connection.execute(
+        """
+        CREATE TABLE search_results (
+            id INTEGER PRIMARY KEY,
+            search_run_id INTEGER NOT NULL REFERENCES search_runs(id),
+            chunk_id INTEGER REFERENCES chunks(id) ON DELETE SET NULL,
+            file_id INTEGER REFERENCES files(id),
+            retrieval_method TEXT NOT NULL,
+            rank INTEGER NOT NULL,
+            score REAL,
+            selected_for_evidence INTEGER NOT NULL DEFAULT 0,
+            result_json TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO search_results (
+            id,
+            search_run_id,
+            chunk_id,
+            file_id,
+            retrieval_method,
+            rank,
+            score,
+            selected_for_evidence,
+            result_json
+        )
+        SELECT
+            id,
+            search_run_id,
+            chunk_id,
+            file_id,
+            retrieval_method,
+            rank,
+            score,
+            selected_for_evidence,
+            result_json
+        FROM search_results_old
+        """
+    )
+    connection.execute("DROP TABLE search_results_old")
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_search_results_run_id
+        ON search_results(search_run_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_search_results_selected
+        ON search_results(selected_for_evidence)
+        """
+    )
 
 
 MVP_SCHEMA_SQL = """
@@ -325,7 +394,7 @@ CREATE TABLE IF NOT EXISTS search_runs (
 CREATE TABLE IF NOT EXISTS search_results (
     id INTEGER PRIMARY KEY,
     search_run_id INTEGER NOT NULL REFERENCES search_runs(id),
-    chunk_id INTEGER REFERENCES chunks(id),
+    chunk_id INTEGER REFERENCES chunks(id) ON DELETE SET NULL,
     file_id INTEGER REFERENCES files(id),
     retrieval_method TEXT NOT NULL,
     rank INTEGER NOT NULL,

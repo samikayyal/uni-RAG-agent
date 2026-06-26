@@ -423,7 +423,7 @@ Stores ranked retrieval results before final packet assembly.
 CREATE TABLE search_results (
     id INTEGER PRIMARY KEY,
     search_run_id INTEGER NOT NULL REFERENCES search_runs(id),
-    chunk_id INTEGER REFERENCES chunks(id),
+    chunk_id INTEGER REFERENCES chunks(id) ON DELETE SET NULL,
     file_id INTEGER REFERENCES files(id),
     retrieval_method TEXT NOT NULL,
     rank INTEGER NOT NULL,
@@ -435,6 +435,11 @@ CREATE TABLE search_results (
 CREATE INDEX idx_search_results_run_id ON search_results(search_run_id);
 CREATE INDEX idx_search_results_selected ON search_results(selected_for_evidence);
 ```
+
+`search_results.chunk_id` is nullable by design. Re-extraction may delete and replace
+stale chunks for a changed file; when that happens, historical search result rows keep
+their `file_id` and other result metadata while SQLite nulls the stale `chunk_id`.
+Evidence packets store the exact evidence payload separately.
 
 `retrieval_method` examples:
 

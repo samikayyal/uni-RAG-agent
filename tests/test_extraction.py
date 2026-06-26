@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from contextlib import closing
 from pathlib import Path
 
@@ -215,6 +216,122 @@ def test_file_failure_does_not_abort_extraction_run(tmp_path: Path) -> None:
     by_name = {row["filename"]: row for row in rows}
     assert by_name["broken.pdf"]["index_status"] == "failed"
     assert by_name["notes.md"]["index_status"] == "indexed"
+
+
+def test_reextraction_nulls_historical_search_result_chunk_reference(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    source_file = course_dir / "notes.md"
+    source_file.write_text("# Search\n\nBM25 first version", encoding="utf-8")
+
+    inventory_courses(config)
+    first_result = extract_pending_files(config)
+
+    with closing(connect_sqlite(config)) as connection:
+        chunk_row = connection.execute(
+            """
+            SELECT chunks.id AS chunk_id, files.id AS file_id
+            FROM chunks
+            JOIN files ON files.id = chunks.file_id
+            WHERE files.filename = ?
+            """,
+            ("notes.md",),
+        ).fetchone()
+        search_run_id = connection.execute(
+            """
+            INSERT INTO search_runs (
+                query,
+                query_type,
+                router_output_json,
+                searched_courses_json,
+                searched_indexes_json,
+                keyword_terms_json,
+                semantic_queries_json,
+                started_at,
+                finished_at,
+                status,
+                weaknesses_json,
+                error
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "bm25",
+                "concept_explanation",
+                "{}",
+                "[]",
+                "[]",
+                '["bm25"]',
+                "[]",
+                first_result.started_at,
+                first_result.finished_at,
+                "completed",
+                None,
+                None,
+            ),
+        ).lastrowid
+        search_result_id = connection.execute(
+            """
+            INSERT INTO search_results (
+                search_run_id,
+                chunk_id,
+                file_id,
+                retrieval_method,
+                rank,
+                score,
+                selected_for_evidence,
+                result_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                search_run_id,
+                chunk_row["chunk_id"],
+                chunk_row["file_id"],
+                "keyword",
+                1,
+                1.0,
+                1,
+                "{}",
+            ),
+        ).lastrowid
+        connection.commit()
+
+    source_file.write_text("# Search\n\nBM25 changed version", encoding="utf-8")
+    current_mtime = source_file.stat().st_mtime
+    os.utime(source_file, (current_mtime + 5, current_mtime + 5))
+    inventory_courses(config)
+    second_result = extract_pending_files(config)
+
+    assert second_result.status == "completed"
+    assert second_result.files_indexed == 1
+    assert second_result.files_failed == 0
+
+    with closing(connect_sqlite(config)) as connection:
+        historical_result = connection.execute(
+            """
+            SELECT chunk_id, file_id
+            FROM search_results
+            WHERE id = ?
+            """,
+            (search_result_id,),
+        ).fetchone()
+        current_chunk_text = connection.execute(
+            """
+            SELECT chunks.text
+            FROM chunks
+            JOIN files ON files.id = chunks.file_id
+            WHERE files.filename = ?
+            """,
+            ("notes.md",),
+        ).fetchone()
+
+    assert historical_result["chunk_id"] is None
+    assert historical_result["file_id"] == chunk_row["file_id"]
+    assert "BM25 changed version" in current_chunk_text["text"]
 
 
 def test_scanned_pdf_without_ocr_uses_contract_reason(tmp_path: Path) -> None:
