@@ -3,9 +3,9 @@
 ## Current Status
 
 * **Current Phase**: Phase 2: Text Extraction
-* **Current Goal**: Implement text extraction and natural-boundary chunking for pending inventory files.
+* **Current Goal**: Implement data schema summaries for pending structured files.
 
-The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, pytest discovery constrained to this project's `tests/` directory, and Feature 03 inventory/file classification with CLI commands, SQLite upserts, idempotent reruns, timestamp-first/hash-on-change behavior, metadata-only skip reasons, missing-file soft marking, current course-total resets, explicit SQLite connection closing, accurate inventory run metrics, inventory summaries, a pandas-based read-only inventory EDA notebook under `notebooks/`, and regression tests for stat/hash/listing failure diagnostics and recovery. The notebook roadmap now names the planned EDA notebook for each later generated-artifact stage and requires existing notebooks to be updated when their source artifact contracts change. The project has not yet implemented text extraction, indexing, retrieval, or answering behavior.
+The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, pytest discovery constrained to this project's `tests/` directory, Feature 03 inventory/file classification with CLI commands, SQLite upserts, idempotent reruns, timestamp-first/hash-on-change behavior, metadata-only skip reasons, missing-file soft marking, current course-total resets, explicit SQLite connection closing, accurate inventory run metrics, inventory summaries, a pandas-based read-only inventory EDA notebook under `notebooks/`, and Feature 04 text extraction/chunking with CLI commands, per-file extraction failures, source-location chunks, stale chunk/index cleanup on re-extraction, optional scanned-PDF OCR gating, legacy `.doc`/`.ppt` failure reasons, and a pandas-based read-only extraction EDA notebook. The project has not yet implemented data schema summaries, indexing, retrieval, or answering behavior.
 
 ## Project Roadmap
 
@@ -34,15 +34,15 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
   - [x] Add a pandas-based read-only EDA notebook for analyzing SQLite inventory output after `inventory run`.
 
 - [ ] **Phase 2: Text Extraction**
-  - [ ] Extract text from PDFs (PyMuPDF + optional Tesseract OCR fallback).
-  - [ ] Extract text from PPTX slides (one chunk per slide with speaker notes).
-  - [ ] Extract text from DOCX files.
-  - [ ] Parse TXT and Markdown files.
-  - [ ] Parse notebooks into one chunk per cell with truncated text outputs.
-  - [ ] Parse Python code via AST into functions/classes/imports; regex fallback for R/C++/MATLAB.
-  - [ ] Parse existing VTT transcripts.
+  - [x] Extract text from PDFs (PyMuPDF + optional Tesseract OCR fallback).
+  - [x] Extract text from PPTX slides (one chunk per slide with speaker notes).
+  - [x] Extract text from DOCX files.
+  - [x] Parse TXT and Markdown files.
+  - [x] Parse notebooks into one chunk per cell with truncated text outputs.
+  - [x] Parse Python code via AST into functions/classes/imports; regex fallback for R/C++/MATLAB.
+  - [x] Parse existing VTT transcripts.
   - [ ] Generate schema summaries for CSV/XLSX/JSON/JSONL/SQLite/DB files.
-  - [ ] Add `notebooks/extraction_eda.ipynb` when text extraction lands.
+  - [x] Add `notebooks/extraction_eda.ipynb` when text extraction lands.
   - [ ] Add `notebooks/data_schema_eda.ipynb` when data summaries land.
 
 - [ ] **Phase 3: Indexing and Search**
@@ -111,4 +111,5 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
 * [x] Run Brooks full sweep on Features 01-03: fix transient hash-failure recovery, align the Feature 02 runs-dir environment variable contract, and verify the current safety net.
 * [x] Add `notebooks/inventory_eda.ipynb` for pandas-based read-only EDA over `data/uni_rag.sqlite` after `inventory run`, and document the notebook strategy across `context/`.
 * [x] Expand the notebook roadmap across applicable stages and record that existing notebooks must be updated when their source artifact contracts change.
-* [ ] Implement Feature 04 text extraction and chunking.
+* [x] Implement Feature 04 text extraction and chunking.
+* [ ] Implement Feature 05 data schema summaries.

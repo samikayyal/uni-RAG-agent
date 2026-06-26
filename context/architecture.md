@@ -94,7 +94,7 @@ Stage notebooks are created when the producing stage is implemented. Do not add 
 | :--- | :--- | :--- | :--- | :--- |
 | Config/storage / 02 | None required for MVP | Not applicable | `uv run -m uni_rag_agent storage check` output | CLI checks are enough until schema migrations or storage drift require richer inspection. |
 | Inventory / 03 | `notebooks/inventory_eda.ipynb` | Implemented | `courses`, `files`, inventory rows in `extraction_runs` | File volume, categories, statuses, skip reasons, extraction backlog, freshness. |
-| Text extraction / 04 | `notebooks/extraction_eda.ipynb` | Planned when Feature 04 lands | `extraction_runs`, `extracted_documents`, `chunks`, `files` | Extraction yield, failures, text length, chunk counts, source-location coverage. |
+| Text extraction / 04 | `notebooks/extraction_eda.ipynb` | Implemented | `extraction_runs`, `extracted_documents`, `chunks`, `files` | Extraction yield, failures, text length, chunk counts, source-location coverage. |
 | Data summaries / 05 | `notebooks/data_schema_eda.ipynb` | Planned when Feature 05 lands | `data_summaries`, `chunks`, `files` | Dataset summary coverage, row/column/table counts, sample availability, large/failed data files. |
 | Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Planned when Feature 06 lands | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
 | Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Planned when Feature 07 lands | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |

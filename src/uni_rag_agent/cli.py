@@ -9,6 +9,13 @@ from typing import Callable
 
 from . import __version__
 from .config import ConfigError, load_config, validate_config
+from .extraction import (
+    ExtractionError,
+    ExtractionRunResult,
+    ExtractionStatus,
+    extract_pending_files,
+    load_extraction_status,
+)
 from .inventory import (
     InventoryError,
     InventoryRunResult,
@@ -30,6 +37,7 @@ NOT_IMPLEMENTED = 1
 CONFIG_ERROR = 2
 STORAGE_ERROR = 3
 INVENTORY_ERROR = 4
+EXTRACTION_ERROR = 5
 
 CommandHandler = Callable[[argparse.Namespace], int]
 
@@ -77,12 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_commands(subparsers)
     _add_storage_commands(subparsers)
     _add_inventory_commands(subparsers)
-    _add_stub_group(
-        subparsers,
-        "extract",
-        "Text extraction commands.",
-        {"run": ("extract run", "Feature Spec 04: Text Extraction and Chunking")},
-    )
+    _add_extract_commands(subparsers)
     _add_stub_group(
         subparsers,
         "index",
@@ -170,6 +173,35 @@ def _add_inventory_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Print aggregate inventory counts from SQLite.",
     )
     summary_parser.set_defaults(handler=_handle_inventory_summary)
+
+
+def _add_extract_commands(subparsers: argparse._SubParsersAction) -> None:
+    extract_parser = subparsers.add_parser(
+        "extract",
+        help="Text extraction and chunking commands.",
+    )
+    extract_subparsers = extract_parser.add_subparsers(
+        dest="extract_command",
+        metavar="subcommand",
+    )
+    extract_subparsers.required = True
+
+    run_parser = extract_subparsers.add_parser(
+        "run",
+        help="Extract pending text-like files into retrieval chunks.",
+    )
+    run_parser.add_argument(
+        "--category",
+        choices=("document", "slides", "notebook", "code", "transcript"),
+        help="Limit extraction to one handled inventory category.",
+    )
+    run_parser.set_defaults(handler=_handle_extract_run)
+
+    status_parser = extract_subparsers.add_parser(
+        "status",
+        help="Print extraction and chunk coverage from SQLite.",
+    )
+    status_parser.set_defaults(handler=_handle_extract_status)
 
 
 def _add_stub_group(
@@ -281,6 +313,38 @@ def _handle_inventory_summary(_: argparse.Namespace) -> int:
     return SUCCESS
 
 
+def _handle_extract_run(args: argparse.Namespace) -> int:
+    try:
+        config = load_config()
+        result = extract_pending_files(config, category=args.category)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (StorageError, ExtractionError) as exc:
+        print(f"Extraction error: {exc}", file=sys.stderr)
+        return EXTRACTION_ERROR
+
+    print("Extraction run completed")
+    _print_extraction_run_result(result)
+    return SUCCESS
+
+
+def _handle_extract_status(_: argparse.Namespace) -> int:
+    try:
+        config = load_config()
+        status = load_extraction_status(config)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (StorageError, ExtractionError) as exc:
+        print(f"Extraction status error: {exc}", file=sys.stderr)
+        return EXTRACTION_ERROR
+
+    print("Extraction status")
+    _print_extraction_status(status)
+    return SUCCESS
+
+
 def _print_storage_result(result: StorageCheckResult) -> None:
     safe = result.as_safe_dict()
     for key in (
@@ -341,6 +405,43 @@ def _print_inventory_summary(summary: InventorySummary) -> None:
     _print_count_mapping("by_category", summary.by_category)
     _print_count_mapping("by_extension", summary.by_extension)
     _print_count_mapping("by_reason", summary.by_reason)
+
+
+def _print_extraction_run_result(result: ExtractionRunResult) -> None:
+    print(f"run_id: {result.run_id}")
+    print(f"status: {result.status}")
+    print(f"started_at: {result.started_at}")
+    print(f"finished_at: {result.finished_at}")
+    print(f"category: {result.category or 'all'}")
+    print(f"files_seen: {result.files_seen}")
+    print(f"files_indexed: {result.files_indexed}")
+    print(f"files_failed: {result.files_failed}")
+    print(f"chunks_created: {result.chunks_created}")
+    _print_count_mapping("by_source_type", result.by_source_type)
+    if result.failures:
+        print("failures:")
+        for failure in result.failures:
+            print(f"- file_id={failure.file_id} path={failure.path}: {failure.error}")
+    if result.diagnostics:
+        print("diagnostics:")
+        for diagnostic in result.diagnostics:
+            print(f"- {diagnostic}")
+
+
+def _print_extraction_status(status: ExtractionStatus) -> None:
+    print(f"latest_extraction_run_id: {status.latest_extraction_run_id}")
+    print(f"latest_extraction_started_at: {status.latest_extraction_started_at}")
+    print(f"pending_text_files: {status.pending_text_files}")
+    print(f"indexed_text_files: {status.indexed_text_files}")
+    print(f"failed_text_files: {status.failed_text_files}")
+    print(f"extracted_documents: {status.extracted_documents}")
+    print(f"chunks_total: {status.chunks_total}")
+    _print_count_mapping("pending_by_category", status.pending_by_category)
+    _print_count_mapping("chunks_by_source_type", status.chunks_by_source_type)
+    if status.recent_failures:
+        print("recent_failures:")
+        for failure in status.recent_failures:
+            print(f"- file_id={failure.file_id} path={failure.path}: {failure.error}")
 
 
 def _print_count_mapping(label: str, counts: Mapping[str, int]) -> None:

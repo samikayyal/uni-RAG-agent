@@ -42,11 +42,11 @@ def test_unknown_command_returns_nonzero_with_message() -> None:
 
 
 def test_registered_stub_command_fails_clearly() -> None:
-    result = run_cli("extract", "run")
+    result = run_cli("index", "keyword")
 
     assert result.returncode == 1
     assert "not implemented yet" in result.stderr
-    assert "Feature Spec 04" in result.stderr
+    assert "Feature Spec 06" in result.stderr
 
 
 def test_inventory_run_cli_fills_temp_storage(tmp_path: Path) -> None:
@@ -97,6 +97,62 @@ def test_inventory_run_cli_fills_temp_storage(tmp_path: Path) -> None:
     assert "Inventory summary" in summary_result.stdout
     assert "files_total: 2" in summary_result.stdout
     assert "Information Retrieval: files=2" in summary_result.stdout
+
+
+def test_extract_run_cli_writes_chunks_and_status(tmp_path: Path) -> None:
+    courses_root = tmp_path / "Courses"
+    data_dir = tmp_path / "data"
+    course_dir = courses_root / "Information Retrieval"
+    course_dir.mkdir(parents=True)
+    (course_dir / "syllabus.txt").write_text("BM25 keyword search", encoding="utf-8")
+    env = _subprocess_env(
+        {
+            "UNI_RAG_COURSES_ROOT": str(courses_root),
+            "UNI_RAG_DATA_DIR": str(data_dir),
+            "UNI_RAG_SQLITE_PATH": str(data_dir / "uni_rag.sqlite"),
+            "UNI_RAG_CHROMA_DIR": str(data_dir / "indexes" / "vector"),
+            "UNI_RAG_RUNS_DIR": str(data_dir / "runs"),
+            "UNI_RAG_USE_FAKE_LLM": "true",
+            "UNI_RAG_USE_FAKE_EMBEDDINGS": "true",
+        }
+    )
+
+    inventory_result = subprocess.run(
+        [sys.executable, "-m", "uni_rag_agent", "inventory", "run"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    extract_result = subprocess.run(
+        [sys.executable, "-m", "uni_rag_agent", "extract", "run"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    status_result = subprocess.run(
+        [sys.executable, "-m", "uni_rag_agent", "extract", "status"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert inventory_result.returncode == 0, inventory_result.stderr
+    assert extract_result.returncode == 0, extract_result.stderr
+    assert "Extraction run completed" in extract_result.stdout
+    assert "files_seen: 1" in extract_result.stdout
+    assert "files_indexed: 1" in extract_result.stdout
+    assert "chunks_created: 1" in extract_result.stdout
+
+    assert status_result.returncode == 0, status_result.stderr
+    assert "Extraction status" in status_result.stdout
+    assert "indexed_text_files: 1" in status_result.stdout
+    assert "chunks_total: 1" in status_result.stdout
 
 
 def test_env_example_exists_and_env_is_ignored() -> None:

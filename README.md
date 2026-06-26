@@ -25,6 +25,8 @@ uv run -m uni_rag_agent storage init
 uv run -m uni_rag_agent storage check
 uv run -m uni_rag_agent inventory run
 uv run -m uni_rag_agent inventory summary
+uv run -m uni_rag_agent extract run
+uv run -m uni_rag_agent extract status
 ```
 
 Runtime configuration is loaded from `.env` with non-secret defaults documented
@@ -40,7 +42,10 @@ uv run -m uni_rag_agent storage init
 uv run -m uni_rag_agent storage check
 uv run -m uni_rag_agent inventory run
 uv run -m uni_rag_agent inventory summary
-uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py
+uv run -m uni_rag_agent extract run
+uv run -m uni_rag_agent extract run --category document
+uv run -m uni_rag_agent extract status
+uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py tests/test_extraction.py
 ```
 
 Feature 02 storage commands create the generated local data layout:
@@ -63,10 +68,19 @@ uv run -m uni_rag_agent inventory run
 uv run -m uni_rag_agent inventory summary
 ```
 
-Remaining MVP command shapes are registered for later specs:
+Extraction commands process pending text-like files from inventory, write
+`extracted_documents` and `chunks`, preserve source locations, fail per file, and
+leave data-schema files pending for the Feature 05 summary pipeline:
 
 ```powershell
 uv run -m uni_rag_agent extract run
+uv run -m uni_rag_agent extract run --category document
+uv run -m uni_rag_agent extract status
+```
+
+Remaining MVP command shapes are registered for later specs:
+
+```powershell
 uv run -m uni_rag_agent index keyword
 uv run -m uni_rag_agent index vector
 uv run -m uni_rag_agent retrieve "query text"
@@ -74,9 +88,9 @@ uv run -m uni_rag_agent eval run
 uv run -m uni_rag_agent app serve
 ```
 
-Commands beyond `config check`, `storage init/check`, and `inventory run/summary`
-are stubs until their feature specs are implemented. They should fail clearly
-and must not scan or mutate `Courses/`.
+The remaining command groups (`index`, `retrieve`, `eval`, and `app`) are stubs
+until their feature specs are implemented. They should fail clearly and must not
+scan or mutate `Courses/`.
 
 ## MVP Module Order
 
