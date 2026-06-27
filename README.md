@@ -78,6 +78,8 @@ uv run -m uni_rag_agent extract run --category document
 uv run -m uni_rag_agent extract status
 ```
 
+Inventory and extraction CLI runs write lifecycle JSONL logs under `data/runs/`.
+
 Remaining MVP command shapes are registered for later specs:
 
 ```powershell

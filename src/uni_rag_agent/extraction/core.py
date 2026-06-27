@@ -237,17 +237,15 @@ def extract_pending_files(
                     files_failed += 1
                     failure = _failure_from_exception(file_record, exc)
                     failures.append(failure)
-                    with connection:
-                        _persist_failed_extraction(
-                            connection,
-                            run_id=run_id,
-                            file_record=file_record,
-                            extractor_name=exc.extractor_name,
-                            extractor_version=exc.extractor_version,
-                            metadata_json=exc.metadata_json,
-                            error=failure.error,
-                            extracted_at=_utc_now(),
-                        )
+                    _record_failed_extraction(
+                        connection,
+                        run_id=run_id,
+                        file_record=file_record,
+                        extractor_name=exc.extractor_name,
+                        extractor_version=exc.extractor_version,
+                        metadata_json=exc.metadata_json,
+                        error=failure.error,
+                    )
                     continue
                 except Exception as exc:
                     files_failed += 1
@@ -259,21 +257,17 @@ def extract_pending_files(
                             error=error,
                         )
                     )
-                    with connection:
-                        _persist_failed_extraction(
-                            connection,
-                            run_id=run_id,
-                            file_record=file_record,
-                            extractor_name=_extractor_name_for_extension(
-                                file_record.extension
-                            ),
-                            extractor_version=None,
-                            metadata_json=_json_dumps(
-                                {"extension": file_record.extension}
-                            ),
-                            error=error,
-                            extracted_at=_utc_now(),
-                        )
+                    _record_failed_extraction(
+                        connection,
+                        run_id=run_id,
+                        file_record=file_record,
+                        extractor_name=_extractor_name_for_extension(
+                            file_record.extension
+                        ),
+                        extractor_version=None,
+                        metadata_json=_json_dumps({"extension": file_record.extension}),
+                        error=error,
+                    )
                     continue
 
                 files_indexed += 1
@@ -707,6 +701,11 @@ def _extract_python(path: Path) -> tuple[RawChunk, ...]:
 
     module_docstring = ast.get_docstring(tree)
     if module_docstring:
+        module_docstring_node = _module_docstring_node(tree)
+        if module_docstring_node is not None:
+            handled_line_numbers.update(
+                _line_numbers_for_nodes([module_docstring_node])
+            )
         raw_chunks.append(
             RawChunk(
                 source_type="code",
@@ -889,6 +888,29 @@ def _finalize_chunks(
                 )
             )
     return tuple(chunks)
+
+
+def _record_failed_extraction(
+    connection: sqlite3.Connection,
+    *,
+    run_id: int,
+    file_record: PendingFileRecord,
+    extractor_name: str,
+    extractor_version: str | None,
+    metadata_json: str | None,
+    error: str,
+) -> None:
+    with connection:
+        _persist_failed_extraction(
+            connection,
+            run_id=run_id,
+            file_record=file_record,
+            extractor_name=extractor_name,
+            extractor_version=extractor_version,
+            metadata_json=metadata_json,
+            error=error,
+            extracted_at=_utc_now(),
+        )
 
 
 def _persist_successful_extraction(
@@ -1415,6 +1437,16 @@ def _source_for_node(source_lines: list[str], node: ast.AST) -> str:
     start = getattr(node, "lineno", 1)
     end = getattr(node, "end_lineno", start)
     return "\n".join(source_lines[start - 1 : end]).strip()
+
+
+def _module_docstring_node(tree: ast.Module) -> ast.Expr | None:
+    if not tree.body:
+        return None
+    node = tree.body[0]
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+        if isinstance(node.value.value, str):
+            return node
+    return None
 
 
 def _line_numbers_for_nodes(nodes: Iterable[ast.AST]) -> set[int]:

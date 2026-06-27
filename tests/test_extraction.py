@@ -155,6 +155,56 @@ def test_extract_run_processes_text_formats_and_preserves_locations(
     assert run_row["files_failed"] == 0
 
 
+def test_python_module_docstring_is_not_duplicated_in_module_chunk(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    (course_dir / "documented.py").write_text(
+        "\n".join(
+            [
+                '"""Module summary for ranking."""',
+                "",
+                "from pathlib import Path",
+                "",
+                "VALUE = 1",
+                "",
+                "def score():",
+                "    return VALUE",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    inventory_courses(config)
+    result = extract_pending_files(config, category="code")
+
+    assert result.files_indexed == 1
+
+    with closing(connect_sqlite(config)) as connection:
+        rows = connection.execute(
+            """
+            SELECT chunks.title, chunks.text, chunks.location_value
+            FROM chunks
+            JOIN files ON files.id = chunks.file_id
+            WHERE files.filename = ?
+            ORDER BY chunks.chunk_index
+            """,
+            ("documented.py",),
+        ).fetchall()
+
+    rows_by_title = {row["title"]: row for row in rows}
+    assert rows_by_title["Module docstring"]["text"] == "Module summary for ranking."
+    assert "from pathlib import Path" in rows_by_title["Imports"]["text"]
+    assert "def score" in rows_by_title["score"]["text"]
+
+    module_row = next(row for row in rows if row["location_value"] == "module")
+    assert "VALUE = 1" in module_row["text"]
+    assert "Module summary for ranking" not in module_row["text"]
+    assert "def score" not in module_row["text"]
+
+
 def test_legacy_formats_fail_per_file_with_expected_reason(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     course_dir = config.courses_root / "Information Retrieval"

@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Mapping, Sequence
+from logging import Logger
 from typing import Callable
 
 from . import __version__
-from .config import ConfigError, load_config, validate_config
+from .config import Config, ConfigError, load_config, validate_config
 from .extraction import (
     ExtractionError,
     ExtractionRunResult,
@@ -31,6 +32,7 @@ from .storage import (
     ensure_data_dirs,
     initialize_schema,
 )
+from .logging_config import build_run_log_path, configure_logging
 
 SUCCESS = 0
 NOT_IMPLEMENTED = 1
@@ -282,16 +284,42 @@ def _handle_storage_check(_: argparse.Namespace) -> int:
 
 
 def _handle_inventory_run(_: argparse.Namespace) -> int:
+    logger: Logger | None = None
     try:
         config = load_config()
+        validate_config(config)
+        logger = _command_logger(config, "inventory run")
+        logger.info(
+            "inventory run started",
+            extra={"event": "inventory_started", "command": "inventory run"},
+        )
         result = inventory_courses(config)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return CONFIG_ERROR
     except (StorageError, InventoryError) as exc:
+        if logger is not None:
+            logger.exception(
+                "inventory run failed",
+                extra={
+                    "event": "inventory_failed",
+                    "command": "inventory run",
+                    "status": "failed",
+                },
+            )
         print(f"Inventory error: {exc}", file=sys.stderr)
         return INVENTORY_ERROR
 
+    logger.info(
+        "inventory run completed",
+        extra={
+            "event": "inventory_completed",
+            "command": "inventory run",
+            "run_id": result.run_id,
+            "status": result.status,
+            "count": result.files_seen,
+        },
+    )
     print("Inventory run completed")
     _print_inventory_run_result(result)
     return SUCCESS
@@ -314,16 +342,42 @@ def _handle_inventory_summary(_: argparse.Namespace) -> int:
 
 
 def _handle_extract_run(args: argparse.Namespace) -> int:
+    logger: Logger | None = None
     try:
         config = load_config()
+        validate_config(config)
+        logger = _command_logger(config, "extract run")
+        logger.info(
+            "extraction run started",
+            extra={"event": "extraction_started", "command": "extract run"},
+        )
         result = extract_pending_files(config, category=args.category)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return CONFIG_ERROR
     except (StorageError, ExtractionError) as exc:
+        if logger is not None:
+            logger.exception(
+                "extraction run failed",
+                extra={
+                    "event": "extraction_failed",
+                    "command": "extract run",
+                    "status": "failed",
+                },
+            )
         print(f"Extraction error: {exc}", file=sys.stderr)
         return EXTRACTION_ERROR
 
+    logger.info(
+        "extraction run completed",
+        extra={
+            "event": "extraction_completed",
+            "command": "extract run",
+            "run_id": result.run_id,
+            "status": result.status,
+            "count": result.files_seen,
+        },
+    )
     print("Extraction run completed")
     _print_extraction_run_result(result)
     return SUCCESS
@@ -442,6 +496,14 @@ def _print_extraction_status(status: ExtractionStatus) -> None:
         print("recent_failures:")
         for failure in status.recent_failures:
             print(f"- file_id={failure.file_id} path={failure.path}: {failure.error}")
+
+
+def _command_logger(config: Config, command_name: str) -> Logger:
+    return configure_logging(
+        level=config.log_level,
+        jsonl_path=build_run_log_path(config.runs_dir, command_name),
+        console=False,
+    )
 
 
 def _print_count_mapping(label: str, counts: Mapping[str, int]) -> None:
