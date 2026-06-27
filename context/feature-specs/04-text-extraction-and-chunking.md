@@ -52,7 +52,7 @@ Notebook:
 notebooks/extraction_eda.ipynb
 ```
 
-Create this notebook when extraction is implemented. It should inspect `extraction_runs`, `extracted_documents`, `chunks`, and joined `files`/`courses` metadata for extraction yield, failures, text length, chunk counts, source-type coverage, and source-location coverage.
+Create this notebook when extraction is implemented. It should inspect `extraction_runs`, `extracted_documents`, `chunks`, and joined `files`/`courses` metadata for extraction yield, failures, text length, chunk counts, source-type coverage, source-location coverage, and matplotlib-backed diagnostic plots for counts, distributions, and failure hotspots.
 
 Internal interfaces:
 
@@ -140,7 +140,7 @@ subchunk
 4. Sub-chunk any unit over the configured max token limit.
 5. Persist `extracted_documents` and `chunks` transactionally per file.
 6. Continue after per-file failures and report summary counts.
-7. Keep `notebooks/extraction_eda.ipynb` aligned with extraction status fields, chunk fields, source types, location types, and command behavior.
+7. Keep `notebooks/extraction_eda.ipynb` aligned with extraction status fields, chunk fields, source types, location types, diagnostic plots, and command behavior.
 
 ## Failure and Safety Rules
 
@@ -161,7 +161,7 @@ subchunk
 - Verify unsupported `.doc` and `.ppt` are marked failed with the expected reason.
 - Verify no extractor executes fixture code.
 - Verify overlarge fixture content is sub-chunked.
-- Verify `notebooks/extraction_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
+- Verify `notebooks/extraction_eda.ipynb`, once created, is valid notebook JSON, imports pandas/matplotlib successfully, documents its read-only safety boundary, and includes plots for extraction outcomes, chunk coverage, and failure reasons.
 - Optional smoke: extract a tiny copied subset of representative real course files into a temp database.
 
 ## Acceptance Criteria
@@ -170,5 +170,5 @@ subchunk
 - Every successful extraction has an `extracted_documents` row and one or more `chunks`.
 - Every failed extraction has a clear status and error.
 - Chunks contain enough source location metadata for citations.
-- `notebooks/extraction_eda.ipynb` exists once this feature lands and can inspect extraction/chunk coverage without mutating app data or source files.
+- `notebooks/extraction_eda.ipynb` exists once this feature lands and can inspect extraction/chunk coverage with tabular views and plots without mutating app data or source files.
 - Automated tests do not require the full `Courses` archive.

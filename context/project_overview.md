@@ -66,6 +66,7 @@ Core flow:
 * **Keyword Search**: SQLite FTS5 with default unicode61 tokenizer.
 * **Vector Store**: ChromaDB with separate collections per logical index (documents, slides, notebooks, code, data schemas, transcripts).
 * **Document Extraction**: PyMuPDF for PDFs, with optional Tesseract OCR fallback for scanned PDFs only when `UNI_RAG_OCR_ENABLED` is true and Tesseract is installed; `python-pptx` for PPTX; `python-docx` for DOCX; `nbformat` for notebooks; pandas/openpyxl for tabular summaries.
+* **Notebook EDA**: pandas for tabular analysis and matplotlib-backed pandas plots for lightweight diagnostic charts over generated app data.
 * **App/API Layer**: FastAPI backend with a simple HTML/JS frontend.
 * **LLM Provider**: Multi-provider via LangChain. LLM and embedding providers/models are configuration values loaded from environment variables, with deterministic fake adapters for tests. Do not hardcode a paid or cloud provider as required.
 * **Configuration**: Environment variables loaded from a `.env` file via `python-dotenv`.
@@ -73,7 +74,7 @@ Core flow:
 ## Key System Constraints
 
 * Use `uv add package_name` for dependency management and `uv run -m uni_rag_agent ...` for project commands.
-* Use pandas-based EDA notebooks as read-only analysis companions for generated app data. Notebooks should document the command that produces their input data, should be updated when the source artifact contract changes, and should avoid adding additional runtime dependencies unless the project explicitly accepts them.
+* Use pandas-based EDA notebooks as read-only analysis companions for generated app data, with matplotlib-backed plots for important counts and distributions. Notebooks should document the command that produces their input data, should be updated when the source artifact contract changes, and should avoid adding additional runtime dependencies unless the project explicitly accepts them.
 * Keep `Courses` as source data; do not mutate course files during ingestion.
 * Store generated metadata, extracted text, indexes, and run artifacts outside `Courses`.
 * Treat `context/feature-specs/` as the implementation contract for MVP module work.

@@ -61,7 +61,7 @@ EDA notebooks are planned only for stages that produce generated artifacts worth
 | :--- | :--- | :--- | :--- |
 | 02 | None required for MVP | Not applicable | `storage check` is the canonical storage-health workflow until schema migration complexity exists. |
 | 03 | `notebooks/inventory_eda.ipynb` | Implemented | `courses`, `files`, inventory run rows, categories, statuses, skip reasons, backlog, freshness. |
-| 04 | `notebooks/extraction_eda.ipynb` | Implemented | `extraction_runs`, `extracted_documents`, `chunks`, extraction failures, text/chunk coverage. |
+| 04 | `notebooks/extraction_eda.ipynb` | Implemented | `extraction_runs`, `extracted_documents`, `chunks`, extraction failures, failure-reason plots, text/chunk coverage. |
 | 05 | `notebooks/data_schema_eda.ipynb` | Planned | `data_summaries`, data-schema chunks, row/column/table/sheet counts, sample coverage. |
 | 06 | `notebooks/keyword_index_eda.ipynb` | Planned | `chunk_fts`, keyword coverage, source-type distribution, query smoke checks. |
 | 07 | `notebooks/vector_index_eda.ipynb` | Planned | `embeddings`, Chroma collection metadata, embedding model/dimension coverage. |
@@ -77,8 +77,8 @@ EDA notebooks are planned only for stages that produce generated artifacts worth
 - Do not document non-`uv` package installation or direct interpreter commands for normal workflows.
 - Do not mutate anything under `D:\Projects\Uni RAG Agent\Courses`.
 - Store generated metadata, extracted text caches, Chroma persistence, search runs, and debug artifacts under `D:\Projects\Uni RAG Agent\data`.
-- Keep project EDA notebooks under `notebooks/`, use pandas for DataFrame-oriented analysis, make notebooks read generated app data only, and do not use them to mutate SQLite, `Courses`, or source course files.
-- Update the relevant notebook when a stage changes the command, tables, JSON artifacts, status vocabulary, or interpretation rules that notebook reads.
+- Keep project EDA notebooks under `notebooks/`, use pandas for DataFrame-oriented analysis and matplotlib-backed plots for lightweight diagnostics, make notebooks read generated app data only, and do not use them to mutate SQLite, `Courses`, or source course files.
+- Update the relevant notebook when a stage changes the command, tables, JSON artifacts, status vocabulary, plots, or interpretation rules that notebook reads.
 - Clear notebook outputs and execution counts before committing unless a future decision explicitly permits committed output snapshots.
 - Keep `.env` local and ignored. Commit `.env.example`.
 - Treat the SQLite schema in `context/architecture.md` as the MVP storage contract.

@@ -460,10 +460,20 @@ def test_extraction_eda_notebook_is_valid_and_read_only() -> None:
     notebook_path = REPO_ROOT / "notebooks" / "extraction_eda.ipynb"
     notebook = nbformat.read(notebook_path, as_version=4)
     source_text = "\n".join(cell.get("source", "") for cell in notebook.cells)
+    cell_ids = {cell.get("id") for cell in notebook.cells}
 
     assert "import pandas as pd" in source_text
+    assert "import matplotlib.pyplot as plt" in source_text
     assert "read-only" in source_text.lower()
     assert "query_only" in source_text
+    assert {
+        "plot-run-outcomes",
+        "plot-coverage-by-category",
+        "plot-chunk-source-coverage",
+        "plot-text-and-token-distributions",
+        "plot-failure-reasons",
+        "plot-failure-hotspots",
+    }.issubset(cell_ids)
     assert all(not cell.get("outputs") for cell in notebook.cells)
     assert all(
         cell.get("execution_count") is None

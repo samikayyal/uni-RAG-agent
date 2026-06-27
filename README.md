@@ -112,12 +112,13 @@ scan or mutate `Courses/`.
 ## EDA Notebooks
 
 Project-owned notebooks live under `notebooks/`. They are pandas-based,
-read-only companions for generated app data, not pipeline implementation code.
-They must not mutate `Courses/`, write to SQLite, rewrite indexes, execute
-course scripts, or execute course notebooks.
+matplotlib-backed, read-only companions for generated app data, not pipeline
+implementation code. Use plots for useful count, distribution, coverage, and
+failure diagnostics. Notebooks must not mutate `Courses/`, write to SQLite,
+rewrite indexes, execute course scripts, or execute course notebooks.
 
 Notebook outputs and execution counts should be cleared before commit. When a
-stage changes the command, tables, JSON artifacts, status vocabulary, or
+stage changes the command, tables, JSON artifacts, status vocabulary, plots, or
 interpretation rules a notebook reads, update that notebook in the same change.
 
 Create stage notebooks when the producing feature lands:

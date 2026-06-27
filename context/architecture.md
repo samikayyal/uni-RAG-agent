@@ -62,7 +62,7 @@ D:\Projects\Uni RAG Agent
 
 `Courses` should remain source data. Generated files should live under `data\` and should be ignored by git. SQLite FTS5 lives inside `data\uni_rag.sqlite`; do not create a separate keyword index unless a later decision changes the storage design.
 
-`notebooks\` contains committed exploratory analysis notebooks for humans to inspect generated app data. Notebooks may read `data\uni_rag.sqlite`, JSON run artifacts, extracted-text caches, evaluation reports, or vector-index metadata, but they must not mutate `Courses` and must not execute old course code or notebooks. Notebook outputs should be lightweight enough for review, and large generated analysis artifacts should stay under `data\runs\` or another gitignored generated-data path.
+`notebooks\` contains committed exploratory analysis notebooks for humans to inspect generated app data. Notebooks may read `data\uni_rag.sqlite`, JSON run artifacts, extracted-text caches, evaluation reports, or vector-index metadata, but they must not mutate `Courses` and must not execute old course code or notebooks. Use pandas for DataFrame analysis and matplotlib-backed pandas plots for lightweight diagnostic charts such as counts, distributions, and failure hotspots. Notebook outputs should be lightweight enough for review, and large generated analysis artifacts should stay under `data\runs\` or another gitignored generated-data path.
 
 ## Storage Strategy
 
@@ -94,7 +94,7 @@ Stage notebooks are created when the producing stage is implemented. Do not add 
 | :--- | :--- | :--- | :--- | :--- |
 | Config/storage / 02 | None required for MVP | Not applicable | `uv run -m uni_rag_agent storage check` output | CLI checks are enough until schema migrations or storage drift require richer inspection. |
 | Inventory / 03 | `notebooks/inventory_eda.ipynb` | Implemented | `courses`, `files`, inventory rows in `extraction_runs` | File volume, categories, statuses, skip reasons, extraction backlog, freshness. |
-| Text extraction / 04 | `notebooks/extraction_eda.ipynb` | Implemented | `extraction_runs`, `extracted_documents`, `chunks`, `files` | Extraction yield, failures, text length, chunk counts, source-location coverage. |
+| Text extraction / 04 | `notebooks/extraction_eda.ipynb` | Implemented | `extraction_runs`, `extracted_documents`, `chunks`, `files` | Extraction yield, failure-reason plots, text length, chunk counts, source-location coverage. |
 | Data summaries / 05 | `notebooks/data_schema_eda.ipynb` | Planned when Feature 05 lands | `data_summaries`, `chunks`, `files` | Dataset summary coverage, row/column/table counts, sample availability, large/failed data files. |
 | Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Planned when Feature 06 lands | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
 | Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Planned when Feature 07 lands | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |
@@ -119,10 +119,10 @@ Rules:
 - do not write to SQLite from notebooks;
 - do not mutate files under `Courses`;
 - do not execute course scripts or course notebooks;
-- use pandas for DataFrame-oriented notebook EDA;
+- use pandas for DataFrame-oriented notebook EDA and matplotlib-backed plots for important counts, distributions, and failure diagnostics;
 - avoid additional notebook-specific dependencies unless a later decision explicitly accepts them;
 - keep notebooks aligned with the schema and commands documented in `context/architecture.md` and `context/feature-specs/`;
-- update the relevant notebook in the same implementation change whenever a stage changes its source command, source tables, JSON artifact shape, status vocabulary, or interpretation rules;
+- update the relevant notebook in the same implementation change whenever a stage changes its source command, source tables, JSON artifact shape, status vocabulary, plots, or interpretation rules;
 - clear notebook outputs and execution counts before committing unless a future decision explicitly allows committed output snapshots.
 
 ## File Classification

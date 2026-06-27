@@ -550,7 +550,7 @@ After Feature 03, `inventory run` creates useful structured metadata in `data/un
 
 ### Decision
 
-Keep project-owned EDA notebooks under `notebooks/`. Use pandas for DataFrame-oriented notebook analysis. Add notebooks at stage boundaries where generated artifacts benefit from human inspection:
+Keep project-owned EDA notebooks under `notebooks/`. Use pandas for DataFrame-oriented notebook analysis and matplotlib-backed pandas plots for lightweight diagnostic charts over generated app data. Add notebooks at stage boundaries where generated artifacts benefit from human inspection:
 
 ```text
 notebooks/inventory_eda.ipynb
@@ -567,11 +567,11 @@ Only create a notebook when its producing stage is implemented and its source ar
 
 EDA notebooks are read-only analysis companions. They may inspect generated app data such as SQLite tables and run artifacts, but they are not the application pipeline and must not mutate `Courses`, write to SQLite, execute course scripts, execute course notebooks, load unsafe artifacts, or become the only place where production behavior exists.
 
-When an implementation change modifies a notebook's source command, source tables, JSON artifact shape, status vocabulary, or interpretation rules, update that notebook in the same change. Notebook outputs and execution counts should be cleared before commit unless a future decision explicitly accepts committed output snapshots.
+When an implementation change modifies a notebook's source command, source tables, JSON artifact shape, status vocabulary, plots, or interpretation rules, update that notebook in the same change. Notebook outputs and execution counts should be cleared before commit unless a future decision explicitly accepts committed output snapshots.
 
 ### Consequences
 
-Notebook analysis can guide extractor priority, performance tuning, and data-quality checks without expanding the runtime surface area. Pandas is accepted for this EDA layer. Additional notebook-specific dependencies should not be added casually unless a later decision explicitly accepts them.
+Notebook analysis can guide extractor priority, performance tuning, and data-quality checks without expanding the runtime surface area. Pandas and matplotlib are accepted for this EDA layer. Additional notebook-specific dependencies should not be added casually unless a later decision explicitly accepts them.
 
 ---
 
