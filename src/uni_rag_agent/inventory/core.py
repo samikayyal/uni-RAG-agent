@@ -2,246 +2,45 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import sqlite3
 from collections import Counter
-from collections.abc import Iterable, Mapping
 from contextlib import closing
-from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 from uni_rag_agent.config import Config
 from uni_rag_agent.storage import connect_sqlite, ensure_data_dirs, initialize_schema
 
-EXTRACTABLE_CATEGORIES = {
-    "document",
-    "slides",
-    "notebook",
-    "code",
-    "data_schema",
-    "transcript",
-}
-
-METADATA_ONLY_CATEGORIES = {
-    "image_metadata_only",
-    "media_metadata_only",
-    "archive_metadata_only",
-    "binary_metadata_only",
-    "installer_metadata_only",
-    "model_metadata_only",
-    "unknown_metadata_only",
-}
-
-EXTENSION_CATEGORY_MAP = {
-    ".pdf": "document",
-    ".docx": "document",
-    ".doc": "document",
-    ".txt": "document",
-    ".md": "document",
-    ".pptx": "slides",
-    ".ppt": "slides",
-    ".ipynb": "notebook",
-    ".py": "code",
-    ".r": "code",
-    ".cpp": "code",
-    ".h": "code",
-    ".m": "code",
-    ".csv": "data_schema",
-    ".xlsx": "data_schema",
-    ".json": "data_schema",
-    ".jsonl": "data_schema",
-    ".sqlite": "data_schema",
-    ".db": "data_schema",
-    ".vtt": "transcript",
-    ".png": "image_metadata_only",
-    ".jpg": "image_metadata_only",
-    ".jpeg": "image_metadata_only",
-    ".tif": "image_metadata_only",
-    ".jfif": "image_metadata_only",
-    ".mp4": "media_metadata_only",
-    ".mov": "media_metadata_only",
-    ".mkv": "media_metadata_only",
-    ".avi": "media_metadata_only",
-    ".m4a": "media_metadata_only",
-    ".wav": "media_metadata_only",
-    ".zip": "archive_metadata_only",
-    ".rar": "archive_metadata_only",
-    ".7z": "archive_metadata_only",
-    ".exe": "installer_metadata_only",
-    ".msi": "installer_metadata_only",
-    ".cab": "installer_metadata_only",
-    ".bin": "model_metadata_only",
-    ".joblib": "model_metadata_only",
-    ".weights": "model_metadata_only",
-    ".tflite": "model_metadata_only",
-    ".pt": "model_metadata_only",
-    ".pkl": "model_metadata_only",
-    ".rdata": "model_metadata_only",
-    ".rds": "model_metadata_only",
-    ".dll": "binary_metadata_only",
-    ".so": "binary_metadata_only",
-    ".dylib": "binary_metadata_only",
-    ".o": "binary_metadata_only",
-    ".obj": "binary_metadata_only",
-    ".class": "binary_metadata_only",
-}
-
-METADATA_ONLY_REASONS = {
-    "image_metadata_only": "standalone image metadata-only by project decision",
-    "media_metadata_only": "audio/video media metadata-only; transcription is opt-in later",
-    "archive_metadata_only": "archive metadata-only; archives are not decompressed",
-    "binary_metadata_only": "binary artifact metadata-only",
-    "installer_metadata_only": "installer metadata-only; installers are never executed",
-    "model_metadata_only": "model or serialized artifact metadata-only; unsafe or noisy for MVP indexing",
-    "unknown_metadata_only": "unknown or unsupported extension metadata-only",
-}
+from .classification import (
+    EXTRACTABLE_CATEGORIES,
+    EXTENSION_CATEGORY_MAP,
+    METADATA_ONLY_CATEGORIES,
+    METADATA_ONLY_REASONS,
+    classify_file,
+)
+from .file_io import (
+    discover_course_entries as _discover_course_entries,
+    relative_path as _relative_path,
+    sha256_file,
+    timestamp_from_epoch as _timestamp_from_epoch,
+    utc_now as _utc_now,
+    walk_files as _walk_files,
+)
+from .models import (
+    CourseRecord,
+    FileClassification,
+    FileRecord,
+    InventoryCourseSummary,
+    InventoryError,
+    InventoryRunResult,
+    InventorySummary,
+)
 
 MISSING_REASON = "missing from latest inventory run"
 TRANSIENT_INVENTORY_FAILURE_PREFIXES = (
     "metadata read failed:",
     "hashing failed:",
 )
-HASH_CHUNK_SIZE = 1024 * 1024
-
-
-class InventoryError(RuntimeError):
-    """Raised when an inventory run cannot be completed."""
-
-
-@dataclass(frozen=True)
-class FileClassification:
-    extension: str
-    category: str
-    index_status: str
-    reason_not_indexed: str | None
-
-
-@dataclass(frozen=True)
-class CourseRecord:
-    name: str
-    path: str
-    file_count: int
-    total_bytes: int
-    timestamp: str
-
-
-@dataclass(frozen=True)
-class FileRecord:
-    course_id: int | None
-    path: str
-    relative_path: str
-    filename: str
-    extension: str
-    size_bytes: int
-    modified_at: str | None
-    content_hash: str | None
-    category: str
-    index_status: str
-    reason_not_indexed: str | None
-    timestamp: str
-
-
-@dataclass(frozen=True)
-class InventoryCourseSummary:
-    course_id: int
-    name: str
-    path: str
-    file_count: int
-    total_bytes: int
-
-
-@dataclass(frozen=True)
-class InventoryRunResult:
-    run_id: int
-    started_at: str
-    finished_at: str
-    status: str
-    courses_seen: int
-    files_seen: int
-    files_pending: int
-    files_metadata_only: int
-    files_failed: int
-    files_missing: int
-    bytes_seen: int
-    by_course: tuple[InventoryCourseSummary, ...]
-    by_category: Mapping[str, int]
-    by_extension: Mapping[str, int]
-    by_status: Mapping[str, int]
-    by_reason: Mapping[str, int]
-    diagnostics: tuple[str, ...]
-
-    def as_safe_dict(self) -> dict[str, object]:
-        return {
-            "run_id": self.run_id,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "status": self.status,
-            "courses_seen": self.courses_seen,
-            "files_seen": self.files_seen,
-            "files_pending": self.files_pending,
-            "files_metadata_only": self.files_metadata_only,
-            "files_failed": self.files_failed,
-            "files_missing": self.files_missing,
-            "bytes_seen": self.bytes_seen,
-            "by_course": [course.__dict__ for course in self.by_course],
-            "by_category": dict(self.by_category),
-            "by_extension": dict(self.by_extension),
-            "by_status": dict(self.by_status),
-            "by_reason": dict(self.by_reason),
-            "diagnostics": list(self.diagnostics),
-        }
-
-
-@dataclass(frozen=True)
-class InventorySummary:
-    courses_total: int
-    files_total: int
-    files_missing: int
-    bytes_total: int
-    latest_inventory_run_id: int | None
-    latest_inventory_started_at: str | None
-    by_course: tuple[InventoryCourseSummary, ...]
-    by_category: Mapping[str, int]
-    by_extension: Mapping[str, int]
-    by_status: Mapping[str, int]
-    by_reason: Mapping[str, int]
-
-    def as_safe_dict(self) -> dict[str, object]:
-        return {
-            "courses_total": self.courses_total,
-            "files_total": self.files_total,
-            "files_missing": self.files_missing,
-            "bytes_total": self.bytes_total,
-            "latest_inventory_run_id": self.latest_inventory_run_id,
-            "latest_inventory_started_at": self.latest_inventory_started_at,
-            "by_course": [course.__dict__ for course in self.by_course],
-            "by_category": dict(self.by_category),
-            "by_extension": dict(self.by_extension),
-            "by_status": dict(self.by_status),
-            "by_reason": dict(self.by_reason),
-        }
-
-
-def classify_file(path: Path) -> FileClassification:
-    """Classify a file by lowercased extension using the MVP vocabulary."""
-    extension = path.suffix.lower()
-    category = EXTENSION_CATEGORY_MAP.get(extension, "unknown_metadata_only")
-    if category in EXTRACTABLE_CATEGORIES:
-        return FileClassification(
-            extension=extension,
-            category=category,
-            index_status="pending",
-            reason_not_indexed=None,
-        )
-    return FileClassification(
-        extension=extension,
-        category=category,
-        index_status="metadata_only",
-        reason_not_indexed=METADATA_ONLY_REASONS[category],
-    )
 
 
 def inventory_courses(config: Config) -> InventoryRunResult:
@@ -437,14 +236,6 @@ def reset_missing_course_totals(
             (inventory_timestamp,),
         )
     return int(cursor.rowcount)
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file_obj:
-        for chunk in iter(lambda: file_obj.read(HASH_CHUNK_SIZE), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _inventory_courses(
@@ -748,55 +539,6 @@ def _is_transient_inventory_failure(status: str, reason: str | None) -> bool:
     return reason.startswith(TRANSIENT_INVENTORY_FAILURE_PREFIXES)
 
 
-def _discover_course_entries(
-    courses_root: Path,
-    diagnostics: list[str],
-) -> tuple[list[Path], list[Path]]:
-    root_files: list[Path] = []
-    course_dirs: list[Path] = []
-    try:
-        with os.scandir(courses_root) as entries:
-            for entry in entries:
-                try:
-                    if entry.is_dir(follow_symlinks=False):
-                        course_dirs.append(Path(entry.path))
-                    elif entry.is_file(follow_symlinks=False):
-                        root_files.append(Path(entry.path))
-                except OSError as exc:
-                    diagnostics.append(f"Could not inspect {entry.path}: {exc}")
-    except OSError as exc:
-        raise InventoryError(f"Could not list Courses root {courses_root}: {exc}") from exc
-
-    return (
-        sorted(root_files, key=lambda path: path.name.lower()),
-        sorted(course_dirs, key=lambda path: path.name.lower()),
-    )
-
-
-def _walk_files(root: Path, diagnostics: list[str]) -> Iterable[Path]:
-    stack = [root]
-    while stack:
-        current = stack.pop()
-        directories: list[Path] = []
-        files: list[Path] = []
-        try:
-            with os.scandir(current) as entries:
-                for entry in entries:
-                    try:
-                        if entry.is_dir(follow_symlinks=False):
-                            directories.append(Path(entry.path))
-                        elif entry.is_file(follow_symlinks=False):
-                            files.append(Path(entry.path))
-                    except OSError as exc:
-                        diagnostics.append(f"Could not inspect {entry.path}: {exc}")
-        except OSError as exc:
-            diagnostics.append(f"Could not list directory {current}: {exc}")
-            continue
-
-        yield from sorted(files, key=lambda path: path.name.lower())
-        stack.extend(reversed(sorted(directories, key=lambda path: path.name.lower())))
-
-
 def _add_file_counts(
     file_record: FileRecord,
     *,
@@ -953,18 +695,3 @@ def _count_by_reason(connection: sqlite3.Connection) -> dict[str, int]:
         """
     ).fetchall()
     return {str(row["value"]): int(row["count"]) for row in rows}
-
-
-def _relative_path(path: Path, courses_root: Path) -> str:
-    try:
-        return str(path.relative_to(courses_root))
-    except ValueError:
-        return path.name
-
-
-def _timestamp_from_epoch(epoch_seconds: float) -> str:
-    return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).isoformat()
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

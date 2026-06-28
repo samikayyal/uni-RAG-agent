@@ -16,6 +16,7 @@ from uni_rag_agent.inventory import (
     load_inventory_summary,
 )
 from uni_rag_agent.inventory import core as inventory_core
+from uni_rag_agent.inventory import file_io as inventory_file_io
 from uni_rag_agent.storage import connect_sqlite
 
 
@@ -456,14 +457,14 @@ def test_nested_directory_listing_failure_records_diagnostic_and_continues(
     blocked_dir.mkdir()
     (course_dir / "syllabus.txt").write_text("BM25", encoding="utf-8")
     (blocked_dir / "hidden.txt").write_text("hidden", encoding="utf-8")
-    original_scandir = inventory_core.os.scandir
+    original_scandir = inventory_file_io.os.scandir
 
     def failing_scandir(path):
         if Path(path) == blocked_dir:
             raise OSError("directory denied")
         return original_scandir(path)
 
-    monkeypatch.setattr(inventory_core.os, "scandir", failing_scandir)
+    monkeypatch.setattr(inventory_file_io.os, "scandir", failing_scandir)
 
     result = inventory_courses(config)
 
@@ -493,14 +494,14 @@ def test_courses_root_listing_failure_records_failed_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config(tmp_path)
-    original_scandir = inventory_core.os.scandir
+    original_scandir = inventory_file_io.os.scandir
 
     def failing_scandir(path):
         if Path(path) == config.courses_root:
             raise OSError("root denied")
         return original_scandir(path)
 
-    monkeypatch.setattr(inventory_core.os, "scandir", failing_scandir)
+    monkeypatch.setattr(inventory_file_io.os, "scandir", failing_scandir)
 
     with pytest.raises(InventoryError, match="Could not list Courses root"):
         inventory_courses(config)
