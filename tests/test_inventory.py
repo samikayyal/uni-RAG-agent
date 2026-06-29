@@ -152,7 +152,9 @@ def test_inventory_rerun_is_idempotent_and_skips_hash_for_unchanged_files(
     assert run_count["count"] == 2
 
 
-def test_changed_timestamp_triggers_hash_comparison(tmp_path: Path, monkeypatch) -> None:
+def test_changed_timestamp_triggers_hash_comparison(
+    tmp_path: Path, monkeypatch
+) -> None:
     config = make_config(tmp_path)
     course_dir = config.courses_root / "Information Retrieval"
     course_dir.mkdir()

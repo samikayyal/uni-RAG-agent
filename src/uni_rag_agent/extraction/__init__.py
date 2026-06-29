@@ -1,11 +1,14 @@
 """Text extraction and chunking public API."""
 
-from .core import (
+from .constants import (
     DEFAULT_MAX_CHUNK_TOKENS,
     LEGACY_FORMAT_REASON,
     SCANNED_PDF_OCR_REASON,
     SUPPORTED_TEXT_EXTENSIONS,
     TEXT_EXTRACTION_CATEGORIES,
+)
+from .core import extract_file, extract_pending_files, load_extraction_status
+from .models import (
     ChunkRecord,
     ExtractedDocument,
     ExtractionError,
@@ -15,9 +18,6 @@ from .core import (
     ExtractionStatus,
     PendingFileRecord,
     RawChunk,
-    extract_file,
-    extract_pending_files,
-    load_extraction_status,
 )
 
 __all__ = [

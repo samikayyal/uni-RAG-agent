@@ -441,7 +441,9 @@ def test_extract_run_category_filter_and_status(tmp_path: Path) -> None:
     course_dir = config.courses_root / "Information Retrieval"
     course_dir.mkdir()
     (course_dir / "notes.md").write_text("# Search\n\nBM25", encoding="utf-8")
-    (course_dir / "assignment.py").write_text("def score():\n    return 1\n", encoding="utf-8")
+    (course_dir / "assignment.py").write_text(
+        "def score():\n    return 1\n", encoding="utf-8"
+    )
 
     inventory_courses(config)
     result = extract_pending_files(config, category="document")

@@ -454,7 +454,9 @@ def _print_inventory_summary(summary: InventorySummary) -> None:
     if summary.by_course:
         print("by_course:")
         for course in summary.by_course:
-            print(f"- {course.name}: files={course.file_count}, bytes={course.total_bytes}")
+            print(
+                f"- {course.name}: files={course.file_count}, bytes={course.total_bytes}"
+            )
     _print_count_mapping("by_status", summary.by_status)
     _print_count_mapping("by_category", summary.by_category)
     _print_count_mapping("by_extension", summary.by_extension)

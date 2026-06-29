@@ -260,7 +260,9 @@ def _inventory_courses(
     bytes_seen = 0
 
     try:
-        root_files, course_dirs = _discover_course_entries(config.courses_root, diagnostics)
+        root_files, course_dirs = _discover_course_entries(
+            config.courses_root, diagnostics
+        )
 
         for root_file in root_files:
             file_record = _build_file_record(
@@ -510,7 +512,8 @@ def _next_inventory_status(
 
     old_hash = existing["content_hash"]
     unchanged_metadata = (
-        existing["modified_at"] == modified_at and int(existing["size_bytes"]) == size_bytes
+        existing["modified_at"] == modified_at
+        and int(existing["size_bytes"]) == size_bytes
     )
     unchanged_content = old_hash is not None and old_hash == content_hash
     unchanged = unchanged_metadata or unchanged_content

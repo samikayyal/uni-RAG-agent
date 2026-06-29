@@ -38,7 +38,9 @@ def discover_course_entries(
                 except OSError as exc:
                     diagnostics.append(f"Could not inspect {entry.path}: {exc}")
     except OSError as exc:
-        raise InventoryError(f"Could not list Courses root {courses_root}: {exc}") from exc
+        raise InventoryError(
+            f"Could not list Courses root {courses_root}: {exc}"
+        ) from exc
 
     return (
         sorted(root_files, key=lambda path: path.name.lower()),

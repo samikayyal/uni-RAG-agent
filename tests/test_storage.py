@@ -59,7 +59,9 @@ def test_storage_initialization_is_idempotent(tmp_path: Path) -> None:
     assert result.required_tables_present == REQUIRED_TABLES
 
 
-def test_check_storage_reports_missing_database_without_creating_it(tmp_path: Path) -> None:
+def test_check_storage_reports_missing_database_without_creating_it(
+    tmp_path: Path,
+) -> None:
     config = make_config(tmp_path)
 
     result = check_storage(config)
@@ -94,9 +96,7 @@ def test_search_results_chunk_reference_nulls_when_chunk_is_deleted(
         rows = connection.execute("PRAGMA foreign_key_list(search_results)").fetchall()
 
     chunk_reference = next(
-        row
-        for row in rows
-        if row["table"] == "chunks" and row["from"] == "chunk_id"
+        row for row in rows if row["table"] == "chunks" and row["from"] == "chunk_id"
     )
     assert chunk_reference["on_delete"] == "SET NULL"
 

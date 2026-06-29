@@ -141,7 +141,9 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
     )
 
 
-def load_settings(repo_root: Path | None = None, env_file: Path | None = None) -> Settings:
+def load_settings(
+    repo_root: Path | None = None, env_file: Path | None = None
+) -> Settings:
     """Backward-compatible alias for the Feature 01 loader name."""
     return load_config(repo_root=repo_root, env_file=env_file)
 
@@ -159,9 +161,7 @@ def validate_config(config: Config) -> None:
         "UNI_RAG_RUNS_DIR": config.runs_dir,
     }.items():
         if _is_relative_to(path, config.courses_root):
-            raise ConfigError(
-                f"{name} must not point inside the Courses root: {path}"
-            )
+            raise ConfigError(f"{name} must not point inside the Courses root: {path}")
 
 
 def find_project_root(start: Path | None = None) -> Path:
