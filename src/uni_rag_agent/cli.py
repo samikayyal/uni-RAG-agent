@@ -31,6 +31,7 @@ from .indexing import (
     KeywordIndexError,
     KeywordIndexResult,
     KeywordSearchError,
+    keyword_query_terms,
     keyword_search,
     sync_keyword_index,
 )
@@ -576,11 +577,32 @@ def _handle_index_keyword(args: argparse.Namespace) -> int:
 
 
 def _handle_search_keyword(args: argparse.Namespace) -> int:
+    command_name = "search keyword"
+    logger: Logger | None = None
+    query_text = " ".join(args.query)
+    keyword_terms: tuple[str, ...] = ()
+    top_k: int | None = args.top_k
     try:
         config = load_config()
+        validate_config(config)
+        top_k = args.top_k if args.top_k is not None else config.keyword_top_k
+        logger = _command_logger(config, command_name)
+        keyword_terms = keyword_query_terms(query_text)
+        logger.info(
+            "keyword search started",
+            extra={
+                "event": "keyword_search_started",
+                "command": command_name,
+                "status": "started",
+                "keyword_terms": keyword_terms,
+                "course": args.course,
+                "indexes": args.indexes or (),
+                "top_k": top_k,
+            },
+        )
         results = keyword_search(
             config,
-            query=" ".join(args.query),
+            query=query_text,
             course=args.course,
             indexes=args.indexes,
             top_k=args.top_k,
@@ -589,9 +611,38 @@ def _handle_search_keyword(args: argparse.Namespace) -> int:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return CONFIG_ERROR
     except (StorageError, KeywordSearchError) as exc:
+        if logger is not None:
+            logger.exception(
+                "keyword search failed",
+                extra={
+                    "event": "keyword_search_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "keyword_terms": keyword_terms,
+                    "course": args.course,
+                    "indexes": args.indexes or (),
+                    "top_k": top_k,
+                    "count": 0,
+                    "result_count": 0,
+                },
+            )
         print(f"Keyword search error: {exc}", file=sys.stderr)
         return SEARCH_ERROR
 
+    logger.info(
+        "keyword search completed",
+        extra={
+            "event": "keyword_search_completed",
+            "command": command_name,
+            "status": "completed",
+            "keyword_terms": keyword_terms,
+            "course": args.course,
+            "indexes": args.indexes or (),
+            "top_k": top_k,
+            "count": len(results),
+            "result_count": len(results),
+        },
+    )
     if args.json:
         print(
             json.dumps(

@@ -13,6 +13,7 @@ from uni_rag_agent.storage import (
     StorageError,
     check_storage,
     connect_sqlite,
+    connect_sqlite_read_only,
     ensure_data_dirs,
     initialize_schema,
 )
@@ -51,9 +52,9 @@ def sync_keyword_index(config: Config, rebuild: bool = False) -> KeywordIndexRes
         with closing(connect_sqlite(config)) as connection:
             initialize_schema(connection)
             rows_removed = _count_fts_rows(connection)
-            chunks_seen = _count_eligible_chunks(connection)
+            chunks_seen = _count_current_eligible_chunks(connection)
             connection.execute("DELETE FROM chunk_fts")
-            connection.execute(_INSERT_KEYWORD_ROWS_SQL, ELIGIBLE_SOURCE_TYPES)
+            connection.execute(_insert_keyword_rows_sql(), ELIGIBLE_SOURCE_TYPES)
             rows_indexed = _count_fts_rows(connection)
             by_source_type = _count_fts_by_source_type(connection)
             connection.commit()
@@ -65,7 +66,8 @@ def sync_keyword_index(config: Config, rebuild: bool = False) -> KeywordIndexRes
         diagnostics.append("No eligible indexed chunks found for keyword indexing.")
     if rows_indexed != chunks_seen:
         diagnostics.append(
-            f"Indexed {rows_indexed} FTS rows from {chunks_seen} eligible chunks."
+            f"Indexed {rows_indexed} FTS rows from {chunks_seen} current "
+            "eligible chunks; blank chunk text is skipped."
         )
 
     return KeywordIndexResult(
@@ -93,6 +95,9 @@ def keyword_search(
     source_types = _source_types_for_indexes(indexes)
     if source_types == ():
         return []
+    search_source_types = (
+        source_types if source_types is not None else ELIGIBLE_SOURCE_TYPES
+    )
 
     storage = check_storage(config)
     if not storage.ok:
@@ -102,12 +107,12 @@ def keyword_search(
     sql, params = _build_search_sql(
         match_query=match_query,
         course=course,
-        source_types=source_types,
+        source_types=search_source_types,
         limit=limit,
     )
 
     try:
-        with closing(_connect_sqlite_read_only(config)) as connection:
+        with closing(connect_sqlite_read_only(config)) as connection:
             rows = connection.execute(sql, params).fetchall()
     except sqlite3.OperationalError as exc:
         raise KeywordSearchError(f"Keyword query could not be executed: {exc}") from exc
@@ -131,7 +136,8 @@ def keyword_search(
     ]
 
 
-def _plain_text_to_fts_query(query: str) -> str:
+def keyword_query_terms(query: str) -> tuple[str, ...]:
+    """Return the deduplicated plain-text terms used by keyword search."""
     tokens: list[str] = []
     seen: set[str] = set()
     for match in _TOKEN_RE.finditer(query):
@@ -144,6 +150,11 @@ def _plain_text_to_fts_query(query: str) -> str:
         raise KeywordSearchError(
             "Keyword query must contain at least one word or number."
         )
+    return tuple(tokens)
+
+
+def _plain_text_to_fts_query(query: str) -> str:
+    tokens = keyword_query_terms(query)
     return " OR ".join(f'"{token}"' for token in tokens)
 
 
@@ -175,23 +186,18 @@ def _build_search_sql(
     *,
     match_query: str,
     course: str | None,
-    source_types: tuple[str, ...] | None,
+    source_types: Sequence[str],
     limit: int,
 ) -> tuple[str, list[object]]:
     where = [
         "chunk_fts MATCH ?",
-        "files.index_status = 'indexed'",
+        _current_chunk_where_sql(source_types, require_non_empty_text=False),
     ]
-    params: list[object] = [match_query]
+    params: list[object] = [match_query, *source_types]
 
     if course is not None:
         where.append("LOWER(courses.name) = LOWER(?)")
         params.append(course)
-
-    if source_types is not None:
-        placeholders = ", ".join("?" for _ in source_types)
-        where.append(f"chunks.source_type IN ({placeholders})")
-        params.extend(source_types)
 
     params.append(limit)
     return (
@@ -218,29 +224,22 @@ def _build_search_sql(
     )
 
 
-def _connect_sqlite_read_only(config: Config) -> sqlite3.Connection:
-    uri = f"{config.sqlite_path.resolve().as_uri()}?mode=ro"
-    connection = sqlite3.connect(uri, uri=True)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA query_only = ON")
-    return connection
-
-
 def _count_fts_rows(connection: sqlite3.Connection) -> int:
     row = connection.execute("SELECT COUNT(*) FROM chunk_fts").fetchone()
     return int(row[0])
 
 
-def _count_eligible_chunks(connection: sqlite3.Connection) -> int:
-    placeholders = ", ".join("?" for _ in ELIGIBLE_SOURCE_TYPES)
+def _count_current_eligible_chunks(connection: sqlite3.Connection) -> int:
+    where_sql = _current_chunk_where_sql(
+        ELIGIBLE_SOURCE_TYPES,
+        require_non_empty_text=False,
+    )
     row = connection.execute(
         f"""
         SELECT COUNT(*)
         FROM chunks
         JOIN files ON files.id = chunks.file_id
-        WHERE files.index_status = 'indexed'
-          AND TRIM(chunks.text) <> ''
-          AND chunks.source_type IN ({placeholders})
+        WHERE {where_sql}
         """,
         ELIGIBLE_SOURCE_TYPES,
     ).fetchone()
@@ -259,20 +258,41 @@ def _count_fts_by_source_type(connection: sqlite3.Connection) -> dict[str, int]:
     return {str(row["source_type"]): int(row["count"]) for row in rows}
 
 
-_INSERT_KEYWORD_ROWS_SQL = """
-INSERT INTO chunk_fts (chunk_id, text, title, course_name, file_path, source_type)
-SELECT
-    chunks.id,
-    chunks.text,
-    COALESCE(chunks.title, ''),
-    COALESCE(courses.name, ''),
-    files.path,
-    chunks.source_type
-FROM chunks
-JOIN files ON files.id = chunks.file_id
-LEFT JOIN courses ON courses.id = files.course_id
-WHERE files.index_status = 'indexed'
-  AND TRIM(chunks.text) <> ''
-  AND chunks.source_type IN (?, ?, ?, ?, ?, ?)
-ORDER BY chunks.id
-"""
+def _current_chunk_where_sql(
+    source_types: Sequence[str],
+    *,
+    require_non_empty_text: bool,
+) -> str:
+    clauses = [
+        "files.index_status = 'indexed'",
+        f"chunks.source_type IN ({_placeholders(source_types)})",
+    ]
+    if require_non_empty_text:
+        clauses.append("TRIM(chunks.text) <> ''")
+    return " AND ".join(clauses)
+
+
+def _placeholders(values: Sequence[object]) -> str:
+    return ", ".join("?" for _ in values)
+
+
+def _insert_keyword_rows_sql() -> str:
+    where_sql = _current_chunk_where_sql(
+        ELIGIBLE_SOURCE_TYPES,
+        require_non_empty_text=True,
+    )
+    return f"""
+    INSERT INTO chunk_fts (chunk_id, text, title, course_name, file_path, source_type)
+    SELECT
+        chunks.id,
+        chunks.text,
+        COALESCE(chunks.title, ''),
+        COALESCE(courses.name, ''),
+        files.path,
+        chunks.source_type
+    FROM chunks
+    JOIN files ON files.id = chunks.file_id
+    LEFT JOIN courses ON courses.id = files.course_id
+    WHERE {where_sql}
+    ORDER BY chunks.id
+    """

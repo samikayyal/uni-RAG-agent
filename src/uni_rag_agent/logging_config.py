@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,13 +14,18 @@ SAFE_EXTRA_FIELDS = {
     "chunks_seen",
     "command",
     "count",
+    "course",
     "duration_ms",
     "event",
+    "indexes",
+    "keyword_terms",
     "path",
+    "result_count",
     "run_id",
     "rows_indexed",
     "rows_removed",
     "status",
+    "top_k",
 }
 
 
@@ -102,4 +108,8 @@ def _json_safe_value(value: Any) -> Any:
         return value
     if isinstance(value, Path):
         return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [_json_safe_value(item) for item in value]
     return str(value)

@@ -14,6 +14,7 @@ from uni_rag_agent.storage import (
     StorageError,
     check_storage,
     connect_sqlite,
+    connect_sqlite_read_only,
     ensure_data_dirs,
     initialize_schema,
 )
@@ -86,6 +87,26 @@ def test_chunk_fts_table_uses_fts5(tmp_path: Path) -> None:
     assert row is not None
     assert "USING fts5" in row[0]
     assert "tokenize='unicode61'" in row[0]
+
+
+def test_read_only_sqlite_connection_rejects_writes(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    ensure_data_dirs(config)
+    with connect_sqlite(config) as connection:
+        initialize_schema(connection)
+
+    with connect_sqlite_read_only(config) as connection:
+        row = connection.execute("SELECT COUNT(*) FROM courses").fetchone()
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            connection.execute(
+                """
+                INSERT INTO courses (name, path, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("Read Only", "Read Only", "2026-06-30", "2026-06-30"),
+            )
+
+    assert row[0] == 0
 
 
 def test_search_results_chunk_reference_nulls_when_chunk_is_deleted(

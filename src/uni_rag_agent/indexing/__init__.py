@@ -3,6 +3,7 @@
 from .keyword import (
     ELIGIBLE_SOURCE_TYPES,
     INDEX_TO_SOURCE_TYPE,
+    keyword_query_terms,
     keyword_search,
     sync_keyword_index,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "KeywordIndexError",
     "KeywordIndexResult",
     "KeywordSearchError",
+    "keyword_query_terms",
     "keyword_search",
     "sync_keyword_index",
 ]

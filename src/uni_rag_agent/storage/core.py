@@ -86,6 +86,15 @@ def connect_sqlite(config: Config) -> sqlite3.Connection:
     return connection
 
 
+def connect_sqlite_read_only(config: Config) -> sqlite3.Connection:
+    """Open the configured SQLite database in read-only/query-only mode."""
+    uri = f"{config.sqlite_path.resolve().as_uri()}?mode=ro"
+    connection = sqlite3.connect(uri, uri=True)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA query_only = ON")
+    return connection
+
+
 def initialize_schema(connection: sqlite3.Connection) -> None:
     """Create the MVP schema from the architecture contract."""
     fts5_available, diagnostic = check_fts5_available(connection)

@@ -77,9 +77,13 @@ def test_keyword_rebuild_indexes_only_current_eligible_chunks(tmp_path: Path) ->
 
     assert result.rebuild is True
     assert result.rows_removed == 0
-    assert result.chunks_seen == 2
+    assert result.chunks_seen == 3
     assert result.rows_indexed == 2
     assert result.by_source_type == {"data_schema": 1, "document": 1}
+    assert result.diagnostics == (
+        "Indexed 2 FTS rows from 3 current eligible chunks; "
+        "blank chunk text is skipped.",
+    )
     with closing(connect_sqlite(config)) as connection:
         rows = connection.execute(
             "SELECT chunk_id, source_type FROM chunk_fts ORDER BY chunk_id"
@@ -90,7 +94,7 @@ def test_keyword_rebuild_indexes_only_current_eligible_chunks(tmp_path: Path) ->
     ]
 
 
-def test_keyword_search_matches_projection_fields_and_course_filter(
+def test_keyword_search_matches_projection_fields(
     tmp_path: Path,
 ) -> None:
     config = make_config(tmp_path)
@@ -119,12 +123,43 @@ def test_keyword_search_matches_projection_fields_and_course_filter(
     title_results = keyword_search(config, "ranking")
     course_results = keyword_search(config, "retrieval")
     path_results = keyword_search(config, "pathterm")
+
+    assert title_results[0].chunk_id == inserted.chunk_id, "title should be searchable"
+    assert course_results[0].chunk_id == inserted.chunk_id, (
+        "course name should be searchable"
+    )
+    assert path_results[0].chunk_id == inserted.chunk_id, (
+        "file path should be searchable"
+    )
+
+
+def test_keyword_search_applies_exact_course_filter_and_result_contract(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    with _initialized_connection(config) as connection:
+        inserted = insert_minimal_chunk(
+            connection,
+            config,
+            course_name="Information Retrieval",
+            filename="bm25.md",
+            text="BM25 ranks documents",
+            location_type="page",
+            location_value="3",
+        )
+        insert_minimal_chunk(
+            connection,
+            config,
+            course_name="High Preformance Computing for Big Data",
+            filename="bm25-mapreduce.md",
+            text="BM25 MapReduce scheduling",
+        )
+        connection.commit()
+    sync_keyword_index(config)
+
     filtered_results = keyword_search(config, "bm25", course="information retrieval")
     partial_course_results = keyword_search(config, "bm25", course="information")
 
-    assert title_results[0].chunk_id == inserted.chunk_id
-    assert course_results[0].chunk_id == inserted.chunk_id
-    assert path_results[0].chunk_id == inserted.chunk_id
     assert filtered_results[0].course == "Information Retrieval"
     assert filtered_results[0].file_id == inserted.file_id
     assert partial_course_results == []
@@ -213,7 +248,7 @@ def test_keyword_search_ranking_score_and_deterministic_ties(
     ]
 
 
-def test_keyword_search_excludes_stale_fts_rows_and_does_not_log_results(
+def test_keyword_search_excludes_stale_fts_rows_and_does_not_persist_results(
     tmp_path: Path,
 ) -> None:
     config = make_config(tmp_path)
@@ -330,6 +365,13 @@ def test_keyword_cli_indexes_searches_and_keeps_semantic_stub(
     assert payload[0]["retrieval_method"] == "keyword"
     assert payload[0]["course"] == "Information Retrieval"
     assert {"chunk_id", "file_id", "score", "snippet"}.issubset(payload[0])
+
+    search_events = _run_log_events(data_dir, "search-keyword")
+    assert search_events[-2]["event"] == "keyword_search_started"
+    assert search_events[-1]["event"] == "keyword_search_completed"
+    assert search_events[-1]["keyword_terms"] == ["BM25"]
+    assert search_events[-1]["count"] == 1
+    assert search_events[-1]["result_count"] == 1
 
     assert semantic_result.returncode == 1
     assert "Feature Spec 07" in semantic_result.stderr
