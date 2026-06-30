@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from .._textutils import _truncate
 from ..constants import NOTEBOOK_OUTPUT_CHAR_LIMIT
 from ..models import RawChunk
 
@@ -70,9 +71,3 @@ def _stringify_notebook_text(value: object) -> str:
     if isinstance(value, list):
         return "".join(str(item) for item in value)
     return str(value)
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return f"{text[: max_chars - 3]}..."

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from uni_rag_agent.config import Config
 
+from .._textutils import _json_dumps, _utc_now
 from ..constants import DEFAULT_MAX_CHUNK_TOKENS
 from ..models import ChunkRecord, DataSummary, ExtractedDocument, PendingFileRecord
 from ..persistence import (
@@ -21,8 +22,6 @@ from .builders import (
     DATA_SCHEMA_EXTRACTOR_NAME,
     DATA_SCHEMA_EXTRACTOR_VERSION,
     SAMPLE_ROW_LIMIT,
-    _json_dumps,
-    _utc_now,
 )
 
 __all__ = [

@@ -20,14 +20,16 @@ from ..models import (
     PendingFileRecord,
     RawChunk,
 )
-from .builders import (
-    DATA_SCHEMA_EXTRACTOR_NAME,
-    DATA_SCHEMA_EXTRACTOR_VERSION,
-    DATA_SCHEMA_SOURCE_TYPE,
+from .._textutils import (
     _failure_from_exception,
     _format_exception,
     _json_dumps,
     _utc_now,
+)
+from .builders import (
+    DATA_SCHEMA_EXTRACTOR_NAME,
+    DATA_SCHEMA_EXTRACTOR_VERSION,
+    DATA_SCHEMA_SOURCE_TYPE,
 )
 from .formats import (
     summarize_csv,

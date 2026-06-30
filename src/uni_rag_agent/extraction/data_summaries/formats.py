@@ -8,6 +8,7 @@ import sqlite3
 from itertools import islice
 from pathlib import Path
 
+from .._textutils import _json_dumps
 from ..constants import TEXT_ENCODINGS
 from ..models import DataSummary, DataSummarySection, ExtractionFailure
 from .builders import (
@@ -20,7 +21,6 @@ from .builders import (
     _build_section,
     _clean_column_name,
     _deduplicate_column_names,
-    _json_dumps,
     _json_safe,
     _merge_fieldnames,
     _read_text_preview,

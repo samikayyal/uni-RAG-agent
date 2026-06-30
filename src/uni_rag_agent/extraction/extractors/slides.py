@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .._textutils import _title_from_text
 from ..models import RawChunk
 
 
@@ -57,17 +58,3 @@ def _pptx_notes_text(slide: Any) -> str:
         if paragraph.text and paragraph.text.strip()
     ]
     return "\n".join(paragraphs).strip()
-
-
-def _title_from_text(text: str, max_length: int = 80) -> str | None:
-    for line in text.splitlines():
-        normalized = " ".join(line.split())
-        if normalized:
-            return _truncate(normalized, max_length)
-    return None
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return f"{text[: max_chars - 3]}..."

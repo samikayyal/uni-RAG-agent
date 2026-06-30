@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 import io
-import json
 import re
 import shutil
 from collections.abc import Iterable, Mapping
-from importlib import metadata
 from pathlib import Path
 from typing import Any
 
 from uni_rag_agent.config import Config
 
+from .._textutils import (
+    _count_tokens,
+    _json_dumps,
+    _package_version,
+    _read_text_file,
+    _title_from_text,
+)
 from ..constants import (
     DEFAULT_MAX_CHUNK_TOKENS,
     PDF_SCANNED_TEXT_CHAR_THRESHOLD,
     SCANNED_PDF_OCR_REASON,
-    TEXT_ENCODINGS,
 )
 from ..models import ExtractionFailure, RawChunk
 
@@ -176,24 +180,6 @@ def _extract_markdown(path: Path) -> tuple[RawChunk, ...]:
     return _extract_plain_text(path)
 
 
-def _read_text_file(path: Path) -> str:
-    last_error: UnicodeDecodeError | None = None
-    for encoding in TEXT_ENCODINGS:
-        try:
-            return path.read_text(encoding=encoding)
-        except UnicodeDecodeError as exc:
-            last_error = exc
-    if last_error is not None:
-        raise last_error
-    return path.read_text()
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return f"{text[: max_chars - 3]}..."
-
-
 def _paragraph_blocks(text: str) -> list[str]:
     blocks = re.split(r"\n\s*\n", text)
     return [block.strip() for block in blocks if block.strip()]
@@ -265,26 +251,3 @@ def _group_text_blocks(
             )
         )
     return raw_chunks
-
-
-def _count_tokens(text: str) -> int:
-    return len(text.split())
-
-
-def _title_from_text(text: str, max_length: int = 80) -> str | None:
-    for line in text.splitlines():
-        normalized = " ".join(line.split())
-        if normalized:
-            return _truncate(normalized, max_length)
-    return None
-
-
-def _package_version(package_name: str) -> str | None:
-    try:
-        return metadata.version(package_name)
-    except metadata.PackageNotFoundError:
-        return None
-
-
-def _json_dumps(payload: Mapping[str, object]) -> str:
-    return json.dumps(payload, sort_keys=True)

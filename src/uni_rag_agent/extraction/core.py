@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-import json
-import traceback
 from collections import Counter
 from contextlib import closing
-from datetime import datetime, timezone
 
 from uni_rag_agent.config import Config
 from uni_rag_agent.storage import connect_sqlite, ensure_data_dirs, initialize_schema
 
+from ._textutils import (
+    _failure_from_exception,
+    _format_exception,
+    _json_dumps,
+    _utc_now,
+)
 from .chunking import finalize_chunks
 from .constants import (
     DEFAULT_MAX_CHUNK_TOKENS,
-    ERROR_CHAR_LIMIT,
     LEGACY_EXTENSIONS,
     LEGACY_FORMAT_REASON,
     NO_TEXT_REASON,
-    SCANNED_PDF_OCR_REASON,
-    SUPPORTED_TEXT_EXTENSIONS,
     TEXT_EXTRACTION_CATEGORIES,
 )
 from .extractors import (
@@ -28,7 +28,6 @@ from .extractors import (
     extractor_version_for_extension,
 )
 from .models import (
-    ChunkRecord,
     ExtractedDocument,
     ExtractionError,
     ExtractionFailure,
@@ -36,7 +35,6 @@ from .models import (
     ExtractionRunResult,
     ExtractionStatus,
     PendingFileRecord,
-    RawChunk,
 )
 from .persistence import (
     _count_chunks_by_source_type,
@@ -259,33 +257,3 @@ def _validate_category(category: str | None) -> None:
             f"Text extraction category must be one of: {allowed}. "
             "Data schema summaries are handled by Feature 05."
         )
-
-
-def _failure_from_exception(
-    file_record: PendingFileRecord,
-    exc: ExtractionFailure,
-) -> ExtractionFailureSummary:
-    return ExtractionFailureSummary(
-        file_id=file_record.id,
-        path=str(file_record.path),
-        error=_truncate(str(exc), ERROR_CHAR_LIMIT),
-    )
-
-
-def _json_dumps(payload: dict[str, object]) -> str:
-    return json.dumps(payload, sort_keys=True)
-
-
-def _format_exception(exc: Exception) -> str:
-    message = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-    return _truncate(message, ERROR_CHAR_LIMIT)
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return f"{text[: max_chars - 3]}..."
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

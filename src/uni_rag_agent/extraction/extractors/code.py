@@ -6,11 +6,11 @@ import ast
 from collections.abc import Iterable
 from pathlib import Path
 
+from .._textutils import _read_text_file
 from ..constants import (
     CPP_FUNCTION_RE,
     MATLAB_FUNCTION_RE,
     R_FUNCTION_RE,
-    TEXT_ENCODINGS,
 )
 from ..models import RawChunk
 
@@ -140,24 +140,6 @@ def _extract_other_code(path: Path, extension: str) -> tuple[RawChunk, ...]:
             )
         )
     return tuple(raw_chunks)
-
-
-def _read_text_file(path: Path) -> str:
-    last_error: UnicodeDecodeError | None = None
-    for encoding in TEXT_ENCODINGS:
-        try:
-            return path.read_text(encoding=encoding)
-        except UnicodeDecodeError as exc:
-            last_error = exc
-    if last_error is not None:
-        raise last_error
-    return path.read_text()
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return f"{text[: max_chars - 3]}..."
 
 
 def _source_for_nodes(source_lines: list[str], nodes: Iterable[ast.AST]) -> str:

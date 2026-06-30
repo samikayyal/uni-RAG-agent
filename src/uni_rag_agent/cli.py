@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections.abc import Mapping, Sequence
 from logging import Logger
-from typing import Callable
+from typing import Callable, Protocol
 
 from . import __version__
 from .config import Config, ConfigError, load_config, validate_config
@@ -297,46 +297,89 @@ def _handle_storage_check(_: argparse.Namespace) -> int:
     return SUCCESS if result.ok else STORAGE_ERROR
 
 
-def _handle_inventory_run(_: argparse.Namespace) -> int:
+class _LoggedRunResult(Protocol):
+    run_id: int
+    status: str
+    files_seen: int
+
+
+def _run_logged_command(
+    *,
+    command_name: str,
+    event_prefix: str,
+    error_label: str,
+    domain_error: type[Exception],
+    error_code: int,
+    completed_message: str,
+    run: Callable[[Config], _LoggedRunResult],
+    print_result: Callable[[_LoggedRunResult], None],
+    extra: Mapping[str, object] | None = None,
+) -> int:
+    """Run a command with uniform config loading, run logging, and error mapping.
+
+    The three long-running commands (inventory, extract, data-summaries) share
+    the same load → validate → log-start → run → log-complete skeleton; only the
+    callable, error type, exit code, and result printer differ.
+    """
+    base_extra = dict(extra or {})
     logger: Logger | None = None
     try:
         config = load_config()
         validate_config(config)
-        logger = _command_logger(config, "inventory run")
+        logger = _command_logger(config, command_name)
         logger.info(
-            "inventory run started",
-            extra={"event": "inventory_started", "command": "inventory run"},
+            f"{command_name} started",
+            extra={
+                "event": f"{event_prefix}_started",
+                "command": command_name,
+                **base_extra,
+            },
         )
-        result = inventory_courses(config)
+        result = run(config)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return CONFIG_ERROR
-    except (StorageError, InventoryError) as exc:
+    except (StorageError, domain_error) as exc:
         if logger is not None:
             logger.exception(
-                "inventory run failed",
+                f"{command_name} failed",
                 extra={
-                    "event": "inventory_failed",
-                    "command": "inventory run",
+                    "event": f"{event_prefix}_failed",
+                    "command": command_name,
                     "status": "failed",
+                    **base_extra,
                 },
             )
-        print(f"Inventory error: {exc}", file=sys.stderr)
-        return INVENTORY_ERROR
+        print(f"{error_label}: {exc}", file=sys.stderr)
+        return error_code
 
     logger.info(
-        "inventory run completed",
+        f"{command_name} completed",
         extra={
-            "event": "inventory_completed",
-            "command": "inventory run",
+            "event": f"{event_prefix}_completed",
+            "command": command_name,
             "run_id": result.run_id,
             "status": result.status,
             "count": result.files_seen,
+            **base_extra,
         },
     )
-    print("Inventory run completed")
-    _print_inventory_run_result(result)
+    print(completed_message)
+    print_result(result)
     return SUCCESS
+
+
+def _handle_inventory_run(_: argparse.Namespace) -> int:
+    return _run_logged_command(
+        command_name="inventory run",
+        event_prefix="inventory",
+        error_label="Inventory error",
+        domain_error=InventoryError,
+        error_code=INVENTORY_ERROR,
+        completed_message="Inventory run completed",
+        run=inventory_courses,
+        print_result=_print_inventory_run_result,
+    )
 
 
 def _handle_inventory_summary(_: argparse.Namespace) -> int:
@@ -356,45 +399,16 @@ def _handle_inventory_summary(_: argparse.Namespace) -> int:
 
 
 def _handle_extract_run(args: argparse.Namespace) -> int:
-    logger: Logger | None = None
-    try:
-        config = load_config()
-        validate_config(config)
-        logger = _command_logger(config, "extract run")
-        logger.info(
-            "extraction run started",
-            extra={"event": "extraction_started", "command": "extract run"},
-        )
-        result = extract_pending_files(config, category=args.category)
-    except ConfigError as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
-        return CONFIG_ERROR
-    except (StorageError, ExtractionError) as exc:
-        if logger is not None:
-            logger.exception(
-                "extraction run failed",
-                extra={
-                    "event": "extraction_failed",
-                    "command": "extract run",
-                    "status": "failed",
-                },
-            )
-        print(f"Extraction error: {exc}", file=sys.stderr)
-        return EXTRACTION_ERROR
-
-    logger.info(
-        "extraction run completed",
-        extra={
-            "event": "extraction_completed",
-            "command": "extract run",
-            "run_id": result.run_id,
-            "status": result.status,
-            "count": result.files_seen,
-        },
+    return _run_logged_command(
+        command_name="extract run",
+        event_prefix="extraction",
+        error_label="Extraction error",
+        domain_error=ExtractionError,
+        error_code=EXTRACTION_ERROR,
+        completed_message="Extraction run completed",
+        run=lambda config: extract_pending_files(config, category=args.category),
+        print_result=_print_extraction_run_result,
     )
-    print("Extraction run completed")
-    _print_extraction_run_result(result)
-    return SUCCESS
 
 
 def _handle_extract_status(_: argparse.Namespace) -> int:
@@ -414,52 +428,17 @@ def _handle_extract_status(_: argparse.Namespace) -> int:
 
 
 def _handle_extract_data_summaries(args: argparse.Namespace) -> int:
-    logger: Logger | None = None
-    command_name = "extract data-summaries"
-    try:
-        config = load_config()
-        validate_config(config)
-        logger = _command_logger(config, command_name)
-        logger.info(
-            "data summary run started",
-            extra={
-                "event": "data_summary_started",
-                "command": command_name,
-                "file_id": args.file_id,
-            },
-        )
-        result = summarize_data_files(config, file_id=args.file_id)
-    except ConfigError as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
-        return CONFIG_ERROR
-    except (StorageError, ExtractionError) as exc:
-        if logger is not None:
-            logger.exception(
-                "data summary run failed",
-                extra={
-                    "event": "data_summary_failed",
-                    "command": command_name,
-                    "status": "failed",
-                    "file_id": args.file_id,
-                },
-            )
-        print(f"Data summary error: {exc}", file=sys.stderr)
-        return EXTRACTION_ERROR
-
-    logger.info(
-        "data summary run completed",
-        extra={
-            "event": "data_summary_completed",
-            "command": command_name,
-            "run_id": result.run_id,
-            "status": result.status,
-            "count": result.files_seen,
-            "file_id": args.file_id,
-        },
+    return _run_logged_command(
+        command_name="extract data-summaries",
+        event_prefix="data_summary",
+        error_label="Data summary error",
+        domain_error=ExtractionError,
+        error_code=EXTRACTION_ERROR,
+        completed_message="Data summary run completed",
+        run=lambda config: summarize_data_files(config, file_id=args.file_id),
+        print_result=_print_data_summary_run_result,
+        extra={"file_id": args.file_id},
     )
-    print("Data summary run completed")
-    _print_data_summary_run_result(result)
-    return SUCCESS
 
 
 def _print_storage_result(result: StorageCheckResult) -> None:

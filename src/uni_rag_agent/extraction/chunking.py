@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 
+from ._textutils import _count_tokens, _json_dumps
 from .models import ChunkRecord, PendingFileRecord, RawChunk
 
 
@@ -71,17 +71,3 @@ def _split_text_by_tokens(text: str, max_tokens: int) -> list[str]:
         " ".join(words[index : index + max_tokens]).strip()
         for index in range(0, len(words), max_tokens)
     ]
-
-
-def _count_tokens(text: str) -> int:
-    return len(text.split())
-
-
-def _json_dumps(payload: Mapping[str, object]) -> str:
-    return json.dumps(payload, sort_keys=True)
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return f"{text[: max_chars - 3]}..."

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..constants import TEXT_ENCODINGS, VTT_TIMESTAMP_RE
+from .._textutils import _read_text_file
+from ..constants import VTT_TIMESTAMP_RE
 from ..models import RawChunk
 
 
@@ -39,21 +40,3 @@ def _extract_vtt(path: Path) -> tuple[RawChunk, ...]:
                 )
             )
     return tuple(raw_chunks)
-
-
-def _read_text_file(path: Path) -> str:
-    last_error: UnicodeDecodeError | None = None
-    for encoding in TEXT_ENCODINGS:
-        try:
-            return path.read_text(encoding=encoding)
-        except UnicodeDecodeError as exc:
-            last_error = exc
-    if last_error is not None:
-        raise last_error
-    return path.read_text()
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return f"{text[: max_chars - 3]}..."

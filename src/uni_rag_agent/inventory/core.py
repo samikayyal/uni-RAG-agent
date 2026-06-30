@@ -13,9 +13,7 @@ from uni_rag_agent.storage import connect_sqlite, ensure_data_dirs, initialize_s
 
 from .classification import (
     EXTRACTABLE_CATEGORIES,
-    EXTENSION_CATEGORY_MAP,
     METADATA_ONLY_CATEGORIES,
-    METADATA_ONLY_REASONS,
     classify_file,
 )
 from .file_io import (

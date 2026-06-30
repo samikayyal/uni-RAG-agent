@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping
-from datetime import datetime, timezone
 from pathlib import Path
 
 from uni_rag_agent.config import Config
 
+from ._textutils import _json_dumps, _truncate, _utc_now
 from .constants import (
     DEFAULT_MAX_CHUNK_TOKENS,
     ERROR_CHAR_LIMIT,
@@ -425,17 +424,3 @@ def _load_recent_failures(
         )
         for row in rows
     )
-
-
-def _json_dumps(payload: Mapping[str, object]) -> str:
-    return json.dumps(payload, sort_keys=True)
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return f"{text[: max_chars - 3]}..."
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

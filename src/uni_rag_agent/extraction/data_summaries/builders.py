@@ -3,19 +3,13 @@
 from __future__ import annotations
 
 import json
-import traceback
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
 
-from ..constants import ERROR_CHAR_LIMIT, TEXT_ENCODINGS
-from ..models import (
-    DataSummary,
-    DataSummarySection,
-    ExtractionFailure,
-    ExtractionFailureSummary,
-    PendingFileRecord,
-)
+from .._textutils import _json_dumps, _truncate
+from ..constants import TEXT_ENCODINGS
+from ..models import DataSummary, DataSummarySection
 
 DATA_SCHEMA_CATEGORY = "data_schema"
 DATA_SCHEMA_SOURCE_TYPE = "data_schema"
@@ -63,16 +57,7 @@ def _build_section(
         sample_rows=normalized_rows,
         summary_text="",
     )
-    return DataSummarySection(
-        name=section.name,
-        kind=section.kind,
-        location_value=section.location_value,
-        row_count=section.row_count,
-        column_count=section.column_count,
-        columns=section.columns,
-        sample_rows=section.sample_rows,
-        summary_text=_section_summary_text(section),
-    )
+    return replace(section, summary_text=_section_summary_text(section))
 
 
 def _build_data_summary(
@@ -313,33 +298,3 @@ def _display_value(value: object) -> str:
 
 def _display_count(value: int | None) -> str:
     return "unknown" if value is None else str(value)
-
-
-def _failure_from_exception(
-    file_record: PendingFileRecord,
-    exc: ExtractionFailure,
-) -> ExtractionFailureSummary:
-    return ExtractionFailureSummary(
-        file_id=file_record.id,
-        path=str(file_record.path),
-        error=_truncate(str(exc), ERROR_CHAR_LIMIT),
-    )
-
-
-def _format_exception(exc: Exception) -> str:
-    message = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-    return _truncate(message, ERROR_CHAR_LIMIT)
-
-
-def _json_dumps(payload: object) -> str:
-    return json.dumps(payload, sort_keys=True)
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if len(text) <= max_chars:
-        return text
-    return f"{text[: max_chars - 3]}..."
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

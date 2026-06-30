@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping
-from importlib import metadata
-
 from uni_rag_agent.config import Config
 
+from .._textutils import _json_dumps, _package_version
 from ..models import ExtractionFailure, PendingFileRecord, RawChunk
 from .code import _extract_other_code, _extract_python
 from .documents import (
@@ -84,14 +81,3 @@ def extractor_version_for_extension(extension: str) -> str | None:
     if package_name is None:
         return None
     return _package_version(package_name)
-
-
-def _package_version(package_name: str) -> str | None:
-    try:
-        return metadata.version(package_name)
-    except metadata.PackageNotFoundError:
-        return None
-
-
-def _json_dumps(payload: Mapping[str, object]) -> str:
-    return json.dumps(payload, sort_keys=True)
