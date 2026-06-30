@@ -11,11 +11,13 @@ from typing import Callable
 from . import __version__
 from .config import Config, ConfigError, load_config, validate_config
 from .extraction import (
+    DataSummaryRunResult,
     ExtractionError,
     ExtractionRunResult,
     ExtractionStatus,
     extract_pending_files,
     load_extraction_status,
+    summarize_data_files,
 )
 from .inventory import (
     InventoryError,
@@ -50,6 +52,7 @@ Available command shapes:
   uv run -m uni_rag_agent storage check
   uv run -m uni_rag_agent inventory run
   uv run -m uni_rag_agent extract run
+  uv run -m uni_rag_agent extract data-summaries
   uv run -m uni_rag_agent index keyword
   uv run -m uni_rag_agent index vector
   uv run -m uni_rag_agent retrieve "query text"
@@ -204,6 +207,17 @@ def _add_extract_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Print extraction and chunk coverage from SQLite.",
     )
     status_parser.set_defaults(handler=_handle_extract_status)
+
+    data_summary_parser = extract_subparsers.add_parser(
+        "data-summaries",
+        help="Summarize pending CSV/XLSX/JSON/JSONL/SQLite data files.",
+    )
+    data_summary_parser.add_argument(
+        "--file-id",
+        type=int,
+        help="Limit data-summary extraction to one pending data_schema file id.",
+    )
+    data_summary_parser.set_defaults(handler=_handle_extract_data_summaries)
 
 
 def _add_stub_group(
@@ -399,6 +413,55 @@ def _handle_extract_status(_: argparse.Namespace) -> int:
     return SUCCESS
 
 
+def _handle_extract_data_summaries(args: argparse.Namespace) -> int:
+    logger: Logger | None = None
+    command_name = "extract data-summaries"
+    try:
+        config = load_config()
+        validate_config(config)
+        logger = _command_logger(config, command_name)
+        logger.info(
+            "data summary run started",
+            extra={
+                "event": "data_summary_started",
+                "command": command_name,
+                "file_id": args.file_id,
+            },
+        )
+        result = summarize_data_files(config, file_id=args.file_id)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (StorageError, ExtractionError) as exc:
+        if logger is not None:
+            logger.exception(
+                "data summary run failed",
+                extra={
+                    "event": "data_summary_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "file_id": args.file_id,
+                },
+            )
+        print(f"Data summary error: {exc}", file=sys.stderr)
+        return EXTRACTION_ERROR
+
+    logger.info(
+        "data summary run completed",
+        extra={
+            "event": "data_summary_completed",
+            "command": command_name,
+            "run_id": result.run_id,
+            "status": result.status,
+            "count": result.files_seen,
+            "file_id": args.file_id,
+        },
+    )
+    print("Data summary run completed")
+    _print_data_summary_run_result(result)
+    return SUCCESS
+
+
 def _print_storage_result(result: StorageCheckResult) -> None:
     safe = result.as_safe_dict()
     for key in (
@@ -474,6 +537,28 @@ def _print_extraction_run_result(result: ExtractionRunResult) -> None:
     print(f"files_failed: {result.files_failed}")
     print(f"chunks_created: {result.chunks_created}")
     _print_count_mapping("by_source_type", result.by_source_type)
+    if result.failures:
+        print("failures:")
+        for failure in result.failures:
+            print(f"- file_id={failure.file_id} path={failure.path}: {failure.error}")
+    if result.diagnostics:
+        print("diagnostics:")
+        for diagnostic in result.diagnostics:
+            print(f"- {diagnostic}")
+
+
+def _print_data_summary_run_result(result: DataSummaryRunResult) -> None:
+    print(f"run_id: {result.run_id}")
+    print(f"status: {result.status}")
+    print(f"started_at: {result.started_at}")
+    print(f"finished_at: {result.finished_at}")
+    print(f"file_id: {result.file_id or 'all'}")
+    print(f"files_seen: {result.files_seen}")
+    print(f"files_indexed: {result.files_indexed}")
+    print(f"files_failed: {result.files_failed}")
+    print(f"summaries_created: {result.summaries_created}")
+    print(f"chunks_created: {result.chunks_created}")
+    _print_count_mapping("by_format", result.by_format)
     if result.failures:
         print("failures:")
         for failure in result.failures:

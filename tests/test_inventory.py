@@ -25,24 +25,46 @@ def make_config(tmp_path: Path) -> Config:
     return load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
 
 
-def test_classify_file_uses_spec_categories_and_statuses() -> None:
-    assert classify_file(Path("lecture.pdf")).category == "document"
-    assert classify_file(Path("lecture.pdf")).index_status == "pending"
-    assert classify_file(Path("slides.pptx")).category == "slides"
-    assert classify_file(Path("notebook.ipynb")).category == "notebook"
-    assert classify_file(Path("assignment.py")).category == "code"
-    assert classify_file(Path("dataset.csv")).category == "data_schema"
-    assert classify_file(Path("captions.vtt")).category == "transcript"
+@pytest.mark.parametrize(
+    ("filename", "category", "index_status", "has_reason"),
+    [
+        ("lecture.pdf", "document", "pending", False),
+        ("slides.pptx", "slides", "pending", False),
+        ("notebook.ipynb", "notebook", "pending", False),
+        ("assignment.py", "code", "pending", False),
+        ("dataset.csv", "data_schema", "pending", False),
+        ("captions.vtt", "transcript", "pending", False),
+        ("diagram.PNG", "image_metadata_only", "metadata_only", True),
+        ("archive.zip", "archive_metadata_only", "metadata_only", True),
+        ("setup.exe", "installer_metadata_only", "metadata_only", True),
+        ("vectors.bin", "model_metadata_only", "metadata_only", True),
+        ("unknown", "unknown_metadata_only", "metadata_only", True),
+    ],
+    ids=[
+        "pdf-document",
+        "pptx-slides",
+        "ipynb-notebook",
+        "py-code",
+        "csv-data-schema",
+        "vtt-transcript",
+        "png-image-metadata-only",
+        "zip-archive-metadata-only",
+        "exe-installer-metadata-only",
+        "bin-model-metadata-only",
+        "no-extension-unknown-metadata-only",
+    ],
+)
+def test_classify_file_uses_spec_category_status_and_reason(
+    filename: str,
+    category: str,
+    index_status: str,
+    has_reason: bool,
+) -> None:
+    classification = classify_file(Path(filename))
 
-    image = classify_file(Path("diagram.PNG"))
-    assert image.category == "image_metadata_only"
-    assert image.index_status == "metadata_only"
-    assert image.reason_not_indexed is not None
-
-    assert classify_file(Path("archive.zip")).category == "archive_metadata_only"
-    assert classify_file(Path("setup.exe")).category == "installer_metadata_only"
-    assert classify_file(Path("vectors.bin")).category == "model_metadata_only"
-    assert classify_file(Path("unknown")).category == "unknown_metadata_only"
+    assert classification.category == category
+    assert classification.index_status == index_status
+    assert (classification.reason_not_indexed is not None) is has_reason
 
 
 def test_inventory_run_preserves_exact_paths_and_classifies_mixed_files(

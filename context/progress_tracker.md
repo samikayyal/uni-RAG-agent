@@ -2,10 +2,10 @@
 
 ## Current Status
 
-* **Current Phase**: Phase 2: Text Extraction
-* **Current Goal**: Implement data schema summaries for pending structured files.
+* **Current Phase**: Phase 3: Indexing and Search
+* **Current Goal**: Implement keyword indexing over extracted chunks and data-schema summaries.
 
-The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, pytest discovery constrained to this project's `tests/` directory, Feature 03 inventory/file classification with CLI commands, SQLite upserts, idempotent reruns, timestamp-first/hash-on-change behavior, metadata-only skip reasons, missing-file soft marking, current course-total resets, explicit SQLite connection closing, accurate inventory run metrics, inventory summaries, inventory CLI JSONL run logs, a smaller inventory module split for models, classification vocabulary, and filesystem helpers, a pandas-based read-only inventory EDA notebook under `notebooks/`, Feature 04 text extraction/chunking with CLI commands, per-file extraction failures, source-location chunks, extraction CLI JSONL run logs, Python module-docstring chunk de-duplication, stale chunk/index cleanup on re-extraction, optional scanned-PDF OCR gating, legacy `.doc`/`.ppt` failure reasons, a focused extraction package split for models/constants, chunking, persistence, and grouped format extractors, a pandas/matplotlib read-only extraction EDA notebook with diagnostic plots, and a search-results foreign-key policy that nulls stale chunk references when chunks are deleted during re-extraction. The project has not yet implemented data schema summaries, indexing, retrieval, or answering behavior.
+The project now has the Feature 01 foundation package, CLI dispatcher, typed configuration loader, JSONL logging helper, fixture convention, `.env.example`, README developer commands, Feature 02 storage initialization, SQLite MVP schema creation, storage health checks, focused foundation/storage tests, negative-path config/storage diagnostics coverage, pytest discovery constrained to this project's `tests/` directory, Feature 03 inventory/file classification with CLI commands, SQLite upserts, idempotent reruns, timestamp-first/hash-on-change behavior, metadata-only skip reasons, missing-file soft marking, current course-total resets, explicit SQLite connection closing, accurate inventory run metrics, inventory summaries, inventory CLI JSONL run logs, a smaller inventory module split for models, classification vocabulary, and filesystem helpers, a pandas-based read-only inventory EDA notebook under `notebooks/`, Feature 04 text extraction/chunking with CLI commands, per-file extraction failures, source-location chunks, extraction CLI JSONL run logs, Python module-docstring chunk de-duplication, stale chunk/index cleanup on re-extraction, optional scanned-PDF OCR gating, legacy `.doc`/`.ppt` failure reasons, a focused extraction package split for models/constants, chunking, persistence, and grouped format extractors, a pandas/matplotlib read-only extraction EDA notebook with diagnostic plots, a search-results foreign-key policy that nulls stale chunk references when chunks are deleted during re-extraction, and Feature 05 data schema summaries for CSV/XLSX/JSON/JSONL/SQLite/DB files with deterministic schema/sample summaries, `data_summaries` persistence, `data_schema` chunks, CLI JSONL run logs, a compact five-file data-summary package split for public API, orchestration/chunk conversion, format readers, persistence, and summary builders/utilities, and a pandas/matplotlib read-only data-schema EDA notebook. The project has not yet implemented keyword indexing, vector indexing, retrieval, evidence packets, or answering behavior.
 
 ## Project Roadmap
 
@@ -41,9 +41,9 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
   - [x] Parse notebooks into one chunk per cell with truncated text outputs.
   - [x] Parse Python code via AST into functions/classes/imports; regex fallback for R/C++/MATLAB.
   - [x] Parse existing VTT transcripts.
-  - [ ] Generate schema summaries for CSV/XLSX/JSON/JSONL/SQLite/DB files.
+  - [x] Generate schema summaries for CSV/XLSX/JSON/JSONL/SQLite/DB files.
   - [x] Add `notebooks/extraction_eda.ipynb` when text extraction lands.
-  - [ ] Add `notebooks/data_schema_eda.ipynb` when data summaries land.
+  - [x] Add `notebooks/data_schema_eda.ipynb` when data summaries land.
 
 - [ ] **Phase 3: Indexing and Search**
   - [ ] Build chunk table and content metadata.
@@ -118,4 +118,6 @@ The project now has the Feature 01 foundation package, CLI dispatcher, typed con
 * [x] Fix `notebooks/extraction_eda.ipynb` so its SQLite setup locates the repository root from either the project root or `notebooks/` before opening `data/uni_rag.sqlite` in read-only mode.
 * [x] Add matplotlib-backed plots to `notebooks/extraction_eda.ipynb` for extraction outcomes, category/status coverage, chunk coverage, text/token distributions, failure reason counts, and failure hotspots; document matplotlib as the accepted EDA plotting dependency.
 * [x] Split the large extraction core into dedicated models/constants, chunking, persistence, and grouped format extractor modules while preserving the public extraction API and CLI behavior.
-* [ ] Implement Feature 05 data schema summaries.
+* [x] Implement Feature 05 data schema summaries.
+* [x] Split the large Feature 05 data-summary module into a compact five-file package for public API, orchestration/chunk conversion, format readers, persistence, and summary builders/utilities while preserving the public extraction API.
+* [x] Verify and fix Brooks test-quality findings for Features 01-05: extract shared SQLite search-result helpers, add direct extraction/data-summary boundary regressions, label broad smoke-test assertions, and move CLI integration assertions from exact stdout strings to SQLite/run-log state.

@@ -26,6 +26,7 @@ uv run -m uni_rag_agent storage check
 uv run -m uni_rag_agent inventory run
 uv run -m uni_rag_agent inventory summary
 uv run -m uni_rag_agent extract run
+uv run -m uni_rag_agent extract data-summaries
 uv run -m uni_rag_agent extract status
 ```
 
@@ -44,8 +45,10 @@ uv run -m uni_rag_agent inventory run
 uv run -m uni_rag_agent inventory summary
 uv run -m uni_rag_agent extract run
 uv run -m uni_rag_agent extract run --category document
+uv run -m uni_rag_agent extract data-summaries
+uv run -m uni_rag_agent extract data-summaries --file-id 123
 uv run -m uni_rag_agent extract status
-uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py tests/test_extraction.py
+uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py tests/test_extraction.py tests/test_data_summaries.py
 ```
 
 Feature 02 storage commands create the generated local data layout:
@@ -69,8 +72,7 @@ uv run -m uni_rag_agent inventory summary
 ```
 
 Extraction commands process pending text-like files from inventory, write
-`extracted_documents` and `chunks`, preserve source locations, fail per file, and
-leave data-schema files pending for the Feature 05 summary pipeline:
+`extracted_documents` and `chunks`, preserve source locations, and fail per file:
 
 ```powershell
 uv run -m uni_rag_agent extract run
@@ -78,7 +80,17 @@ uv run -m uni_rag_agent extract run --category document
 uv run -m uni_rag_agent extract status
 ```
 
-Inventory and extraction CLI runs write lifecycle JSONL logs under `data/runs/`.
+Data-summary extraction processes pending `data_schema` files, writes
+`data_summaries`, creates `data_schema` chunks for later keyword/vector indexing,
+and samples schemas without embedding full datasets:
+
+```powershell
+uv run -m uni_rag_agent extract data-summaries
+uv run -m uni_rag_agent extract data-summaries --file-id 123
+```
+
+Inventory, extraction, and data-summary CLI runs write lifecycle JSONL logs under
+`data/runs/`.
 
 Remaining MVP command shapes are registered for later specs:
 

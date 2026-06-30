@@ -141,3 +141,63 @@ class ExtractionStatus:
             "chunks_by_source_type": dict(self.chunks_by_source_type),
             "recent_failures": [failure.__dict__ for failure in self.recent_failures],
         }
+
+
+@dataclass(frozen=True)
+class DataSummarySection:
+    name: str
+    kind: str
+    location_value: str
+    row_count: int | None
+    column_count: int | None
+    columns: tuple[Mapping[str, object], ...]
+    sample_rows: tuple[Mapping[str, object], ...]
+    summary_text: str
+
+
+@dataclass(frozen=True)
+class DataSummary:
+    file_id: int
+    format: str
+    row_count: int | None
+    column_count: int | None
+    table_count: int | None
+    sheet_count: int | None
+    schema_json: str
+    sample_json: str | None
+    summary_text: str
+    sections: tuple[DataSummarySection, ...]
+
+
+@dataclass(frozen=True)
+class DataSummaryRunResult:
+    run_id: int
+    started_at: str
+    finished_at: str
+    status: str
+    file_id: int | None
+    files_seen: int
+    files_indexed: int
+    files_failed: int
+    summaries_created: int
+    chunks_created: int
+    by_format: Mapping[str, int]
+    failures: tuple[ExtractionFailureSummary, ...]
+    diagnostics: tuple[str, ...]
+
+    def as_safe_dict(self) -> dict[str, object]:
+        return {
+            "run_id": self.run_id,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "status": self.status,
+            "file_id": self.file_id,
+            "files_seen": self.files_seen,
+            "files_indexed": self.files_indexed,
+            "files_failed": self.files_failed,
+            "summaries_created": self.summaries_created,
+            "chunks_created": self.chunks_created,
+            "by_format": dict(self.by_format),
+            "failures": [failure.__dict__ for failure in self.failures],
+            "diagnostics": list(self.diagnostics),
+        }

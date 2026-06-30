@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from uni_rag_agent.storage import (
     initialize_schema,
 )
 from uni_rag_agent.storage import core as storage_core
+from tests.sqlite_helpers import insert_minimal_chunk, insert_search_result
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UNI_RAG_ENV_PREFIX = "UNI_RAG_"
@@ -108,140 +110,13 @@ def test_initialize_schema_migrates_existing_search_results_chunk_reference(
     ensure_data_dirs(config)
     with connect_sqlite(config) as connection:
         initialize_schema(connection)
-        connection.execute("DROP TABLE search_results")
-        connection.execute(
-            """
-            CREATE TABLE search_results (
-                id INTEGER PRIMARY KEY,
-                search_run_id INTEGER NOT NULL REFERENCES search_runs(id),
-                chunk_id INTEGER REFERENCES chunks(id),
-                file_id INTEGER REFERENCES files(id),
-                retrieval_method TEXT NOT NULL,
-                rank INTEGER NOT NULL,
-                score REAL,
-                selected_for_evidence INTEGER NOT NULL DEFAULT 0,
-                result_json TEXT
-            )
-            """
+        _replace_search_results_with_legacy_chunk_fk(connection)
+        stored_chunk = insert_minimal_chunk(connection, config)
+        search_result = insert_search_result(
+            connection,
+            chunk_id=stored_chunk.chunk_id,
+            file_id=stored_chunk.file_id,
         )
-        file_id = connection.execute(
-            """
-            INSERT INTO files (
-                path,
-                relative_path,
-                filename,
-                extension,
-                size_bytes,
-                category,
-                index_status,
-                discovered_at,
-                last_seen_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                str(config.courses_root / "notes.md"),
-                "notes.md",
-                "notes.md",
-                ".md",
-                1,
-                "document",
-                "indexed",
-                "2026-06-27T00:00:00+00:00",
-                "2026-06-27T00:00:00+00:00",
-            ),
-        ).lastrowid
-        extraction_run_id = connection.execute(
-            """
-            INSERT INTO extraction_runs (started_at, status, config_json)
-            VALUES (?, ?, ?)
-            """,
-            ("2026-06-27T00:00:00+00:00", "completed", "{}"),
-        ).lastrowid
-        extracted_document_id = connection.execute(
-            """
-            INSERT INTO extracted_documents (
-                file_id,
-                extraction_run_id,
-                extractor_name,
-                status,
-                text_length,
-                chunk_count,
-                extracted_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                file_id,
-                extraction_run_id,
-                "markdown-text",
-                "indexed",
-                4,
-                1,
-                "2026-06-27T00:00:00+00:00",
-            ),
-        ).lastrowid
-        chunk_id = connection.execute(
-            """
-            INSERT INTO chunks (
-                file_id,
-                extracted_document_id,
-                chunk_uid,
-                source_type,
-                chunk_index,
-                text,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                file_id,
-                extracted_document_id,
-                "file-1-chunk-0",
-                "document",
-                0,
-                "BM25",
-                "2026-06-27T00:00:00+00:00",
-            ),
-        ).lastrowid
-        search_run_id = connection.execute(
-            """
-            INSERT INTO search_runs (
-                query,
-                router_output_json,
-                searched_courses_json,
-                searched_indexes_json,
-                keyword_terms_json,
-                semantic_queries_json,
-                started_at,
-                status
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "bm25",
-                "{}",
-                "[]",
-                "[]",
-                '["bm25"]',
-                "[]",
-                "2026-06-27T00:00:00+00:00",
-                "completed",
-            ),
-        ).lastrowid
-        search_result_id = connection.execute(
-            """
-            INSERT INTO search_results (
-                search_run_id,
-                chunk_id,
-                file_id,
-                retrieval_method,
-                rank
-            )
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (search_run_id, chunk_id, file_id, "keyword", 1),
-        ).lastrowid
         connection.commit()
 
         initialize_schema(connection)
@@ -251,15 +126,15 @@ def test_initialize_schema_migrates_existing_search_results_chunk_reference(
             for row in rows
             if row["table"] == "chunks" and row["from"] == "chunk_id"
         )
-        connection.execute("DELETE FROM chunks WHERE id = ?", (chunk_id,))
+        connection.execute("DELETE FROM chunks WHERE id = ?", (stored_chunk.chunk_id,))
         historical_result = connection.execute(
             "SELECT chunk_id, file_id FROM search_results WHERE id = ?",
-            (search_result_id,),
+            (search_result.search_result_id,),
         ).fetchone()
 
     assert chunk_reference["on_delete"] == "SET NULL"
     assert historical_result["chunk_id"] is None
-    assert historical_result["file_id"] == file_id
+    assert historical_result["file_id"] == stored_chunk.file_id
 
 
 def test_initialize_schema_reports_clear_fts5_failure(
@@ -349,6 +224,27 @@ def test_storage_check_cli_fails_clearly_before_init(tmp_path: Path) -> None:
     assert result.returncode == 3
     assert "Storage check failed" in result.stdout
     assert "SQLite database does not exist" in result.stdout
+
+
+def _replace_search_results_with_legacy_chunk_fk(
+    connection: sqlite3.Connection,
+) -> None:
+    connection.execute("DROP TABLE search_results")
+    connection.execute(
+        """
+        CREATE TABLE search_results (
+            id INTEGER PRIMARY KEY,
+            search_run_id INTEGER NOT NULL REFERENCES search_runs(id),
+            chunk_id INTEGER REFERENCES chunks(id),
+            file_id INTEGER REFERENCES files(id),
+            retrieval_method TEXT NOT NULL,
+            rank INTEGER NOT NULL,
+            score REAL,
+            selected_for_evidence INTEGER NOT NULL DEFAULT 0,
+            result_json TEXT
+        )
+        """
+    )
 
 
 def _subprocess_env(overrides: dict[str, str]) -> dict[str, str]:

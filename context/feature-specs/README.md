@@ -62,7 +62,7 @@ EDA notebooks are planned only for stages that produce generated artifacts worth
 | 02 | None required for MVP | Not applicable | `storage check` is the canonical storage-health workflow until schema migration complexity exists. |
 | 03 | `notebooks/inventory_eda.ipynb` | Implemented | `courses`, `files`, inventory run rows, categories, statuses, skip reasons, backlog, freshness. |
 | 04 | `notebooks/extraction_eda.ipynb` | Implemented | `extraction_runs`, `extracted_documents`, `chunks`, extraction failures, failure-reason plots, text/chunk coverage. |
-| 05 | `notebooks/data_schema_eda.ipynb` | Planned | `data_summaries`, data-schema chunks, row/column/table/sheet counts, sample coverage. |
+| 05 | `notebooks/data_schema_eda.ipynb` | Implemented | `data_summaries`, data-schema chunks, row/column/table/sheet counts, sample coverage. |
 | 06 | `notebooks/keyword_index_eda.ipynb` | Planned | `chunk_fts`, keyword coverage, source-type distribution, query smoke checks. |
 | 07 | `notebooks/vector_index_eda.ipynb` | Planned | `embeddings`, Chroma collection metadata, embedding model/dimension coverage. |
 | 08-09 | `notebooks/retrieval_eda.ipynb` | Planned | Router outputs, `search_runs`, `search_results`, RRF mix, evidence packets, weaknesses. |
