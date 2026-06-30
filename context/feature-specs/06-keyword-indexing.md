@@ -53,10 +53,11 @@ Internal interfaces:
 ```python
 sync_keyword_index(config: Config, rebuild: bool = False) -> KeywordIndexResult
 keyword_search(
+    config: Config,
     query: str,
     course: str | None = None,
     indexes: list[str] | None = None,
-    top_k: int = 20,
+    top_k: int | None = None,
 ) -> list[RetrievalResult]
 ```
 
@@ -92,10 +93,15 @@ Read:
 
 `chunk_fts` is a denormalized FTS projection keyed by `chunk_id`; it is not an external-content FTS table directly bound to `chunks`. The implementation should populate it from `chunks` joined to `files` and `courses` so keyword search can match chunk text, titles, course names, and file paths. It may use rebuild-first behavior for MVP, then add incremental updates later if needed.
 
+The projection includes only chunks whose joined source file currently has
+`files.index_status = 'indexed'`. Keyword search also reapplies that filter while
+joining back to authoritative rows so stale FTS rows cannot return results after
+inventory or extraction status changes.
+
 ## Workflow
 
 1. Validate SQLite FTS5 availability.
-2. For rebuilds, clear and repopulate `chunk_fts` from all current chunks joined to their file and course rows.
+2. For rebuilds, clear and repopulate `chunk_fts` from all current chunks joined to their file and course rows where `files.index_status = 'indexed'`.
 3. Include chunk text, title, course name, and file path terms in searchable fields.
 4. Translate logical index filters to logical chunk source types.
 5. Execute FTS query safely.
@@ -109,7 +115,8 @@ Read:
 - Invalid FTS syntax should return a clear query error, not crash the app.
 - Empty indexes should return no results with a clear diagnostic.
 - Keyword indexing must not read source files under `Courses`; it reads extracted chunks only.
-- Keyword search must not mutate source or generated content except optional search logs in later specs.
+- Keyword search must not mutate source or generated content; persistent search logs belong to later specs.
+- Missing, skipped, failed, pending, and metadata-only source files must not appear in keyword-index or keyword-search results.
 - The EDA notebook must read generated app data only and must not mutate `chunk_fts`, SQLite, or `Courses`.
 - Notebook outputs and execution counts should be cleared before commit.
 

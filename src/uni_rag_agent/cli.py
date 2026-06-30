@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Mapping, Sequence
 from logging import Logger
@@ -26,6 +27,14 @@ from .inventory import (
     inventory_courses,
     load_inventory_summary,
 )
+from .indexing import (
+    KeywordIndexError,
+    KeywordIndexResult,
+    KeywordSearchError,
+    keyword_search,
+    sync_keyword_index,
+)
+from .retrieval import RetrievalResult
 from .storage import (
     StorageCheckResult,
     StorageError,
@@ -42,6 +51,8 @@ CONFIG_ERROR = 2
 STORAGE_ERROR = 3
 INVENTORY_ERROR = 4
 EXTRACTION_ERROR = 5
+INDEX_ERROR = 6
+SEARCH_ERROR = 7
 
 CommandHandler = Callable[[argparse.Namespace], int]
 
@@ -55,6 +66,8 @@ Available command shapes:
   uv run -m uni_rag_agent extract data-summaries
   uv run -m uni_rag_agent index keyword
   uv run -m uni_rag_agent index vector
+  uv run -m uni_rag_agent search keyword "query text"
+  uv run -m uni_rag_agent search semantic "query text"
   uv run -m uni_rag_agent retrieve "query text"
   uv run -m uni_rag_agent eval run
   uv run -m uni_rag_agent app serve
@@ -91,15 +104,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_storage_commands(subparsers)
     _add_inventory_commands(subparsers)
     _add_extract_commands(subparsers)
-    _add_stub_group(
-        subparsers,
-        "index",
-        "Index maintenance commands.",
-        {
-            "keyword": ("index keyword", "Feature Spec 06: Keyword Indexing"),
-            "vector": ("index vector", "Feature Spec 07: Vector Indexing"),
-        },
-    )
+    _add_index_commands(subparsers)
+    _add_search_commands(subparsers)
     _add_retrieve_command(subparsers)
     _add_stub_group(
         subparsers,
@@ -218,6 +224,85 @@ def _add_extract_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Limit data-summary extraction to one pending data_schema file id.",
     )
     data_summary_parser.set_defaults(handler=_handle_extract_data_summaries)
+
+
+def _add_index_commands(subparsers: argparse._SubParsersAction) -> None:
+    index_parser = subparsers.add_parser(
+        "index",
+        help="Index maintenance commands.",
+    )
+    index_subparsers = index_parser.add_subparsers(
+        dest="index_command",
+        metavar="subcommand",
+    )
+    index_subparsers.required = True
+
+    keyword_parser = index_subparsers.add_parser(
+        "keyword",
+        help="Rebuild the SQLite FTS5 keyword projection from current chunks.",
+    )
+    keyword_parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Explicitly request the MVP full rebuild behavior.",
+    )
+    keyword_parser.set_defaults(handler=_handle_index_keyword)
+
+    vector_parser = index_subparsers.add_parser("vector")
+    vector_parser.set_defaults(
+        handler=_not_implemented_handler(
+            "index vector",
+            "Feature Spec 07: Vector Indexing",
+        ),
+    )
+
+
+def _add_search_commands(subparsers: argparse._SubParsersAction) -> None:
+    search_parser = subparsers.add_parser(
+        "search",
+        help="Direct search commands.",
+    )
+    search_subparsers = search_parser.add_subparsers(
+        dest="search_command",
+        metavar="subcommand",
+    )
+    search_subparsers.required = True
+
+    keyword_parser = search_subparsers.add_parser(
+        "keyword",
+        help="Run plain-text SQLite FTS5 keyword search over current chunks.",
+    )
+    keyword_parser.add_argument("query", nargs="+", help="Plain-text query.")
+    keyword_parser.add_argument(
+        "--course",
+        help="Case-insensitive exact course-name filter.",
+    )
+    keyword_parser.add_argument(
+        "--index",
+        dest="indexes",
+        action="append",
+        help="Logical index filter such as slides_index. May be repeated.",
+    )
+    keyword_parser.add_argument(
+        "--top-k",
+        type=int,
+        help="Maximum keyword results to return.",
+    )
+    keyword_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print JSON result objects instead of a table.",
+    )
+    keyword_parser.set_defaults(handler=_handle_search_keyword)
+
+    semantic_parser = search_subparsers.add_parser("semantic")
+    semantic_parser.add_argument("query", nargs="+", help="Query text.")
+    semantic_parser.set_defaults(
+        handler=_not_implemented_handler(
+            "search semantic",
+            "Feature Spec 07: Vector Indexing",
+        ),
+    )
 
 
 def _add_stub_group(
@@ -441,6 +526,85 @@ def _handle_extract_data_summaries(args: argparse.Namespace) -> int:
     )
 
 
+def _handle_index_keyword(args: argparse.Namespace) -> int:
+    command_name = "index keyword"
+    logger: Logger | None = None
+    try:
+        config = load_config()
+        validate_config(config)
+        logger = _command_logger(config, command_name)
+        logger.info(
+            "keyword index started",
+            extra={
+                "event": "keyword_index_started",
+                "command": command_name,
+                "status": "started",
+            },
+        )
+        result = sync_keyword_index(config, rebuild=args.rebuild)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (StorageError, KeywordIndexError) as exc:
+        if logger is not None:
+            logger.exception(
+                "keyword index failed",
+                extra={
+                    "event": "keyword_index_failed",
+                    "command": command_name,
+                    "status": "failed",
+                },
+            )
+        print(f"Keyword index error: {exc}", file=sys.stderr)
+        return INDEX_ERROR
+
+    logger.info(
+        "keyword index completed",
+        extra={
+            "event": "keyword_index_completed",
+            "command": command_name,
+            "status": "completed",
+            "count": result.rows_indexed,
+            "rows_removed": result.rows_removed,
+            "chunks_seen": result.chunks_seen,
+            "rows_indexed": result.rows_indexed,
+        },
+    )
+    print("Keyword index completed")
+    _print_keyword_index_result(result)
+    return SUCCESS
+
+
+def _handle_search_keyword(args: argparse.Namespace) -> int:
+    try:
+        config = load_config()
+        results = keyword_search(
+            config,
+            query=" ".join(args.query),
+            course=args.course,
+            indexes=args.indexes,
+            top_k=args.top_k,
+        )
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (StorageError, KeywordSearchError) as exc:
+        print(f"Keyword search error: {exc}", file=sys.stderr)
+        return SEARCH_ERROR
+
+    if args.json:
+        print(
+            json.dumps(
+                [result.as_safe_dict() for result in results],
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        _print_keyword_search_results(results)
+    return SUCCESS
+
+
 def _print_storage_result(result: StorageCheckResult) -> None:
     safe = result.as_safe_dict()
     for key in (
@@ -562,6 +726,57 @@ def _print_extraction_status(status: ExtractionStatus) -> None:
         print("recent_failures:")
         for failure in status.recent_failures:
             print(f"- file_id={failure.file_id} path={failure.path}: {failure.error}")
+
+
+def _print_keyword_index_result(result: KeywordIndexResult) -> None:
+    print("mode: rebuild")
+    print(f"rows_removed: {result.rows_removed}")
+    print(f"chunks_seen: {result.chunks_seen}")
+    print(f"rows_indexed: {result.rows_indexed}")
+    _print_count_mapping("by_source_type", result.by_source_type)
+    if result.diagnostics:
+        print("diagnostics:")
+        for diagnostic in result.diagnostics:
+            print(f"- {diagnostic}")
+
+
+def _print_keyword_search_results(results: Sequence[RetrievalResult]) -> None:
+    if not results:
+        print("No keyword results")
+        return
+
+    print("rank | score | chunk_id | source/location | course | path | snippet")
+    print("---- | ----- | -------- | --------------- | ------ | ---- | -------")
+    for result in results:
+        location = _format_source_location(result)
+        print(
+            " | ".join(
+                (
+                    str(result.rank),
+                    f"{result.score:.6g}",
+                    str(result.chunk_id),
+                    _table_value(location, 24),
+                    _table_value(result.course or "", 28),
+                    _table_value(result.file_path, 48),
+                    _table_value(result.snippet.replace("\n", " "), 80),
+                )
+            )
+        )
+
+
+def _format_source_location(result: RetrievalResult) -> str:
+    if result.location_type and result.location_value:
+        return f"{result.source_type}:{result.location_type} {result.location_value}"
+    if result.location_type:
+        return f"{result.source_type}:{result.location_type}"
+    return result.source_type
+
+
+def _table_value(value: str, max_chars: int) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return f"{normalized[: max_chars - 3]}..."
 
 
 def _command_logger(config: Config, command_name: str) -> Logger:

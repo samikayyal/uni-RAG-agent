@@ -26,18 +26,36 @@ def insert_minimal_chunk(
     connection: sqlite3.Connection,
     config: Config,
     *,
+    course_name: str | None = None,
     filename: str = "notes.md",
     relative_path: str | None = None,
     extension: str = ".md",
     category: str = "document",
+    index_status: str = "indexed",
     source_type: str = "document",
+    title: str | None = None,
     text: str = "BM25",
+    location_type: str | None = None,
+    location_value: str | None = None,
     timestamp: str = TEST_TIMESTAMP,
 ) -> MinimalChunkRows:
     relative_path = relative_path or filename
+    course_id = None
+    if course_name is not None:
+        course_id = _insert_course(
+            connection,
+            config,
+            course_name=course_name,
+            timestamp=timestamp,
+        )
+        file_path = config.courses_root / course_name / relative_path
+    else:
+        file_path = config.courses_root / relative_path
+
     file_id = connection.execute(
         """
         INSERT INTO files (
+            course_id,
             path,
             relative_path,
             filename,
@@ -48,16 +66,17 @@ def insert_minimal_chunk(
             discovered_at,
             last_seen_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            str(config.courses_root / relative_path),
+            course_id,
+            str(file_path),
             relative_path,
             filename,
             extension,
             len(text.encode("utf-8")),
             category,
-            "indexed",
+            index_status,
             timestamp,
             timestamp,
         ),
@@ -100,10 +119,13 @@ def insert_minimal_chunk(
             chunk_uid,
             source_type,
             chunk_index,
+            title,
             text,
+            location_type,
+            location_value,
             created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             file_id,
@@ -111,7 +133,10 @@ def insert_minimal_chunk(
             f"file-{file_id}-chunk-0",
             source_type,
             0,
+            title,
             text,
+            location_type,
+            location_value,
             timestamp,
         ),
     ).lastrowid
@@ -121,6 +146,45 @@ def insert_minimal_chunk(
         extracted_document_id=int(extracted_document_id),
         chunk_id=int(chunk_id),
     )
+
+
+def _insert_course(
+    connection: sqlite3.Connection,
+    config: Config,
+    *,
+    course_name: str,
+    timestamp: str,
+) -> int:
+    course_path = config.courses_root / course_name
+    row = connection.execute(
+        "SELECT id FROM courses WHERE name = ?",
+        (course_name,),
+    ).fetchone()
+    if row is not None:
+        return int(row["id"])
+
+    course_id = connection.execute(
+        """
+        INSERT INTO courses (
+            name,
+            path,
+            file_count,
+            total_bytes,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            course_name,
+            str(course_path),
+            0,
+            0,
+            timestamp,
+            timestamp,
+        ),
+    ).lastrowid
+    return int(course_id)
 
 
 def insert_search_result(

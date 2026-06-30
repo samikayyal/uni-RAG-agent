@@ -34,6 +34,7 @@ This document records the key decisions made during the design and development o
 | **DEC-026** | Early hand-curated evaluation set of 15-20 questions | `Accepted` | 2026-06-21 |
 | **DEC-027** | Use read-only EDA notebooks for generated app data | `Accepted` | 2026-06-26 |
 | **DEC-028** | Null stale search-result chunk references on chunk deletion | `Accepted` | 2026-06-27 |
+| **DEC-029** | Exclude non-current source files from retrieval indexes | `Accepted` | 2026-06-30 |
 
 ---
 
@@ -591,4 +592,33 @@ Use `ON DELETE SET NULL` for `search_results.chunk_id`. Historical search result
 ### Consequences
 
 Changed-file re-extraction can replace chunks without being blocked by historical retrieval rows. Future retrieval and EDA code must treat `search_results.chunk_id` as nullable and should join chunk details with a left join when inspecting historical results. Historical rows whose chunks were deleted can still identify the source file and retrieval metadata, but they cannot rehydrate the exact old chunk text from `chunks`.
+
+---
+
+## DEC-029: Exclude non-current source files from retrieval indexes
+
+* **Status**: Accepted
+* **Date**: 2026-06-30
+
+### Context
+
+Inventory and extraction preserve historical SQLite rows so reruns can explain
+missing files, skipped files, failures, and stale chunks. That history is useful
+for diagnostics, but retrieval should represent the currently indexed corpus.
+
+### Decision
+
+Current retrieval indexes exclude chunks whose joined source file does not have
+`files.index_status = 'indexed'`. Feature 06 keyword indexing rebuilds
+`chunk_fts` only from current indexed files, and keyword search reapplies the
+same filter when joining FTS rows back to `chunks`, `files`, and `courses`.
+Future retrieval indexes should follow the same current-file-only policy unless
+a later decision creates an explicit historical-search mode.
+
+### Consequences
+
+Missing, skipped, failed, pending, and metadata-only source files do not leak into
+normal answers even if historical chunks or stale FTS rows remain in SQLite.
+Operational notebooks and storage diagnostics may still inspect those historical
+rows, but answer-time retrieval uses only the current indexed corpus.
 

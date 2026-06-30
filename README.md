@@ -28,6 +28,9 @@ uv run -m uni_rag_agent inventory summary
 uv run -m uni_rag_agent extract run
 uv run -m uni_rag_agent extract data-summaries
 uv run -m uni_rag_agent extract status
+uv run -m uni_rag_agent index keyword
+uv run -m uni_rag_agent search keyword "mapreduce"
+uv run -m uni_rag_agent search keyword "mapreduce" --json
 ```
 
 Runtime configuration is loaded from `.env` with non-secret defaults documented
@@ -48,7 +51,13 @@ uv run -m uni_rag_agent extract run --category document
 uv run -m uni_rag_agent extract data-summaries
 uv run -m uni_rag_agent extract data-summaries --file-id 123
 uv run -m uni_rag_agent extract status
-uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py tests/test_extraction.py tests/test_data_summaries.py
+uv run -m uni_rag_agent index keyword
+uv run -m uni_rag_agent index keyword --rebuild
+uv run -m uni_rag_agent search keyword "mapreduce"
+uv run -m uni_rag_agent search keyword "mapreduce" --course "Information Retrieval"
+uv run -m uni_rag_agent search keyword "mapreduce" --index slides_index --top-k 10
+uv run -m uni_rag_agent search keyword "mapreduce" --json
+uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py tests/test_extraction.py tests/test_data_summaries.py tests/test_keyword_indexing.py
 ```
 
 Feature 02 storage commands create the generated local data layout:
@@ -92,19 +101,36 @@ uv run -m uni_rag_agent extract data-summaries --file-id 123
 Inventory, extraction, and data-summary CLI runs write lifecycle JSONL logs under
 `data/runs/`.
 
-Remaining MVP command shapes are registered for later specs:
+Keyword indexing rebuilds the SQLite FTS5 `chunk_fts` projection from current
+indexed chunks only. It searches chunk text, titles, course names, and file
+paths, and it supports exact course filters plus logical index filters such as
+`slides_index`:
 
 ```powershell
 uv run -m uni_rag_agent index keyword
+uv run -m uni_rag_agent search keyword "mapreduce"
+uv run -m uni_rag_agent search keyword "mapreduce" --course "Information Retrieval"
+uv run -m uni_rag_agent search keyword "mapreduce" --index slides_index --top-k 10
+uv run -m uni_rag_agent search keyword "mapreduce" --json
+```
+
+`index keyword` writes lifecycle JSONL logs under `data/runs/`. Direct keyword
+search does not write `search_runs` or `search_results`; persistent retrieval
+traces belong to later evidence/retrieval specs.
+
+Remaining MVP command shapes are registered for later specs:
+
+```powershell
 uv run -m uni_rag_agent index vector
+uv run -m uni_rag_agent search semantic "query text"
 uv run -m uni_rag_agent retrieve "query text"
 uv run -m uni_rag_agent eval run
 uv run -m uni_rag_agent app serve
 ```
 
-The remaining command groups (`index`, `retrieve`, `eval`, and `app`) are stubs
-until their feature specs are implemented. They should fail clearly and must not
-scan or mutate `Courses/`.
+`index vector`, `search semantic`, `retrieve`, `eval`, and `app` are stubs until
+their feature specs are implemented. They should fail clearly and must not scan
+or mutate `Courses/`.
 
 ## MVP Module Order
 

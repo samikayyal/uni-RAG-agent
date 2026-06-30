@@ -1,1 +1,5 @@
-"""Retrieval package placeholder for Feature Spec 08."""
+"""Retrieval public contracts."""
+
+from .models import RetrievalResult
+
+__all__ = ["RetrievalResult"]

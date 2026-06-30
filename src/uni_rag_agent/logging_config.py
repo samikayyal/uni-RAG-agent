@@ -10,12 +10,15 @@ from pathlib import Path
 from typing import Any
 
 SAFE_EXTRA_FIELDS = {
+    "chunks_seen",
     "command",
     "count",
     "duration_ms",
     "event",
     "path",
     "run_id",
+    "rows_indexed",
+    "rows_removed",
     "status",
 }
 

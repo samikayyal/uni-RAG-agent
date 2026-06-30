@@ -96,7 +96,7 @@ Stage notebooks are created when the producing stage is implemented. Do not add 
 | Inventory / 03 | `notebooks/inventory_eda.ipynb` | Implemented | `courses`, `files`, inventory rows in `extraction_runs` | File volume, categories, statuses, skip reasons, extraction backlog, freshness. |
 | Text extraction / 04 | `notebooks/extraction_eda.ipynb` | Implemented | `extraction_runs`, `extracted_documents`, `chunks`, `files` | Extraction yield, failure-reason plots, text length, chunk counts, source-location coverage. |
 | Data summaries / 05 | `notebooks/data_schema_eda.ipynb` | Implemented | `data_summaries`, `chunks`, `files` | Dataset summary coverage, row/column/table counts, sample availability, large/failed data files. |
-| Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Planned when Feature 06 lands | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
+| Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Implemented | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
 | Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Planned when Feature 07 lands | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |
 | Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Planned when Features 08-09 land | `search_runs`, `search_results`, `evidence_packets` | Router behavior, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
 | Answering / 10 | `notebooks/answering_eda.ipynb` | Planned when Feature 10 lands | `answers`, `evidence_packets` | Citation validity, limitations, model/fake-adapter traces, insufficient-evidence behavior. |
@@ -346,10 +346,15 @@ SELECT
     chunks.source_type
 FROM chunks
 JOIN files ON files.id = chunks.file_id
-LEFT JOIN courses ON courses.id = files.course_id;
+LEFT JOIN courses ON courses.id = files.course_id
+WHERE files.index_status = 'indexed';
 ```
 
-For the MVP, keyword indexing may rebuild `chunk_fts` from this projection. Incremental synchronization can be added later, but it must preserve this denormalized search contract.
+For the MVP, keyword indexing rebuilds `chunk_fts` from this projection and only
+indexes chunks whose source file is currently `indexed`. Missing, skipped,
+failed, pending, or metadata-only source files are excluded even if historical
+chunks remain in SQLite. Incremental synchronization can be added later, but it
+must preserve this denormalized, current-file-only search contract.
 
 ### embeddings
 
@@ -565,6 +570,7 @@ Rules:
 
 - keep title, text, course name, and file path searchable;
 - rebuild `chunk_fts` from the joined `chunks`/`files`/`courses` projection for the MVP;
+- include only chunks whose joined `files.index_status = 'indexed'`;
 - add incremental FTS updates later only if they preserve the same projection fields.
 
 ### Stage 4: Embedding
