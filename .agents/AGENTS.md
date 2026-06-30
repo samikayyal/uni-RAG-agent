@@ -1,1 +1,0 @@
-**Look at the AGENTS.md file at the root of the project**

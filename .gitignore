@@ -13,3 +13,14 @@ wheels/
 Courses/
 data/
 .env
+
+# Tooling and caches
+.codex/
+.agents/
+.claude/
+.pytest_cache/
+.ruff_cache/
+
+# Ignore all markdown files in the project root except README.md
+/*.md
+!/README.md
