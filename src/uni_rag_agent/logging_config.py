@@ -12,6 +12,7 @@ from typing import Any
 
 SAFE_EXTRA_FIELDS = {
     "chunks_seen",
+    "collection",
     "command",
     "count",
     "course",
@@ -19,6 +20,7 @@ SAFE_EXTRA_FIELDS = {
     "event",
     "indexes",
     "keyword_terms",
+    "model",
     "path",
     "result_count",
     "run_id",

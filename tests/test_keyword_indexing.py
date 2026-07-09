@@ -309,7 +309,7 @@ def test_empty_keyword_index_returns_no_results_without_crashing(
     assert keyword_search(config, "bm25") == []
 
 
-def test_keyword_cli_indexes_searches_and_keeps_semantic_stub(
+def test_keyword_cli_indexes_and_searches(
     tmp_path: Path,
 ) -> None:
     courses_root = tmp_path / "Courses"
@@ -339,6 +339,7 @@ def test_keyword_cli_indexes_searches_and_keeps_semantic_stub(
     table_result = _run_cli(env, "search", "keyword", "BM25")
     json_result = _run_cli(env, "search", "keyword", "BM25", "--json")
     semantic_result = _run_cli(env, "search", "semantic", "BM25")
+    semantic_json_result = _run_cli(env, "search", "semantic", "BM25", "--json")
 
     assert inventory_result.returncode == 0, inventory_result.stderr
     assert extract_result.returncode == 0, extract_result.stderr
@@ -373,8 +374,17 @@ def test_keyword_cli_indexes_searches_and_keeps_semantic_stub(
     assert search_events[-1]["count"] == 1
     assert search_events[-1]["result_count"] == 1
 
-    assert semantic_result.returncode == 1
-    assert "Feature Spec 07" in semantic_result.stderr
+    # Semantic search runs even before vector indexing: no Chroma collections
+    # yet, so it returns no results rather than failing.
+    assert semantic_result.returncode == 0, semantic_result.stderr
+    assert "No semantic results" in semantic_result.stdout
+    assert semantic_json_result.returncode == 0, semantic_json_result.stderr
+    assert json.loads(semantic_json_result.stdout) == []
+
+    # Keyword JSON now carries the shared nullable vector fields without
+    # breaking existing subset assertions.
+    assert payload[0]["vector_collection"] is None
+    assert payload[0]["vector_id"] is None
 
 
 def test_keyword_index_eda_notebook_is_valid_and_read_only() -> None:

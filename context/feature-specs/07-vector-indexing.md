@@ -38,7 +38,10 @@ Commands:
 ```powershell
 uv run -m uni_rag_agent index vector
 uv run -m uni_rag_agent index vector --collection document_index
+uv run -m uni_rag_agent index vector --model BAAI/bge-m3
+uv run -m uni_rag_agent index vector --model BAAI/bge-m3 --rebuild
 uv run -m uni_rag_agent search semantic "distributed computation"
+uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3 --index slides_index --course "Information Retrieval" --top-k 10 --json
 ```
 
 Notebook:
@@ -52,15 +55,66 @@ Create this notebook when vector indexing is implemented. It should inspect `emb
 Internal interfaces:
 
 ```python
-get_embedding_model(config: Config) -> Embeddings
-sync_vector_index(config: Config, collection: str | None = None) -> VectorIndexResult
+get_embedding_model(config: Config, model: str | None = None) -> Embeddings
+sync_vector_index(
+    config: Config,
+    collection: str | None = None,
+    model: str | None = None,
+    rebuild: bool = False,
+) -> VectorIndexResult
 semantic_search(
+    config: Config,
     query: str,
     course: str | None = None,
-    indexes: list[str] | None = None,
-    top_k: int = 20,
+    indexes: Sequence[str] | None = None,
+    top_k: int | None = None,
+    model: str | None = None,
 ) -> list[RetrievalResult]
 ```
+
+Signature reconciliation: `semantic_search(config, query, ...)` intentionally
+mirrors the implemented `keyword_search(config, query, ...)` rather than the
+earlier query-first sketch, so the two direct-search entry points share one
+shape (config first, query second, then `course`/`indexes`/`top_k`). `top_k`
+defaults to `UNI_RAG_SEMANTIC_TOP_K` when omitted.
+
+### Embedding model selection
+
+- Without `--model`, selection follows config: when `UNI_RAG_USE_FAKE_EMBEDDINGS`
+  is true `get_embedding_model` returns the deterministic fake adapter; when it
+  is false the configured `UNI_RAG_EMBEDDING_MODEL` must resolve to a known real
+  profile or the command fails clearly.
+- An explicit real `--model BAAI/bge-m3` overrides `UNI_RAG_USE_FAKE_EMBEDDINGS=true`
+  for that command so experiments do not require editing `.env`.
+- An explicit `--model fake-embedding` is always allowed for fake runs.
+
+### Dependencies
+
+Core dependencies are `chromadb` and `langchain-core`. Real Hugging Face local
+models live in the optional `embeddings` extra (`langchain-huggingface` plus the
+Sentence Transformers stack, which pulls in `transformers` and `torch`). Those
+imports are lazy and only happen when a real Hugging Face profile is selected,
+so the fake-default test path stays offline and lightweight. Install the extra
+with `uv sync --extra embeddings`.
+
+### Side-by-side models and collections
+
+The public logical collections stay stable (`document_index`, `slides_index`,
+etc.). Each embedding model/profile persists into a distinct physical ChromaDB
+collection named `<logical_index>__<model_slug>__<hash>`, where the hash input
+includes provider, model, dimension, and metric. Collections use cosine
+distance. `embeddings` rows store `vector_backend='chroma'`, the physical
+`vector_collection`, a stable `vector_id='chunk:<chunk_id>'`, the selected
+`embedding_model`, the dimension, and a timestamp.
+
+### Shared retrieval contract
+
+`RetrievalResult` (shared with keyword search) keeps `snippet` required and adds
+nullable `vector_collection` and `vector_id`. Keyword results emit `null` for
+both. Semantic results hydrate `snippet` from a truncated SQLite chunk-text
+preview and populate `vector_collection`/`vector_id`. Empty semantic results
+return `[]`; "clear diagnostics" means the CLI message plus JSONL telemetry, not
+a new return-value field.
 
 Chroma collections:
 

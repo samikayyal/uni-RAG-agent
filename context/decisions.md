@@ -35,6 +35,7 @@ This document records the key decisions made during the design and development o
 | **DEC-027** | Use read-only EDA notebooks for generated app data | `Accepted` | 2026-06-26 |
 | **DEC-028** | Null stale search-result chunk references on chunk deletion | `Accepted` | 2026-06-27 |
 | **DEC-029** | Exclude non-current source files from retrieval indexes | `Accepted` | 2026-06-30 |
+| **DEC-030** | Fake-default embeddings with optional real models and model-namespaced vector collections | `Accepted` | 2026-07-01 |
 
 ---
 
@@ -621,4 +622,58 @@ Missing, skipped, failed, pending, and metadata-only source files do not leak in
 normal answers even if historical chunks or stale FTS rows remain in SQLite.
 Operational notebooks and storage diagnostics may still inspect those historical
 rows, but answer-time retrieval uses only the current indexed corpus.
+
+---
+
+## DEC-030: Fake-default embeddings with optional real models and model-namespaced vector collections
+
+* **Status**: Accepted
+* **Date**: 2026-07-01
+
+### Context
+
+Feature 07 adds ChromaDB vector indexing and semantic search through LangChain
+embedding abstractions (DEC-010, DEC-011). LangChain's Hugging Face integration
+(`langchain-huggingface`) depends on `sentence-transformers`, which pulls in
+`transformers` and `torch`. Making that mandatory would make every CI/test
+install heavy and would push tests toward network access and model downloads,
+which Spec 07 forbids. The system also needs to experiment with more than one
+real embedding model over time without mixing incompatible vector spaces, and
+re-extraction deletes and replaces stale chunks that already have embedding
+mapping rows.
+
+### Decision
+
+- Keep deterministic fake embeddings as the default, offline test path. The fake
+  adapter is dependency-light and sized by `UNI_RAG_EMBEDDING_DIM`.
+- Ship `chromadb` and `langchain-core` as core dependencies, but put real Hugging
+  Face local-model support (`langchain-huggingface` plus the Sentence
+  Transformers stack) in an optional `embeddings` extra, imported lazily only
+  when a real Hugging Face profile is selected.
+- Resolve the embedding model from config by default; an explicit `--model`
+  selects a known real profile and overrides `UNI_RAG_USE_FAKE_EMBEDDINGS=true`
+  for that command. When fake embeddings are disabled, the configured model must
+  resolve to a known real profile or the command fails clearly with a
+  `VectorIndexError`/`SemanticSearchError`.
+- Support side-by-side models through model-namespaced physical ChromaDB
+  collections (`<logical_index>__<model_slug>__<hash>`, hash over
+  provider/model/dimension/metric) while the logical collections stay stable.
+  Collections use cosine distance.
+- Use `ON DELETE CASCADE` on `embeddings.chunk_id` so stale embedding mapping
+  rows are removed when their chunk is deleted.
+- Keep semantic search direct and read-only: it queries ChromaDB, joins ids back
+  to SQLite, reapplies the current-file-only/course/index filters, and does not
+  persist `search_runs`/`search_results`. Persistence belongs to later
+  retrieval/evidence specs.
+
+### Consequences
+
+The default `uv sync` and the whole automated test suite stay offline and
+lightweight. Real models are an explicit opt-in (`uv sync --extra embeddings`)
+and are exercised only by manual smoke runs. Known real profiles (`BAAI/bge-m3`,
+`jinaai/jina-embeddings-v3`, `jinaai/jina-embeddings-v5-text-small`,
+`google/embeddinggemma-300m`) live in a registry with provider, dimension, trust,
+and gated/access notes; their dependencies and weights are only needed when
+selected. Side-by-side models never share a physical collection, and stale
+embedding rows cannot point at deleted chunks.
 

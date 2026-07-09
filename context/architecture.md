@@ -97,7 +97,7 @@ Stage notebooks are created when the producing stage is implemented. Do not add 
 | Text extraction / 04 | `notebooks/extraction_eda.ipynb` | Implemented | `extraction_runs`, `extracted_documents`, `chunks`, `files` | Extraction yield, failure-reason plots, text length, chunk counts, source-location coverage. |
 | Data summaries / 05 | `notebooks/data_schema_eda.ipynb` | Implemented | `data_summaries`, `chunks`, `files` | Dataset summary coverage, row/column/table counts, sample availability, large/failed data files. |
 | Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Implemented | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
-| Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Planned when Feature 07 lands | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |
+| Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Implemented | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |
 | Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Planned when Features 08-09 land | `search_runs`, `search_results`, `evidence_packets` | Router behavior, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
 | Answering / 10 | `notebooks/answering_eda.ipynb` | Planned when Feature 10 lands | `answers`, `evidence_packets` | Citation validity, limitations, model/fake-adapter traces, insufficient-evidence behavior. |
 | UI / 11 | None required for MVP | Not applicable | FastAPI responses and UI tests | UI correctness is covered by API/UI tests; use retrieval/answering notebooks for underlying traces. |
@@ -363,7 +363,7 @@ Maps chunks to embeddings in the selected vector backend.
 ```sql
 CREATE TABLE embeddings (
     id INTEGER PRIMARY KEY,
-    chunk_id INTEGER NOT NULL REFERENCES chunks(id),
+    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
     vector_backend TEXT NOT NULL,
     vector_collection TEXT NOT NULL,
     vector_id TEXT NOT NULL,
@@ -376,6 +376,15 @@ CREATE TABLE embeddings (
 
 CREATE INDEX idx_embeddings_chunk_id ON embeddings(chunk_id);
 ```
+
+`embeddings.chunk_id` uses `ON DELETE CASCADE` (DEC-030): re-extraction deletes
+and replaces stale chunks, and the orphaned vector-mapping rows are removed
+automatically so they cannot point at deleted chunks. `embedding_model` plus a
+model-namespaced physical `vector_collection` keep side-by-side models isolated.
+`vector_collection` is the physical ChromaDB collection name
+`<logical_index>__<model_slug>__<hash>`; the logical index stays stable while
+different models hash to distinct physical collections. `vector_id` is the
+stable `chunk:<chunk_id>` id used inside ChromaDB.
 
 ### data_summaries
 
@@ -588,7 +597,17 @@ Rules:
 
 - embeddings are chunk-level;
 - vector IDs map back to SQLite chunk IDs;
-- do not embed metadata-only files.
+- do not embed metadata-only files;
+- embed only current eligible chunks (`files.index_status = 'indexed'`,
+  non-empty text, eligible `source_type`), reusing the same current-file-only
+  contract as keyword indexing (DEC-029);
+- one ChromaDB collection per logical index, namespaced per embedding model;
+- ChromaDB collections use cosine distance;
+- the default `index vector` run is incremental (embed only chunks missing an
+  embedding for the selected model); `--rebuild` clears and repopulates only the
+  selected model/profile and optional logical collection;
+- the fake embedding adapter is the deterministic, offline default; real Hugging
+  Face local models load lazily through the optional `embeddings` extra (DEC-030).
 
 ## Query Routing
 

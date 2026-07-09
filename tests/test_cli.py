@@ -44,11 +44,11 @@ def test_unknown_command_returns_nonzero_with_message() -> None:
 
 
 def test_registered_stub_command_fails_clearly() -> None:
-    result = run_cli("index", "vector")
+    result = run_cli("retrieve", "query text")
 
     assert result.returncode == 1
     assert "not implemented yet" in result.stderr
-    assert "Feature Spec 07" in result.stderr
+    assert "Feature Spec 08" in result.stderr
 
 
 def test_inventory_run_cli_fills_temp_storage(tmp_path: Path) -> None:

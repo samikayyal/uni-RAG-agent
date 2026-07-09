@@ -18,25 +18,21 @@ from uni_rag_agent.storage import (
     initialize_schema,
 )
 
+from .eligibility import (
+    ELIGIBLE_SOURCE_TYPES,
+    INDEX_TO_SOURCE_TYPE,
+    current_chunk_where_sql,
+    source_types_for_indexes,
+)
 from .models import KeywordIndexError, KeywordIndexResult, KeywordSearchError
 
-ELIGIBLE_SOURCE_TYPES = (
-    "document",
-    "slides",
-    "notebook",
-    "code",
-    "data_schema",
-    "transcript",
-)
-
-INDEX_TO_SOURCE_TYPE = {
-    "document_index": "document",
-    "slides_index": "slides",
-    "notebook_index": "notebook",
-    "code_index": "code",
-    "data_schema_index": "data_schema",
-    "transcript_index": "transcript",
-}
+__all__ = [
+    "ELIGIBLE_SOURCE_TYPES",
+    "INDEX_TO_SOURCE_TYPE",
+    "keyword_query_terms",
+    "keyword_search",
+    "sync_keyword_index",
+]
 
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -92,7 +88,7 @@ def keyword_search(
         raise KeywordSearchError("top_k must be greater than zero")
 
     match_query = _plain_text_to_fts_query(query)
-    source_types = _source_types_for_indexes(indexes)
+    source_types = source_types_for_indexes(indexes, error=KeywordSearchError)
     if source_types == ():
         return []
     search_source_types = (
@@ -158,30 +154,6 @@ def _plain_text_to_fts_query(query: str) -> str:
     return " OR ".join(f'"{token}"' for token in tokens)
 
 
-def _source_types_for_indexes(indexes: Sequence[str] | None) -> tuple[str, ...] | None:
-    if indexes is None:
-        return None
-    if not indexes:
-        return ()
-
-    source_types: list[str] = []
-    unknown: list[str] = []
-    for index_name in indexes:
-        source_type = INDEX_TO_SOURCE_TYPE.get(index_name)
-        if source_type is None:
-            unknown.append(index_name)
-        elif source_type not in source_types:
-            source_types.append(source_type)
-
-    if unknown:
-        allowed = ", ".join(sorted(INDEX_TO_SOURCE_TYPE))
-        raise KeywordSearchError(
-            f"Unknown logical index name(s): {', '.join(unknown)}. "
-            f"Allowed indexes: {allowed}"
-        )
-    return tuple(source_types)
-
-
 def _build_search_sql(
     *,
     match_query: str,
@@ -191,7 +163,7 @@ def _build_search_sql(
 ) -> tuple[str, list[object]]:
     where = [
         "chunk_fts MATCH ?",
-        _current_chunk_where_sql(source_types, require_non_empty_text=False),
+        current_chunk_where_sql(source_types, require_non_empty_text=False),
     ]
     params: list[object] = [match_query, *source_types]
 
@@ -230,7 +202,7 @@ def _count_fts_rows(connection: sqlite3.Connection) -> int:
 
 
 def _count_current_eligible_chunks(connection: sqlite3.Connection) -> int:
-    where_sql = _current_chunk_where_sql(
+    where_sql = current_chunk_where_sql(
         ELIGIBLE_SOURCE_TYPES,
         require_non_empty_text=False,
     )
@@ -258,26 +230,8 @@ def _count_fts_by_source_type(connection: sqlite3.Connection) -> dict[str, int]:
     return {str(row["source_type"]): int(row["count"]) for row in rows}
 
 
-def _current_chunk_where_sql(
-    source_types: Sequence[str],
-    *,
-    require_non_empty_text: bool,
-) -> str:
-    clauses = [
-        "files.index_status = 'indexed'",
-        f"chunks.source_type IN ({_placeholders(source_types)})",
-    ]
-    if require_non_empty_text:
-        clauses.append("TRIM(chunks.text) <> ''")
-    return " AND ".join(clauses)
-
-
-def _placeholders(values: Sequence[object]) -> str:
-    return ", ".join("?" for _ in values)
-
-
 def _insert_keyword_rows_sql() -> str:
-    where_sql = _current_chunk_where_sql(
+    where_sql = current_chunk_where_sql(
         ELIGIBLE_SOURCE_TYPES,
         require_non_empty_text=True,
     )

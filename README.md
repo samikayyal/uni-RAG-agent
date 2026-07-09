@@ -29,8 +29,10 @@ uv run -m uni_rag_agent extract run
 uv run -m uni_rag_agent extract data-summaries
 uv run -m uni_rag_agent extract status
 uv run -m uni_rag_agent index keyword
+uv run -m uni_rag_agent index vector
 uv run -m uni_rag_agent search keyword "mapreduce"
 uv run -m uni_rag_agent search keyword "mapreduce" --json
+uv run -m uni_rag_agent search semantic "distributed computation"
 ```
 
 Runtime configuration is loaded from `.env` with non-secret defaults documented
@@ -53,11 +55,16 @@ uv run -m uni_rag_agent extract data-summaries --file-id 123
 uv run -m uni_rag_agent extract status
 uv run -m uni_rag_agent index keyword
 uv run -m uni_rag_agent index keyword --rebuild
+uv run -m uni_rag_agent index vector
+uv run -m uni_rag_agent index vector --collection document_index
+uv run -m uni_rag_agent index vector --model BAAI/bge-m3 --rebuild
 uv run -m uni_rag_agent search keyword "mapreduce"
 uv run -m uni_rag_agent search keyword "mapreduce" --course "Information Retrieval"
 uv run -m uni_rag_agent search keyword "mapreduce" --index slides_index --top-k 10
 uv run -m uni_rag_agent search keyword "mapreduce" --json
-uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py tests/test_extraction.py tests/test_data_summaries.py tests/test_keyword_indexing.py
+uv run -m uni_rag_agent search semantic "distributed computation"
+uv run -m uni_rag_agent search semantic "distributed computation" --index slides_index --course "Information Retrieval" --top-k 10 --json
+uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py tests/test_extraction.py tests/test_data_summaries.py tests/test_keyword_indexing.py tests/test_vector_indexing.py
 ```
 
 Feature 02 storage commands create the generated local data layout:
@@ -118,19 +125,45 @@ uv run -m uni_rag_agent search keyword "mapreduce" --json
 search does not write `search_runs` or `search_results`; persistent retrieval
 traces belong to later evidence/retrieval specs.
 
-Remaining MVP command shapes are registered for later specs:
+Vector indexing embeds current eligible chunks into ChromaDB (one
+model-namespaced collection per logical index, cosine distance) and records
+`embeddings` mapping rows in SQLite. The default `index vector` run is
+incremental; `--rebuild` clears and repopulates only the selected
+model/profile and optional `--collection`. Semantic search queries those
+collections and joins ids back to SQLite for chunk text and citations:
 
 ```powershell
 uv run -m uni_rag_agent index vector
-uv run -m uni_rag_agent search semantic "query text"
+uv run -m uni_rag_agent index vector --collection document_index
+uv run -m uni_rag_agent search semantic "distributed computation"
+uv run -m uni_rag_agent search semantic "distributed computation" --index slides_index --top-k 10 --json
+```
+
+The default embedding adapter is a deterministic, offline fake sized by
+`UNI_RAG_EMBEDDING_DIM`, so vector indexing and semantic search work without
+network access or API keys. Real Hugging Face local models are an optional
+extra:
+
+```powershell
+uv sync --extra embeddings
+uv run -m uni_rag_agent index vector --model BAAI/bge-m3 --rebuild
+uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3 --json
+```
+
+An explicit `--model` overrides `UNI_RAG_USE_FAKE_EMBEDDINGS` for that command.
+`index vector` writes lifecycle JSONL logs under `data/runs/`. Direct semantic
+search does not write `search_runs` or `search_results`.
+
+Remaining MVP command shapes are registered for later specs:
+
+```powershell
 uv run -m uni_rag_agent retrieve "query text"
 uv run -m uni_rag_agent eval run
 uv run -m uni_rag_agent app serve
 ```
 
-`index vector`, `search semantic`, `retrieve`, `eval`, and `app` are stubs until
-their feature specs are implemented. They should fail clearly and must not scan
-or mutate `Courses/`.
+`retrieve`, `eval`, and `app` are stubs until their feature specs are
+implemented. They should fail clearly and must not scan or mutate `Courses/`.
 
 ## MVP Module Order
 

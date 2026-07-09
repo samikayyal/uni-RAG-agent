@@ -31,6 +31,9 @@ from .indexing import (
     KeywordIndexError,
     KeywordIndexResult,
     KeywordSearchError,
+    SemanticSearchError,
+    VectorIndexError,
+    VectorIndexResult,
     keyword_query_terms,
     keyword_search,
     sync_keyword_index,
@@ -249,13 +252,27 @@ def _add_index_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     keyword_parser.set_defaults(handler=_handle_index_keyword)
 
-    vector_parser = index_subparsers.add_parser("vector")
-    vector_parser.set_defaults(
-        handler=_not_implemented_handler(
-            "index vector",
-            "Feature Spec 07: Vector Indexing",
+    vector_parser = index_subparsers.add_parser(
+        "vector",
+        help="Embed current eligible chunks into ChromaDB for the selected model.",
+    )
+    vector_parser.add_argument(
+        "--collection",
+        help="Limit indexing to one logical index such as document_index.",
+    )
+    vector_parser.add_argument(
+        "--model",
+        help=(
+            "Embedding model: 'fake-embedding' or a known real profile such as "
+            "BAAI/bge-m3. Overrides UNI_RAG_USE_FAKE_EMBEDDINGS for this command."
         ),
     )
+    vector_parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Clear and repopulate only the selected model/profile and collection.",
+    )
+    vector_parser.set_defaults(handler=_handle_index_vector)
 
 
 def _add_search_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -296,14 +313,36 @@ def _add_search_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     keyword_parser.set_defaults(handler=_handle_search_keyword)
 
-    semantic_parser = search_subparsers.add_parser("semantic")
-    semantic_parser.add_argument("query", nargs="+", help="Query text.")
-    semantic_parser.set_defaults(
-        handler=_not_implemented_handler(
-            "search semantic",
-            "Feature Spec 07: Vector Indexing",
-        ),
+    semantic_parser = search_subparsers.add_parser(
+        "semantic",
+        help="Run semantic vector search over current chunks via ChromaDB.",
     )
+    semantic_parser.add_argument("query", nargs="+", help="Query text.")
+    semantic_parser.add_argument(
+        "--course",
+        help="Case-insensitive exact course-name filter.",
+    )
+    semantic_parser.add_argument(
+        "--index",
+        dest="indexes",
+        action="append",
+        help="Logical index filter such as slides_index. May be repeated.",
+    )
+    semantic_parser.add_argument(
+        "--top-k",
+        type=int,
+        help="Maximum semantic results to return.",
+    )
+    semantic_parser.add_argument(
+        "--model",
+        help="Embedding model to query. Must match the model used to index.",
+    )
+    semantic_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print JSON result objects instead of a table.",
+    )
+    semantic_parser.set_defaults(handler=_handle_search_semantic)
 
 
 def _add_stub_group(
@@ -656,6 +695,142 @@ def _handle_search_keyword(args: argparse.Namespace) -> int:
     return SUCCESS
 
 
+def _handle_index_vector(args: argparse.Namespace) -> int:
+    from .indexing import sync_vector_index
+
+    command_name = "index vector"
+    logger: Logger | None = None
+    base_extra = {
+        "command": command_name,
+        "model": args.model or "(config)",
+        "collection": args.collection or "all",
+    }
+    try:
+        config = load_config()
+        validate_config(config)
+        logger = _command_logger(config, command_name)
+        logger.info(
+            "vector index started",
+            extra={"event": "vector_index_started", "status": "started", **base_extra},
+        )
+        result = sync_vector_index(
+            config,
+            collection=args.collection,
+            model=args.model,
+            rebuild=args.rebuild,
+        )
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (StorageError, VectorIndexError) as exc:
+        if logger is not None:
+            logger.exception(
+                "vector index failed",
+                extra={
+                    "event": "vector_index_failed",
+                    "status": "failed",
+                    **base_extra,
+                },
+            )
+        print(f"Vector index error: {exc}", file=sys.stderr)
+        return INDEX_ERROR
+
+    logger.info(
+        "vector index completed",
+        extra={
+            "event": "vector_index_completed",
+            "status": "completed",
+            "model": result.model,
+            "collection": args.collection or "all",
+            "command": command_name,
+            "count": result.vectors_indexed,
+            "rows_removed": result.rows_removed,
+            "chunks_seen": result.chunks_seen,
+        },
+    )
+    print("Vector index completed")
+    _print_vector_index_result(result)
+    return SUCCESS
+
+
+def _handle_search_semantic(args: argparse.Namespace) -> int:
+    from .indexing import semantic_search
+
+    command_name = "search semantic"
+    logger: Logger | None = None
+    query_text = " ".join(args.query)
+    top_k: int | None = args.top_k
+    base_extra = {
+        "command": command_name,
+        "course": args.course,
+        "indexes": args.indexes or (),
+        "model": args.model or "(config)",
+    }
+    try:
+        config = load_config()
+        validate_config(config)
+        top_k = args.top_k if args.top_k is not None else config.semantic_top_k
+        logger = _command_logger(config, command_name)
+        logger.info(
+            "semantic search started",
+            extra={
+                "event": "semantic_search_started",
+                "status": "started",
+                "top_k": top_k,
+                **base_extra,
+            },
+        )
+        results = semantic_search(
+            config,
+            query=query_text,
+            course=args.course,
+            indexes=args.indexes,
+            top_k=args.top_k,
+            model=args.model,
+        )
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (StorageError, SemanticSearchError) as exc:
+        if logger is not None:
+            logger.exception(
+                "semantic search failed",
+                extra={
+                    "event": "semantic_search_failed",
+                    "status": "failed",
+                    "top_k": top_k,
+                    "count": 0,
+                    "result_count": 0,
+                    **base_extra,
+                },
+            )
+        print(f"Semantic search error: {exc}", file=sys.stderr)
+        return SEARCH_ERROR
+
+    logger.info(
+        "semantic search completed",
+        extra={
+            "event": "semantic_search_completed",
+            "status": "completed",
+            "top_k": top_k,
+            "count": len(results),
+            "result_count": len(results),
+            **base_extra,
+        },
+    )
+    if args.json:
+        print(
+            json.dumps(
+                [result.as_safe_dict() for result in results],
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        _print_semantic_search_results(results)
+    return SUCCESS
+
+
 def _print_storage_result(result: StorageCheckResult) -> None:
     safe = result.as_safe_dict()
     for key in (
@@ -794,6 +969,47 @@ def _print_keyword_index_result(result: KeywordIndexResult) -> None:
 def _print_keyword_search_results(results: Sequence[RetrievalResult]) -> None:
     if not results:
         print("No keyword results")
+        return
+
+    print("rank | score | chunk_id | source/location | course | path | snippet")
+    print("---- | ----- | -------- | --------------- | ------ | ---- | -------")
+    for result in results:
+        location = _format_source_location(result)
+        print(
+            " | ".join(
+                (
+                    str(result.rank),
+                    f"{result.score:.6g}",
+                    str(result.chunk_id),
+                    _table_value(location, 24),
+                    _table_value(result.course or "", 28),
+                    _table_value(result.file_path, 48),
+                    _table_value(result.snippet.replace("\n", " "), 80),
+                )
+            )
+        )
+
+
+def _print_vector_index_result(result: VectorIndexResult) -> None:
+    print(f"mode: {'rebuild' if result.rebuild else 'incremental'}")
+    print(f"model: {result.model}")
+    print(f"provider: {result.provider}")
+    print(f"embedding_dim: {result.embedding_dim}")
+    print(f"collections: {', '.join(result.collections)}")
+    print(f"chunks_seen: {result.chunks_seen}")
+    print(f"rows_removed: {result.rows_removed}")
+    print(f"vectors_indexed: {result.vectors_indexed}")
+    print(f"embeddings_total: {result.embeddings_total}")
+    _print_count_mapping("by_source_type", result.by_source_type)
+    if result.diagnostics:
+        print("diagnostics:")
+        for diagnostic in result.diagnostics:
+            print(f"- {diagnostic}")
+
+
+def _print_semantic_search_results(results: Sequence[RetrievalResult]) -> None:
+    if not results:
+        print("No semantic results")
         return
 
     print("rank | score | chunk_id | source/location | course | path | snippet")

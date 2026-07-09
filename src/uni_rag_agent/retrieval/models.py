@@ -18,6 +18,8 @@ class RetrievalResult:
     score: float
     snippet: str
     retrieval_method: str = "keyword"
+    vector_collection: str | None = None
+    vector_id: str | None = None
 
     def as_safe_dict(self) -> dict[str, object]:
         return {
@@ -32,4 +34,6 @@ class RetrievalResult:
             "score": self.score,
             "snippet": self.snippet,
             "retrieval_method": self.retrieval_method,
+            "vector_collection": self.vector_collection,
+            "vector_id": self.vector_id,
         }

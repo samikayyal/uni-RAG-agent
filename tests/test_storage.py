@@ -19,7 +19,11 @@ from uni_rag_agent.storage import (
     initialize_schema,
 )
 from uni_rag_agent.storage import core as storage_core
-from tests.sqlite_helpers import insert_minimal_chunk, insert_search_result
+from tests.sqlite_helpers import (
+    insert_embedding_row,
+    insert_minimal_chunk,
+    insert_search_result,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UNI_RAG_ENV_PREFIX = "UNI_RAG_"
@@ -158,6 +162,68 @@ def test_initialize_schema_migrates_existing_search_results_chunk_reference(
     assert historical_result["file_id"] == stored_chunk.file_id
 
 
+def test_embeddings_chunk_reference_cascades_on_fresh_schema(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    ensure_data_dirs(config)
+    with connect_sqlite(config) as connection:
+        initialize_schema(connection)
+        rows = connection.execute("PRAGMA foreign_key_list(embeddings)").fetchall()
+
+    chunk_reference = next(
+        row for row in rows if row["table"] == "chunks" and row["from"] == "chunk_id"
+    )
+    assert chunk_reference["on_delete"] == "CASCADE"
+
+
+def test_initialize_schema_migrates_embeddings_chunk_cascade(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    ensure_data_dirs(config)
+    with connect_sqlite(config) as connection:
+        initialize_schema(connection)
+        _replace_embeddings_with_legacy_chunk_fk(connection)
+        stored_chunk = insert_minimal_chunk(connection, config)
+        embedding_id = insert_embedding_row(connection, chunk_id=stored_chunk.chunk_id)
+        connection.commit()
+
+        initialize_schema(connection)
+        rows = connection.execute("PRAGMA foreign_key_list(embeddings)").fetchall()
+        chunk_reference = next(
+            row
+            for row in rows
+            if row["table"] == "chunks" and row["from"] == "chunk_id"
+        )
+        unique_indexes = {
+            tuple(
+                detail["name"]
+                for detail in connection.execute(
+                    f"PRAGMA index_info('{index['name']}')"
+                ).fetchall()
+            )
+            for index in connection.execute("PRAGMA index_list(embeddings)").fetchall()
+            if index["unique"]
+        }
+        chunk_id_index_present = any(
+            index["name"] == "idx_embeddings_chunk_id"
+            for index in connection.execute("PRAGMA index_list(embeddings)").fetchall()
+        )
+        preserved_before = connection.execute(
+            "SELECT id, chunk_id FROM embeddings WHERE id = ?",
+            (embedding_id,),
+        ).fetchone()
+        connection.execute("DELETE FROM chunks WHERE id = ?", (stored_chunk.chunk_id,))
+        remaining = connection.execute(
+            "SELECT COUNT(*) FROM embeddings WHERE id = ?",
+            (embedding_id,),
+        ).fetchone()[0]
+
+    assert chunk_reference["on_delete"] == "CASCADE"
+    assert preserved_before["chunk_id"] == stored_chunk.chunk_id
+    assert chunk_id_index_present
+    assert ("vector_backend", "vector_collection", "vector_id") in unique_indexes
+    assert ("chunk_id", "embedding_model") in unique_indexes
+    assert remaining == 0
+
+
 def test_initialize_schema_reports_clear_fts5_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -245,6 +311,31 @@ def test_storage_check_cli_fails_clearly_before_init(tmp_path: Path) -> None:
     assert result.returncode == 3
     assert "Storage check failed" in result.stdout
     assert "SQLite database does not exist" in result.stdout
+
+
+def _replace_embeddings_with_legacy_chunk_fk(
+    connection: sqlite3.Connection,
+) -> None:
+    connection.execute("DROP TABLE embeddings")
+    connection.execute(
+        """
+        CREATE TABLE embeddings (
+            id INTEGER PRIMARY KEY,
+            chunk_id INTEGER NOT NULL REFERENCES chunks(id),
+            vector_backend TEXT NOT NULL,
+            vector_collection TEXT NOT NULL,
+            vector_id TEXT NOT NULL,
+            embedding_model TEXT NOT NULL,
+            embedding_dim INTEGER NOT NULL,
+            embedded_at TEXT NOT NULL,
+            UNIQUE(vector_backend, vector_collection, vector_id),
+            UNIQUE(chunk_id, embedding_model)
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id)"
+    )
 
 
 def _replace_search_results_with_legacy_chunk_fk(

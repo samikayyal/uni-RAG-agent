@@ -187,6 +187,43 @@ def _insert_course(
     return int(course_id)
 
 
+def insert_embedding_row(
+    connection: sqlite3.Connection,
+    *,
+    chunk_id: int,
+    vector_collection: str = "document_index__fake-embedding__0000000000",
+    vector_id: str | None = None,
+    embedding_model: str = "fake-embedding",
+    embedding_dim: int = 384,
+    vector_backend: str = "chroma",
+    timestamp: str = TEST_TIMESTAMP,
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO embeddings (
+            chunk_id,
+            vector_backend,
+            vector_collection,
+            vector_id,
+            embedding_model,
+            embedding_dim,
+            embedded_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            chunk_id,
+            vector_backend,
+            vector_collection,
+            vector_id or f"chunk:{chunk_id}",
+            embedding_model,
+            embedding_dim,
+            timestamp,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
 def insert_search_result(
     connection: sqlite3.Connection,
     *,

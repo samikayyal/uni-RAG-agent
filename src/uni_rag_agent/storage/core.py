@@ -103,6 +103,7 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
 
     connection.executescript(MVP_SCHEMA_SQL)
     _ensure_search_results_chunk_delete_policy(connection)
+    _ensure_embeddings_chunk_delete_policy(connection)
     connection.commit()
 
 
@@ -259,6 +260,71 @@ def _ensure_search_results_chunk_delete_policy(connection: sqlite3.Connection) -
     )
 
 
+def _ensure_embeddings_chunk_delete_policy(connection: sqlite3.Connection) -> None:
+    """Cascade-delete stale embedding mapping rows when their chunk is deleted.
+
+    Re-extraction deletes and replaces stale chunks. With ``ON DELETE CASCADE``
+    on ``embeddings.chunk_id`` the orphaned vector-mapping rows are removed
+    automatically. This idempotent migration upgrades databases created before
+    the policy existed while preserving both unique constraints and the
+    chunk-id index.
+    """
+    rows = connection.execute("PRAGMA foreign_key_list(embeddings)").fetchall()
+    for row in rows:
+        if row["table"] == "chunks" and row["from"] == "chunk_id":
+            if str(row["on_delete"]).upper() == "CASCADE":
+                return
+            break
+    else:
+        return
+
+    connection.execute("ALTER TABLE embeddings RENAME TO embeddings_old")
+    connection.execute(
+        """
+        CREATE TABLE embeddings (
+            id INTEGER PRIMARY KEY,
+            chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+            vector_backend TEXT NOT NULL,
+            vector_collection TEXT NOT NULL,
+            vector_id TEXT NOT NULL,
+            embedding_model TEXT NOT NULL,
+            embedding_dim INTEGER NOT NULL,
+            embedded_at TEXT NOT NULL,
+            UNIQUE(vector_backend, vector_collection, vector_id),
+            UNIQUE(chunk_id, embedding_model)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO embeddings (
+            id,
+            chunk_id,
+            vector_backend,
+            vector_collection,
+            vector_id,
+            embedding_model,
+            embedding_dim,
+            embedded_at
+        )
+        SELECT
+            id,
+            chunk_id,
+            vector_backend,
+            vector_collection,
+            vector_id,
+            embedding_model,
+            embedding_dim,
+            embedded_at
+        FROM embeddings_old
+        """
+    )
+    connection.execute("DROP TABLE embeddings_old")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id)"
+    )
+
+
 MVP_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS courses (
     id INTEGER PRIMARY KEY,
@@ -356,7 +422,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
 
 CREATE TABLE IF NOT EXISTS embeddings (
     id INTEGER PRIMARY KEY,
-    chunk_id INTEGER NOT NULL REFERENCES chunks(id),
+    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
     vector_backend TEXT NOT NULL,
     vector_collection TEXT NOT NULL,
     vector_id TEXT NOT NULL,
