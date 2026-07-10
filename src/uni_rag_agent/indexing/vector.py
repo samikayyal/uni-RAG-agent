@@ -38,6 +38,8 @@ from .models import SemanticSearchError, VectorIndexError, VectorIndexResult
 from .profiles import EmbeddingProfile, physical_collection_name
 
 _EMBED_BATCH = 64
+_VECTOR_ID_BATCH = 256
+_HYDRATE_CANDIDATE_BATCH = 250
 _SNIPPET_CHAR_LIMIT = 240
 VECTOR_BACKEND = "chroma"
 
@@ -52,10 +54,9 @@ INSERT INTO embeddings (
     embedded_at
 )
 VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(chunk_id, embedding_model) DO UPDATE SET
-    vector_backend = excluded.vector_backend,
-    vector_collection = excluded.vector_collection,
+ON CONFLICT(chunk_id, vector_backend, vector_collection) DO UPDATE SET
     vector_id = excluded.vector_id,
+    embedding_model = excluded.embedding_model,
     embedding_dim = excluded.embedding_dim,
     embedded_at = excluded.embedded_at
 """
@@ -69,6 +70,14 @@ class _Candidate:
     vector_id: str
 
 
+@dataclass(frozen=True)
+class _ReconciliationResult:
+    """Counts emitted while bringing one physical collection back in sync."""
+
+    mappings_removed: int = 0
+    vectors_removed: int = 0
+
+
 def sync_vector_index(
     config: Config,
     collection: str | None = None,
@@ -77,10 +86,10 @@ def sync_vector_index(
 ) -> VectorIndexResult:
     """Embed eligible chunks into ChromaDB for the selected model.
 
-    The default behavior is incremental: only current eligible chunks that are
-    missing an embedding for the selected model are embedded. ``rebuild`` clears
-    and repopulates only the selected model/profile (and optional logical
-    ``collection``).
+    The default behavior is incremental: the selected physical collection is
+    reconciled with SQLite, then only current eligible chunks missing that
+    profile are embedded. ``rebuild`` clears and repopulates only the selected
+    model/profile (and optional logical ``collection``).
     """
     built = build_embedding_model(config, model, error=VectorIndexError)
     profile = built.profile
@@ -91,6 +100,8 @@ def sync_vector_index(
     try:
         client = _chroma_client(config, error=VectorIndexError)
         rows_removed = 0
+        mappings_removed = 0
+        vectors_removed = 0
         vectors_indexed = 0
         by_source_type: dict[str, int] = {}
         physical_names: list[str] = []
@@ -104,12 +115,19 @@ def sync_vector_index(
                         client,
                         connection,
                         physical=physical,
-                        model_name=profile.model_name,
                     )
                 chroma_collection = client.get_or_create_collection(
                     name=physical,
                     metadata={"hnsw:space": profile.metric},
                 )
+                reconciliation = _reconcile_collection(
+                    connection,
+                    chroma_collection=chroma_collection,
+                    source_type=source_type,
+                    physical=physical,
+                )
+                mappings_removed += reconciliation.mappings_removed
+                vectors_removed += reconciliation.vectors_removed
                 indexed = _embed_missing_chunks(
                     connection,
                     chroma_collection=chroma_collection,
@@ -119,7 +137,6 @@ def sync_vector_index(
                     model_name=profile.model_name,
                     dimension=dimension,
                     embeddings=built.embeddings,
-                    course_field=True,
                 )
                 if indexed:
                     by_source_type[source_type] = indexed
@@ -129,7 +146,6 @@ def sync_vector_index(
             )
             embeddings_total = _embeddings_total(
                 connection,
-                model_name=profile.model_name,
                 physical_names=physical_names,
             )
             connection.commit()
@@ -145,6 +161,8 @@ def sync_vector_index(
         vectors_indexed=vectors_indexed,
         embeddings_total=embeddings_total,
         model_name=profile.model_name,
+        mappings_removed=mappings_removed,
+        vectors_removed=vectors_removed,
     )
     return VectorIndexResult(
         rebuild=rebuild,
@@ -154,6 +172,8 @@ def sync_vector_index(
         collections=tuple(logical for logical, _ in selected),
         chunks_seen=chunks_seen,
         rows_removed=rows_removed,
+        mappings_removed=mappings_removed,
+        vectors_removed=vectors_removed,
         vectors_indexed=vectors_indexed,
         embeddings_total=embeddings_total,
         by_source_type=dict(sorted(by_source_type.items())),
@@ -200,6 +220,9 @@ def semantic_search(
         raise SemanticSearchError(f"Semantic search storage check failed: {details}")
 
     try:
+        canonical_course = _canonical_course_name(config, course)
+        if course is not None and canonical_course is None:
+            return []
         query_vector = built.embeddings.embed_query(query_text)
         client = _chroma_client(config, error=SemanticSearchError)
         candidates = _query_candidates(
@@ -209,14 +232,15 @@ def semantic_search(
             dimension=dimension,
             query_vector=query_vector,
             limit=limit,
+            course=canonical_course,
         )
         if not candidates:
             return []
         rows = _hydrate_candidates(
             config,
-            candidate_ids=list(candidates),
+            candidates=candidates,
             source_types=[source_type for _, source_type in selected],
-            course=course,
+            course=canonical_course,
         )
     except SemanticSearchError:
         raise
@@ -298,7 +322,6 @@ def _clear_collection(
     connection: sqlite3.Connection,
     *,
     physical: str,
-    model_name: str,
 ) -> int:
     if physical in _existing_collection_names(client):
         client.delete_collection(name=physical)  # type: ignore[attr-defined]
@@ -307,9 +330,8 @@ def _clear_collection(
         DELETE FROM embeddings
         WHERE vector_backend = ?
           AND vector_collection = ?
-          AND embedding_model = ?
         """,
-        (VECTOR_BACKEND, physical, model_name),
+        (VECTOR_BACKEND, physical),
     )
     connection.commit()
     return max(cursor.rowcount, 0)
@@ -325,10 +347,11 @@ def _embed_missing_chunks(
     model_name: str,
     dimension: int,
     embeddings: object,
-    course_field: bool,
 ) -> int:
     rows = _missing_chunk_rows(
-        connection, source_type=source_type, model_name=model_name
+        connection,
+        source_type=source_type,
+        physical=physical,
     )
     if not rows:
         return 0
@@ -369,7 +392,7 @@ def _missing_chunk_rows(
     connection: sqlite3.Connection,
     *,
     source_type: str,
-    model_name: str,
+    physical: str,
 ) -> list[sqlite3.Row]:
     where_sql = current_chunk_where_sql((source_type,), require_non_empty_text=True)
     return connection.execute(
@@ -389,12 +412,85 @@ def _missing_chunk_rows(
               SELECT 1
               FROM embeddings
               WHERE embeddings.chunk_id = chunks.id
-                AND embeddings.embedding_model = ?
+                AND embeddings.vector_backend = ?
+                AND embeddings.vector_collection = ?
           )
         ORDER BY chunks.id
         """,
-        (source_type, model_name),
+        (source_type, VECTOR_BACKEND, physical),
     ).fetchall()
+
+
+def _reconcile_collection(
+    connection: sqlite3.Connection,
+    *,
+    chroma_collection: object,
+    source_type: str,
+    physical: str,
+) -> _ReconciliationResult:
+    """Remove stale state and make missing vectors eligible for re-embedding.
+
+    SQLite is authoritative: rows must describe current, non-empty chunks in
+    this logical collection. Chroma-only ids are deleted; SQLite mappings whose
+    vector disappeared are removed so the normal missing-chunk path restores
+    them in the same sync.
+    """
+    all_rows = connection.execute(
+        """
+        SELECT id, vector_id
+        FROM embeddings
+        WHERE vector_backend = ?
+          AND vector_collection = ?
+        """,
+        (VECTOR_BACKEND, physical),
+    ).fetchall()
+    current_where = current_chunk_where_sql((source_type,), require_non_empty_text=True)
+    current_rows = connection.execute(
+        f"""
+        SELECT embeddings.id, embeddings.vector_id
+        FROM embeddings
+        JOIN chunks ON chunks.id = embeddings.chunk_id
+        JOIN files ON files.id = chunks.file_id
+        WHERE embeddings.vector_backend = ?
+          AND embeddings.vector_collection = ?
+          AND {current_where}
+        """,
+        (VECTOR_BACKEND, physical, source_type),
+    ).fetchall()
+
+    current_ids = {int(row["id"]) for row in current_rows}
+    stale_mapping_ids = [
+        int(row["id"]) for row in all_rows if int(row["id"]) not in current_ids
+    ]
+    if stale_mapping_ids:
+        connection.execute(
+            f"DELETE FROM embeddings WHERE id IN ({placeholders(stale_mapping_ids)})",
+            stale_mapping_ids,
+        )
+
+    expected_vector_ids = {str(row["vector_id"]) for row in current_rows}
+    actual_vector_ids = _collection_vector_ids(chroma_collection)
+    stale_vector_ids = actual_vector_ids - expected_vector_ids
+    if stale_vector_ids:
+        _delete_vectors(chroma_collection, stale_vector_ids)
+
+    missing_vector_ids = expected_vector_ids - actual_vector_ids
+    if missing_vector_ids:
+        connection.execute(
+            f"""
+            DELETE FROM embeddings
+            WHERE vector_backend = ?
+              AND vector_collection = ?
+              AND vector_id IN ({placeholders(tuple(missing_vector_ids))})
+            """,
+            (VECTOR_BACKEND, physical, *missing_vector_ids),
+        )
+
+    connection.commit()
+    return _ReconciliationResult(
+        mappings_removed=len(stale_mapping_ids) + len(missing_vector_ids),
+        vectors_removed=len(stale_vector_ids),
+    )
 
 
 def _chunk_metadata(
@@ -440,7 +536,6 @@ def _eligible_chunk_count(
 def _embeddings_total(
     connection: sqlite3.Connection,
     *,
-    model_name: str,
     physical_names: Sequence[str],
 ) -> int:
     if not physical_names:
@@ -449,10 +544,10 @@ def _embeddings_total(
         f"""
         SELECT COUNT(*)
         FROM embeddings
-        WHERE embedding_model = ?
+        WHERE vector_backend = ?
           AND vector_collection IN ({placeholders(physical_names)})
         """,
-        (model_name, *physical_names),
+        (VECTOR_BACKEND, *physical_names),
     ).fetchone()
     return int(row[0])
 
@@ -465,6 +560,7 @@ def _query_candidates(
     dimension: int,
     query_vector: Sequence[float],
     limit: int,
+    course: str | None,
 ) -> dict[int, _Candidate]:
     existing = _existing_collection_names(client)
     candidates: dict[int, _Candidate] = {}
@@ -476,11 +572,19 @@ def _query_candidates(
         count = collection.count()
         if count == 0:
             continue
+        # The collection stores the exact canonical course name as metadata.
+        # Restricting Chroma first keeps the final top-K meaningful for course
+        # queries; SQLite reapplies the same filter while hydrating.
         fetch_k = min(count, max(limit * 4, limit))
-        result = collection.query(
-            query_embeddings=[list(query_vector)],
-            n_results=fetch_k,
-            include=["distances", "metadatas"],
+        query_kwargs: dict[str, object] = {
+            "query_embeddings": [list(query_vector)],
+            "n_results": fetch_k,
+            "include": ["distances", "metadatas"],
+        }
+        if course is not None:
+            query_kwargs["where"] = {"course": course}
+        result = collection.query(  # type: ignore[attr-defined]
+            **query_kwargs,
         )
         for chunk_id, distance, vector_id in _iter_query_hits(result):
             current = candidates.get(chunk_id)
@@ -522,38 +626,76 @@ def _first_or_empty(result: object, key: str) -> list[object]:
 def _hydrate_candidates(
     config: Config,
     *,
-    candidate_ids: Sequence[int],
+    candidates: dict[int, _Candidate],
     source_types: Sequence[str],
     course: str | None,
 ) -> list[sqlite3.Row]:
     unique_source_types = tuple(dict.fromkeys(source_types))
-    if not unique_source_types or not candidate_ids:
+    if not unique_source_types or not candidates:
         return []
     where_sql = current_chunk_where_sql(
         unique_source_types, require_non_empty_text=False
     )
-    sql = f"""
-        SELECT
-            chunks.id AS chunk_id,
-            files.id AS file_id,
-            courses.name AS course,
-            files.path AS file_path,
-            chunks.source_type AS source_type,
-            chunks.location_type AS location_type,
-            chunks.location_value AS location_value,
-            chunks.text AS text
-        FROM chunks
-        JOIN files ON files.id = chunks.file_id
-        LEFT JOIN courses ON courses.id = files.course_id
-        WHERE {where_sql}
-          AND chunks.id IN ({placeholders(candidate_ids)})
-    """
-    params: list[object] = [*unique_source_types, *candidate_ids]
-    if course is not None:
-        sql += " AND LOWER(courses.name) = LOWER(?)"
-        params.append(course)
+    hydrated: list[sqlite3.Row] = []
     with closing(connect_sqlite_read_only(config)) as connection:
-        return connection.execute(sql, params).fetchall()
+        candidate_values = tuple(candidates.values())
+        for start in range(0, len(candidate_values), _HYDRATE_CANDIDATE_BATCH):
+            batch = candidate_values[start : start + _HYDRATE_CANDIDATE_BATCH]
+            hit_sql = ", ".join("(?, ?, ?)" for _ in batch)
+            sql = f"""
+                WITH candidate_hits(chunk_id, vector_collection, vector_id) AS (
+                    VALUES {hit_sql}
+                )
+                SELECT
+                    chunks.id AS chunk_id,
+                    files.id AS file_id,
+                    courses.name AS course,
+                    files.path AS file_path,
+                    chunks.source_type AS source_type,
+                    chunks.location_type AS location_type,
+                    chunks.location_value AS location_value,
+                    chunks.text AS text
+                FROM candidate_hits
+                JOIN embeddings
+                  ON embeddings.chunk_id = candidate_hits.chunk_id
+                 AND embeddings.vector_backend = ?
+                 AND embeddings.vector_collection = candidate_hits.vector_collection
+                 AND embeddings.vector_id = candidate_hits.vector_id
+                JOIN chunks ON chunks.id = embeddings.chunk_id
+                JOIN files ON files.id = chunks.file_id
+                LEFT JOIN courses ON courses.id = files.course_id
+                WHERE {where_sql}
+            """
+            params: list[object] = [
+                *(
+                    value
+                    for candidate in batch
+                    for value in (
+                        candidate.chunk_id,
+                        candidate.physical_collection,
+                        candidate.vector_id,
+                    )
+                ),
+                VECTOR_BACKEND,
+                *unique_source_types,
+            ]
+            if course is not None:
+                sql += " AND LOWER(courses.name) = LOWER(?)"
+                params.append(course)
+            hydrated.extend(connection.execute(sql, params).fetchall())
+    return hydrated
+
+
+def _canonical_course_name(config: Config, course: str | None) -> str | None:
+    """Resolve a case-insensitive CLI course filter to stored metadata text."""
+    if course is None:
+        return None
+    with closing(connect_sqlite_read_only(config)) as connection:
+        row = connection.execute(
+            "SELECT name FROM courses WHERE LOWER(name) = LOWER(?)",
+            (course,),
+        ).fetchone()
+    return str(row["name"]) if row is not None else None
 
 
 def _sync_diagnostics(
@@ -562,8 +704,16 @@ def _sync_diagnostics(
     vectors_indexed: int,
     embeddings_total: int,
     model_name: str,
+    mappings_removed: int,
+    vectors_removed: int,
 ) -> list[str]:
     diagnostics: list[str] = []
+    if mappings_removed or vectors_removed:
+        diagnostics.append(
+            "Reconciled vector storage: removed "
+            f"{vectors_removed} stale Chroma vector(s) and "
+            f"{mappings_removed} SQLite mapping row(s)."
+        )
     if chunks_seen == 0:
         diagnostics.append("No eligible indexed chunks found for vector indexing.")
     elif vectors_indexed == 0:
@@ -601,6 +751,20 @@ def _existing_collection_names(client: object) -> set[str]:
     for collection in client.list_collections():  # type: ignore[attr-defined]
         names.add(collection if isinstance(collection, str) else collection.name)
     return names
+
+
+def _collection_vector_ids(chroma_collection: object) -> set[str]:
+    result = chroma_collection.get(include=[])  # type: ignore[attr-defined]
+    ids = result.get("ids", []) if isinstance(result, dict) else []
+    return {str(vector_id) for vector_id in ids}
+
+
+def _delete_vectors(chroma_collection: object, vector_ids: set[str]) -> None:
+    ordered_ids = sorted(vector_ids)
+    for start in range(0, len(ordered_ids), _VECTOR_ID_BATCH):
+        chroma_collection.delete(  # type: ignore[attr-defined]
+            ids=ordered_ids[start : start + _VECTOR_ID_BATCH]
+        )
 
 
 def _snippet(text: object) -> str:

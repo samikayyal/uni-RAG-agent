@@ -103,7 +103,7 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
 
     connection.executescript(MVP_SCHEMA_SQL)
     _ensure_search_results_chunk_delete_policy(connection)
-    _ensure_embeddings_chunk_delete_policy(connection)
+    _ensure_embeddings_lifecycle_schema(connection)
     connection.commit()
 
 
@@ -260,22 +260,37 @@ def _ensure_search_results_chunk_delete_policy(connection: sqlite3.Connection) -
     )
 
 
-def _ensure_embeddings_chunk_delete_policy(connection: sqlite3.Connection) -> None:
-    """Cascade-delete stale embedding mapping rows when their chunk is deleted.
+def _ensure_embeddings_lifecycle_schema(connection: sqlite3.Connection) -> None:
+    """Keep embedding mappings aligned with the physical vector profile.
 
-    Re-extraction deletes and replaces stale chunks. With ``ON DELETE CASCADE``
-    on ``embeddings.chunk_id`` the orphaned vector-mapping rows are removed
-    automatically. This idempotent migration upgrades databases created before
-    the policy existed while preserving both unique constraints and the
-    chunk-id index.
+    Each physical vector collection represents one provider/model/dimension/
+    metric profile. A chunk may therefore have mappings for more than one
+    physical collection. The migration also retains the cascade rule needed
+    when extraction deletes stale chunks.
     """
     rows = connection.execute("PRAGMA foreign_key_list(embeddings)").fetchall()
+    has_chunk_cascade = False
     for row in rows:
         if row["table"] == "chunks" and row["from"] == "chunk_id":
             if str(row["on_delete"]).upper() == "CASCADE":
-                return
+                has_chunk_cascade = True
             break
-    else:
+
+    unique_sets = {
+        tuple(
+            index_column["name"]
+            for index_column in connection.execute(
+                f"PRAGMA index_info({row['name']})"
+            ).fetchall()
+        )
+        for row in connection.execute("PRAGMA index_list(embeddings)").fetchall()
+        if row["unique"]
+    }
+    expected_unique_sets = {
+        ("vector_backend", "vector_collection", "vector_id"),
+        ("chunk_id", "vector_backend", "vector_collection"),
+    }
+    if has_chunk_cascade and expected_unique_sets.issubset(unique_sets):
         return
 
     connection.execute("ALTER TABLE embeddings RENAME TO embeddings_old")
@@ -291,7 +306,7 @@ def _ensure_embeddings_chunk_delete_policy(connection: sqlite3.Connection) -> No
             embedding_dim INTEGER NOT NULL,
             embedded_at TEXT NOT NULL,
             UNIQUE(vector_backend, vector_collection, vector_id),
-            UNIQUE(chunk_id, embedding_model)
+            UNIQUE(chunk_id, vector_backend, vector_collection)
         )
         """
     )
@@ -430,7 +445,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
     embedding_dim INTEGER NOT NULL,
     embedded_at TEXT NOT NULL,
     UNIQUE(vector_backend, vector_collection, vector_id),
-    UNIQUE(chunk_id, embedding_model)
+    UNIQUE(chunk_id, vector_backend, vector_collection)
 );
 
 CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);

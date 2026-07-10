@@ -27,6 +27,7 @@ from uni_rag_agent.indexing import (
     sync_vector_index,
 )
 from uni_rag_agent.indexing import embeddings as embeddings_module
+from uni_rag_agent.indexing import vector as vector_module
 from uni_rag_agent.retrieval import RetrievalResult
 from uni_rag_agent.storage import connect_sqlite, ensure_data_dirs, initialize_schema
 from tests.sqlite_helpers import insert_minimal_chunk
@@ -64,6 +65,16 @@ def test_resolve_profile_follows_config_fake_default(tmp_path: Path) -> None:
     assert profile.provider == "fake"
     assert profile.dimension == config.embedding_dim
     assert profile.metric == "cosine"
+
+
+def test_fake_default_never_uses_a_configured_real_model_name(tmp_path: Path) -> None:
+    config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
+
+    profile = resolve_embedding_profile(config)
+
+    assert profile.is_fake is True
+    assert profile.provider == "fake"
+    assert profile.model_name == "fake-embedding"
 
 
 def test_explicit_fake_model_selects_fake_profile(tmp_path: Path) -> None:
@@ -153,6 +164,17 @@ def test_get_embedding_model_uses_config_dimension(tmp_path: Path) -> None:
     assert isinstance(built.embeddings, FakeDeterministicEmbeddings)
     assert built.dimension == 128
     assert len(get_embedding_model(config).embed_query("probe")) == 128
+
+
+def test_invalid_direct_config_uses_the_callers_domain_error(tmp_path: Path) -> None:
+    config = make_config(tmp_path, embedding_dim=0)
+    with _initialized_connection(config):
+        pass
+
+    with pytest.raises(VectorIndexError, match="Embedding dimension"):
+        sync_vector_index(config)
+    with pytest.raises(SemanticSearchError, match="Embedding dimension"):
+        semantic_search(config, "distributed")
 
 
 # --------------------------------------------------------------------------- #
@@ -327,6 +349,87 @@ def test_sync_is_idempotent(tmp_path: Path) -> None:
     assert total == 2
 
 
+def test_sync_rolls_over_to_a_new_fake_dimension_and_rebuilds_it(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path, embedding_dim=8)
+    with _initialized_connection(config) as connection:
+        stored = insert_minimal_chunk(
+            connection,
+            config,
+            filename="rollover.md",
+            text="distributed computation",
+        )
+        connection.commit()
+
+    first = sync_vector_index(config)
+    changed = dataclasses.replace(config, embedding_dim=16)
+    rollover = sync_vector_index(changed)
+    rebuilt = sync_vector_index(changed, rebuild=True)
+
+    assert first.vectors_indexed == 1
+    assert rollover.vectors_indexed == 1
+    assert rebuilt.rows_removed == 1
+    assert rebuilt.vectors_indexed == 1
+    assert [result.chunk_id for result in semantic_search(changed, "distributed")] == [
+        stored.chunk_id
+    ]
+    with closing(connect_sqlite(changed)) as connection:
+        rows = connection.execute(
+            "SELECT vector_collection FROM embeddings WHERE chunk_id = ?",
+            (stored.chunk_id,),
+        ).fetchall()
+    assert len(rows) == 2
+    assert len({row["vector_collection"] for row in rows}) == 2
+
+
+def test_fake_then_real_profile_creates_distinct_mappings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
+    with _initialized_connection(config) as connection:
+        stored = insert_minimal_chunk(
+            connection,
+            config,
+            filename="profile.md",
+            text="distributed computation",
+        )
+        connection.commit()
+
+    def fake_huggingface_embeddings(**_kwargs: object) -> FakeDeterministicEmbeddings:
+        return FakeDeterministicEmbeddings(1024)
+
+    monkeypatch.setattr(
+        embeddings_module,
+        "_require_huggingface",
+        lambda _profile, *, error: fake_huggingface_embeddings,
+    )
+
+    fake_result = sync_vector_index(config)
+    real_result = sync_vector_index(config, model="BAAI/bge-m3")
+
+    assert fake_result.model == "fake-embedding"
+    assert real_result.model == "BAAI/bge-m3"
+    assert fake_result.vectors_indexed == 1
+    assert real_result.vectors_indexed == 1
+    with closing(connect_sqlite(config)) as connection:
+        rows = connection.execute(
+            """
+            SELECT embedding_model, vector_collection
+            FROM embeddings
+            WHERE chunk_id = ?
+            ORDER BY embedding_model
+            """,
+            (stored.chunk_id,),
+        ).fetchall()
+    assert [row["embedding_model"] for row in rows] == [
+        "BAAI/bge-m3",
+        "fake-embedding",
+    ]
+    assert len({row["vector_collection"] for row in rows}) == 2
+
+
 def test_sync_collection_filter_limits_to_one_logical_index(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     with _initialized_connection(config) as connection:
@@ -393,6 +496,111 @@ def test_rebuild_removes_stale_rows_and_repopulates_selected_model(
     with closing(connect_sqlite(config)) as connection:
         rows = connection.execute("SELECT chunk_id FROM embeddings").fetchall()
     assert [row["chunk_id"] for row in rows] == [keep.chunk_id]
+
+
+def test_sync_reconciles_orphaned_vectors_and_reused_chunk_ids(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    with _initialized_connection(config) as connection:
+        old = insert_minimal_chunk(
+            connection,
+            config,
+            course_name="Old Course",
+            filename="old.md",
+            text="distributed computation",
+        )
+        connection.commit()
+    sync_vector_index(config)
+
+    with closing(connect_sqlite(config)) as connection:
+        connection.execute("DELETE FROM chunks WHERE id = ?", (old.chunk_id,))
+        replacement = insert_minimal_chunk(
+            connection,
+            config,
+            course_name="New Course",
+            filename="replacement.md",
+            text="xylophone qwerty",
+        )
+        connection.commit()
+
+    assert replacement.chunk_id == old.chunk_id
+    # The stale Chroma vector has the same id, but no longer has an exact
+    # authoritative SQLite mapping and must not hydrate as the replacement.
+    assert semantic_search(config, "distributed computation") == []
+
+    repaired = sync_vector_index(config)
+
+    assert repaired.vectors_removed == 1
+    assert repaired.vectors_indexed == 1
+    assert [result.chunk_id for result in semantic_search(config, "xylophone")] == [
+        replacement.chunk_id
+    ]
+
+
+def test_sync_restores_a_missing_physical_collection(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    with _initialized_connection(config) as connection:
+        stored = insert_minimal_chunk(
+            connection,
+            config,
+            filename="missing-collection.md",
+            text="distributed computation",
+        )
+        connection.commit()
+    sync_vector_index(config)
+
+    with closing(connect_sqlite(config)) as connection:
+        physical = connection.execute(
+            "SELECT vector_collection FROM embeddings WHERE chunk_id = ?",
+            (stored.chunk_id,),
+        ).fetchone()[0]
+    client = vector_module._chroma_client(config, error=VectorIndexError)
+    client.delete_collection(name=physical)  # type: ignore[attr-defined]
+
+    repaired = sync_vector_index(config)
+    stable = sync_vector_index(config)
+
+    assert repaired.mappings_removed == 1
+    assert repaired.vectors_indexed == 1
+    assert stable.mappings_removed == 0
+    assert stable.vectors_removed == 0
+    assert stable.vectors_indexed == 0
+    assert [result.chunk_id for result in semantic_search(config, "distributed")] == [
+        stored.chunk_id
+    ]
+
+
+def test_sync_restores_a_missing_individual_vector(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    with _initialized_connection(config) as connection:
+        stored = insert_minimal_chunk(
+            connection,
+            config,
+            filename="missing-vector.md",
+            text="distributed computation",
+        )
+        connection.commit()
+    sync_vector_index(config)
+
+    with closing(connect_sqlite(config)) as connection:
+        row = connection.execute(
+            """
+            SELECT vector_collection, vector_id
+            FROM embeddings
+            WHERE chunk_id = ?
+            """,
+            (stored.chunk_id,),
+        ).fetchone()
+    client = vector_module._chroma_client(config, error=VectorIndexError)
+    collection = client.get_collection(name=row["vector_collection"])  # type: ignore[attr-defined]
+    collection.delete(ids=[row["vector_id"]])  # type: ignore[attr-defined]
+
+    repaired = sync_vector_index(config)
+
+    assert repaired.mappings_removed == 1
+    assert repaired.vectors_indexed == 1
+    assert [result.chunk_id for result in semantic_search(config, "distributed")] == [
+        stored.chunk_id
+    ]
 
 
 def test_sync_reports_no_eligible_chunks(tmp_path: Path) -> None:
@@ -490,6 +698,39 @@ def test_semantic_search_applies_course_index_and_top_k_filters(tmp_path: Path) 
     assert [r.chunk_id for r in index_filtered] == [ir_doc.chunk_id]
     assert len(top_k_limited) == 1
     assert semantic_search(config, "distributed computation", indexes=[]) == []
+
+
+def test_semantic_search_course_filter_is_applied_before_top_k(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    with _initialized_connection(config) as connection:
+        # This exceeds the old 4x overfetch window for top_k=1. Chroma must
+        # apply the canonical course filter before semantic top-K selection.
+        for number in range(334):
+            insert_minimal_chunk(
+                connection,
+                config,
+                course_name="Other Course",
+                filename=f"other-{number}.md",
+                text="distributed computation",
+            )
+        target = insert_minimal_chunk(
+            connection,
+            config,
+            course_name="Target Course",
+            filename="target.md",
+            text="distributed systems overview",
+        )
+        connection.commit()
+    sync_vector_index(config)
+
+    results = semantic_search(
+        config,
+        "distributed computation",
+        course="Target Course",
+        top_k=1,
+    )
+
+    assert [result.chunk_id for result in results] == [target.chunk_id]
 
 
 def test_semantic_search_without_collections_returns_empty(tmp_path: Path) -> None:

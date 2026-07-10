@@ -90,6 +90,8 @@ def build_embedding_model(
     """
     profile = resolve_embedding_profile(config, model, error=error)
     if profile.is_fake:
+        if profile.dimension <= 0:
+            raise error("Embedding dimension must be greater than zero.")
         embeddings: Embeddings = FakeDeterministicEmbeddings(profile.dimension)
         return BuiltEmbeddingModel(
             embeddings=embeddings,

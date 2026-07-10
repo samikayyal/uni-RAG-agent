@@ -745,6 +745,8 @@ def _handle_index_vector(args: argparse.Namespace) -> int:
             "command": command_name,
             "count": result.vectors_indexed,
             "rows_removed": result.rows_removed,
+            "mappings_removed": result.mappings_removed,
+            "vectors_removed": result.vectors_removed,
             "chunks_seen": result.chunks_seen,
         },
     )
@@ -998,6 +1000,8 @@ def _print_vector_index_result(result: VectorIndexResult) -> None:
     print(f"collections: {', '.join(result.collections)}")
     print(f"chunks_seen: {result.chunks_seen}")
     print(f"rows_removed: {result.rows_removed}")
+    print(f"mappings_removed: {result.mappings_removed}")
+    print(f"vectors_removed: {result.vectors_removed}")
     print(f"vectors_indexed: {result.vectors_indexed}")
     print(f"embeddings_total: {result.embeddings_total}")
     _print_count_mapping("by_source_type", result.by_source_type)

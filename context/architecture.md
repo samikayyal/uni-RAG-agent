@@ -371,7 +371,7 @@ CREATE TABLE embeddings (
     embedding_dim INTEGER NOT NULL,
     embedded_at TEXT NOT NULL,
     UNIQUE(vector_backend, vector_collection, vector_id),
-    UNIQUE(chunk_id, embedding_model)
+    UNIQUE(chunk_id, vector_backend, vector_collection)
 );
 
 CREATE INDEX idx_embeddings_chunk_id ON embeddings(chunk_id);
@@ -379,8 +379,10 @@ CREATE INDEX idx_embeddings_chunk_id ON embeddings(chunk_id);
 
 `embeddings.chunk_id` uses `ON DELETE CASCADE` (DEC-030): re-extraction deletes
 and replaces stale chunks, and the orphaned vector-mapping rows are removed
-automatically so they cannot point at deleted chunks. `embedding_model` plus a
-model-namespaced physical `vector_collection` keep side-by-side models isolated.
+automatically so they cannot point at deleted chunks. The physical
+`vector_collection` is the canonical embedding-profile identity, so a chunk may
+have one mapping per backend/physical collection and side-by-side profiles stay
+isolated even when they share a display model name.
 `vector_collection` is the physical ChromaDB collection name
 `<logical_index>__<model_slug>__<hash>`; the logical index stays stable while
 different models hash to distinct physical collections. `vector_id` is the
@@ -603,11 +605,17 @@ Rules:
   contract as keyword indexing (DEC-029);
 - one ChromaDB collection per logical index, namespaced per embedding model;
 - ChromaDB collections use cosine distance;
-- the default `index vector` run is incremental (embed only chunks missing an
-  embedding for the selected model); `--rebuild` clears and repopulates only the
-  selected model/profile and optional logical collection;
+- the default `index vector` run is incremental: it reconciles the selected
+  physical collection with SQLite, removes Chroma-only vectors and stale mapping
+  rows, restores mappings whose Chroma vectors disappeared, then embeds current
+  eligible chunks missing the selected physical profile; `--rebuild` clears and
+  repopulates only the selected model/profile and optional logical collection;
 - the fake embedding adapter is the deterministic, offline default; real Hugging
   Face local models load lazily through the optional `embeddings` extra (DEC-030).
+- semantic search accepts a Chroma hit only when its exact backend, physical
+  collection, vector id, and chunk mapping still exist in SQLite; course filters
+  are resolved before the final top-K limit so they cannot silently discard a
+  matching chunk outside a cross-course candidate window.
 
 ## Query Routing
 

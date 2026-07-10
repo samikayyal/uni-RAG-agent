@@ -105,7 +105,11 @@ collection named `<logical_index>__<model_slug>__<hash>`, where the hash input
 includes provider, model, dimension, and metric. Collections use cosine
 distance. `embeddings` rows store `vector_backend='chroma'`, the physical
 `vector_collection`, a stable `vector_id='chunk:<chunk_id>'`, the selected
-`embedding_model`, the dimension, and a timestamp.
+`embedding_model`, the dimension, and a timestamp. The physical collection is
+the canonical profile identity: a chunk may have one mapping per physical
+collection, so fake and real runs or dimension rollovers cannot suppress one
+another. Fake embeddings always use the stable `fake-embedding` identity even
+when config names a real model.
 
 ### Shared retrieval contract
 
@@ -173,17 +177,18 @@ Read:
 - `files`
 - `courses`
 
-SQLite remains authoritative. Chroma metadata should include chunk ID and enough filter fields for efficient search, but chunk text and citations should be loaded from SQLite.
+SQLite remains authoritative. Chroma metadata should include chunk ID and enough filter fields for efficient search, but chunk text and citations should be loaded from SQLite. A semantic hit is valid only when its exact backend, physical collection, vector ID, and chunk mapping still exist in `embeddings`; then SQLite may hydrate its metadata and text.
 
 ## Workflow
 
 1. Load config and embedding adapter.
 2. Map chunks to logical Chroma collections by `source_type`.
-3. Select chunks missing embeddings for the configured model.
-4. Batch embed chunk text.
-5. Upsert vectors into ChromaDB.
-6. Store `embeddings` rows with vector backend, collection, vector ID, model, dimension, and timestamp.
-7. Implement semantic search by querying selected collections and joining result IDs back to SQLite metadata.
+3. Reconcile each selected physical collection with SQLite: delete Chroma-only vectors and stale SQLite mappings, and make SQLite mappings with missing Chroma vectors eligible for re-embedding.
+4. Select chunks missing embeddings for the configured physical profile.
+5. Batch embed chunk text.
+6. Upsert vectors into ChromaDB.
+7. Store `embeddings` rows with vector backend, collection, vector ID, model, dimension, and timestamp.
+8. Implement semantic search by querying selected collections, validating exact `embeddings` mappings, and then joining result IDs back to SQLite metadata. Apply course filtering before final top-K truncation.
 8. Keep `notebooks/vector_index_eda.ipynb` aligned with embedding fields, collection names, vector metadata, model/dimension semantics, and search result shape.
 
 ## Failure and Safety Rules
@@ -193,6 +198,8 @@ SQLite remains authoritative. Chroma metadata should include chunk ID and enough
 - Do not embed chunks from metadata-only files.
 - Do not embed empty or whitespace-only chunks.
 - Batch failures should be recoverable without corrupting existing embeddings.
+- Incremental sync must repair a missing selected Chroma collection/vector and remove Chroma vectors that no longer have current authoritative mappings.
+- Semantic search must ignore a stale Chroma vector even if SQLite later reuses its numeric chunk ID for a different chunk.
 - Do not store secrets in Chroma metadata.
 - The EDA notebook must read generated app data only and must not mutate SQLite, ChromaDB files, or `Courses`.
 - Notebook outputs and execution counts should be cleared before commit.
@@ -202,7 +209,10 @@ SQLite remains authoritative. Chroma metadata should include chunk ID and enough
 - Automated tests with deterministic fake embeddings.
 - Verify collection mapping for document, slide, notebook, code, data schema, and transcript chunks.
 - Verify embedding sync is idempotent.
+- Verify fake-to-real and embedding-dimension rollovers create distinct physical mappings and remain searchable.
+- Verify incremental sync removes orphaned vectors and restores missing collections/vectors.
 - Verify semantic search returns chunk metadata joined from SQLite.
+- Verify semantic search validates the exact SQLite mapping and applies course filters before final top-K truncation.
 - Verify metadata-only files are never embedded.
 - Verify missing real provider config fails clearly when fake embeddings are disabled.
 - Verify `notebooks/vector_index_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.

@@ -96,12 +96,13 @@ REAL_EMBEDDING_PROFILES: dict[str, EmbeddingProfile] = {
 }
 
 
-def fake_profile(
-    config: Config, *, model_name: str = "fake-embedding"
-) -> EmbeddingProfile:
+def fake_profile(config: Config) -> EmbeddingProfile:
     """Return the deterministic fake profile sized by ``UNI_RAG_EMBEDDING_DIM``."""
     return EmbeddingProfile(
-        model_name=model_name,
+        # Keep fake vectors in their own stable identity even if a user has
+        # configured a real model name while experimenting. Otherwise a fake
+        # mapping can suppress a later real-model run for that same name.
+        model_name="fake-embedding",
         provider="fake",
         dimension=config.embedding_dim,
         is_fake=True,
@@ -130,8 +131,7 @@ def resolve_embedding_profile(
 
     if requested:
         if requested.casefold() in FAKE_MODEL_NAMES:
-            name = "fake-embedding" if requested.casefold() == "fake" else requested
-            return fake_profile(config, model_name=name)
+            return fake_profile(config)
         profile = REAL_EMBEDDING_PROFILES.get(requested)
         if profile is not None:
             return profile
@@ -142,10 +142,7 @@ def resolve_embedding_profile(
         )
 
     if config.use_fake_embeddings:
-        name = config.embedding_model or "fake-embedding"
-        if name.casefold() in FAKE_MODEL_NAMES:
-            name = "fake-embedding" if name.casefold() == "fake" else name
-        return fake_profile(config, model_name=name)
+        return fake_profile(config)
 
     profile = REAL_EMBEDDING_PROFILES.get(config.embedding_model)
     if profile is not None:

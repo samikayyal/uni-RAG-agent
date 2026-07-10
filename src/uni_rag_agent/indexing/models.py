@@ -55,6 +55,8 @@ class VectorIndexResult:
     collections: tuple[str, ...]
     chunks_seen: int
     rows_removed: int
+    mappings_removed: int
+    vectors_removed: int
     vectors_indexed: int
     embeddings_total: int
     by_source_type: Mapping[str, int]
@@ -69,6 +71,8 @@ class VectorIndexResult:
             "collections": list(self.collections),
             "chunks_seen": self.chunks_seen,
             "rows_removed": self.rows_removed,
+            "mappings_removed": self.mappings_removed,
+            "vectors_removed": self.vectors_removed,
             "vectors_indexed": self.vectors_indexed,
             "embeddings_total": self.embeddings_total,
             "by_source_type": dict(self.by_source_type),

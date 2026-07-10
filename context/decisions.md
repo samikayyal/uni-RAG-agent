@@ -658,13 +658,19 @@ mapping rows.
 - Support side-by-side models through model-namespaced physical ChromaDB
   collections (`<logical_index>__<model_slug>__<hash>`, hash over
   provider/model/dimension/metric) while the logical collections stay stable.
-  Collections use cosine distance.
+  Collections use cosine distance. The physical collection is the canonical
+  profile identity; fake embeddings always use `fake-embedding` rather than a
+  configured real-model name, and SQLite permits one mapping per chunk/profile.
 - Use `ON DELETE CASCADE` on `embeddings.chunk_id` so stale embedding mapping
   rows are removed when their chunk is deleted.
-- Keep semantic search direct and read-only: it queries ChromaDB, joins ids back
-  to SQLite, reapplies the current-file-only/course/index filters, and does not
-  persist `search_runs`/`search_results`. Persistence belongs to later
+- Keep semantic search direct and read-only: it queries ChromaDB, verifies each
+  hit against its exact authoritative SQLite mapping, reapplies the
+  current-file-only/course/index filters before final top-K truncation, and does
+  not persist `search_runs`/`search_results`. Persistence belongs to later
   retrieval/evidence specs.
+- Incremental vector sync reconciles the selected Chroma collection with SQLite:
+  it removes Chroma-only vectors and stale mappings, restores mappings whose
+  vectors disappeared, then embeds missing current chunks.
 
 ### Consequences
 
@@ -674,6 +680,7 @@ and are exercised only by manual smoke runs. Known real profiles (`BAAI/bge-m3`,
 `jinaai/jina-embeddings-v3`, `jinaai/jina-embeddings-v5-text-small`,
 `google/embeddinggemma-300m`) live in a registry with provider, dimension, trust,
 and gated/access notes; their dependencies and weights are only needed when
-selected. Side-by-side models never share a physical collection, and stale
-embedding rows cannot point at deleted chunks.
+selected. Side-by-side profiles never share a physical collection, stale
+embedding rows cannot point at deleted chunks, and drift between Chroma and
+SQLite is reconciled before incremental indexing.
 

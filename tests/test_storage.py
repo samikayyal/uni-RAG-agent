@@ -220,7 +220,7 @@ def test_initialize_schema_migrates_embeddings_chunk_cascade(tmp_path: Path) -> 
     assert preserved_before["chunk_id"] == stored_chunk.chunk_id
     assert chunk_id_index_present
     assert ("vector_backend", "vector_collection", "vector_id") in unique_indexes
-    assert ("chunk_id", "embedding_model") in unique_indexes
+    assert ("chunk_id", "vector_backend", "vector_collection") in unique_indexes
     assert remaining == 0
 
 
