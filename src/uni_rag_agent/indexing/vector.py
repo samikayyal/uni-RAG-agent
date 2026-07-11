@@ -188,6 +188,8 @@ def semantic_search(
     indexes: Sequence[str] | None = None,
     top_k: int | None = None,
     model: str | None = None,
+    *,
+    courses: Sequence[str] | None = None,
 ) -> list[RetrievalResult]:
     """Run semantic vector search over the selected model's collections.
 
@@ -204,6 +206,12 @@ def semantic_search(
     query_text = query.strip()
     if not query_text:
         raise SemanticSearchError("Semantic query must not be empty.")
+    if course is not None and courses is not None:
+        raise SemanticSearchError("Specify either course or courses, not both")
+    if courses is not None and not courses:
+        return []
+    if courses is None and course is not None:
+        courses = (course,)
 
     source_types = source_types_for_indexes(indexes, error=SemanticSearchError)
     if source_types == ():
@@ -220,8 +228,8 @@ def semantic_search(
         raise SemanticSearchError(f"Semantic search storage check failed: {details}")
 
     try:
-        canonical_course = _canonical_course_name(config, course)
-        if course is not None and canonical_course is None:
+        canonical_courses = _canonical_course_names(config, courses)
+        if courses is not None and not canonical_courses:
             return []
         query_vector = built.embeddings.embed_query(query_text)
         client = _chroma_client(config, error=SemanticSearchError)
@@ -232,7 +240,7 @@ def semantic_search(
             dimension=dimension,
             query_vector=query_vector,
             limit=limit,
-            course=canonical_course,
+            courses=canonical_courses,
         )
         if not candidates:
             return []
@@ -240,7 +248,7 @@ def semantic_search(
             config,
             candidates=candidates,
             source_types=[source_type for _, source_type in selected],
-            course=canonical_course,
+            courses=canonical_courses,
         )
     except SemanticSearchError:
         raise
@@ -560,7 +568,7 @@ def _query_candidates(
     dimension: int,
     query_vector: Sequence[float],
     limit: int,
-    course: str | None,
+    courses: Sequence[str] | None,
 ) -> dict[int, _Candidate]:
     existing = _existing_collection_names(client)
     candidates: dict[int, _Candidate] = {}
@@ -581,20 +589,20 @@ def _query_candidates(
             "n_results": fetch_k,
             "include": ["distances", "metadatas"],
         }
-        if course is not None:
-            query_kwargs["where"] = {"course": course}
+        if courses is not None:
+            query_kwargs["where"] = {"course": {"$in": list(courses)}}
         result = collection.query(  # type: ignore[attr-defined]
             **query_kwargs,
         )
         hits = list(_iter_query_hits(result))
-        if course is not None and not hits:
+        if courses is not None and not hits:
             # Chroma's filtered HNSW query can occasionally exhaust its search
             # frontier before reaching a sparse metadata partition. Fall back
             # to exact local scoring of that partition so a course filter is
             # always applied before final top-K truncation.
             hits = _course_filter_fallback_hits(
                 collection,
-                course=course,
+                courses=courses,
                 query_vector=query_vector,
                 limit=limit,
             )
@@ -613,13 +621,13 @@ def _query_candidates(
 def _course_filter_fallback_hits(
     collection: object,
     *,
-    course: str,
+    courses: Sequence[str],
     query_vector: Sequence[float],
     limit: int,
 ) -> list[tuple[int, float, str]]:
     """Return exact top results from a course partition missed by HNSW."""
     result = collection.get(  # type: ignore[attr-defined]
-        where={"course": course},
+        where={"course": {"$in": list(courses)}},
         include=["embeddings"],
     )
     ids = result.get("ids") if isinstance(result, dict) else None
@@ -693,7 +701,7 @@ def _hydrate_candidates(
     *,
     candidates: dict[int, _Candidate],
     source_types: Sequence[str],
-    course: str | None,
+    courses: Sequence[str] | None,
 ) -> list[sqlite3.Row]:
     unique_source_types = tuple(dict.fromkeys(source_types))
     if not unique_source_types or not candidates:
@@ -744,23 +752,41 @@ def _hydrate_candidates(
                 VECTOR_BACKEND,
                 *unique_source_types,
             ]
-            if course is not None:
-                sql += " AND LOWER(courses.name) = LOWER(?)"
-                params.append(course)
+            if courses is not None:
+                sql += f" AND courses.name IN ({', '.join('?' for _ in courses)})"
+                params.extend(courses)
             hydrated.extend(connection.execute(sql, params).fetchall())
     return hydrated
 
 
-def _canonical_course_name(config: Config, course: str | None) -> str | None:
-    """Resolve a case-insensitive CLI course filter to stored metadata text."""
-    if course is None:
+def _canonical_course_names(
+    config: Config,
+    courses: Sequence[str] | None,
+) -> tuple[str, ...] | None:
+    """Resolve course filters to canonical SQLite spelling."""
+    if courses is None:
         return None
+    requested: list[str] = []
+    seen: set[str] = set()
+    for course in courses:
+        normalized = course.strip().casefold()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            requested.append(course.strip())
+    if not requested:
+        return ()
+    placeholders = ", ".join("?" for _ in requested)
     with closing(connect_sqlite_read_only(config)) as connection:
-        row = connection.execute(
-            "SELECT name FROM courses WHERE LOWER(name) = LOWER(?)",
-            (course,),
-        ).fetchone()
-    return str(row["name"]) if row is not None else None
+        rows = connection.execute(
+            f"SELECT name FROM courses WHERE LOWER(name) IN ({placeholders})",
+            [value.casefold() for value in requested],
+        ).fetchall()
+    canonical_by_key = {str(row["name"]).casefold(): str(row["name"]) for row in rows}
+    return tuple(
+        canonical_by_key[value.casefold()]
+        for value in requested
+        if value.casefold() in canonical_by_key
+    )
 
 
 def _sync_diagnostics(

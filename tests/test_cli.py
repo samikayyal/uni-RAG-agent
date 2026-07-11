@@ -43,12 +43,11 @@ def test_unknown_command_returns_nonzero_with_message() -> None:
     assert "unknown" in result.stderr
 
 
-def test_registered_stub_command_fails_clearly() -> None:
+def test_retrieve_requires_an_explicit_embedding_model() -> None:
     result = run_cli("retrieve", "query text")
 
-    assert result.returncode == 1
-    assert "not implemented yet" in result.stderr
-    assert "Feature Spec 08" in result.stderr
+    assert result.returncode == 7
+    assert "No embedding model selected" in result.stderr
 
 
 def test_inventory_run_cli_fills_temp_storage(tmp_path: Path) -> None:

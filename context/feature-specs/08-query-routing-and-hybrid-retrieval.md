@@ -135,6 +135,25 @@ Writing `search_runs` and `search_results` belongs to spec 09. This spec should 
 - Verify `notebooks/retrieval_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
 - Optional smoke: run retrieval against a tiny fixture database with keyword and synthetic fixture vector results.
 
+## Implemented runtime contract
+
+Feature 08 requires an explicitly selected reviewed embedding model for every
+`retrieve` invocation, including unsupported routes. Supported routes execute
+one metadata search, one routed-term keyword search, and one semantic search per
+semantic query. Candidate courses and logical indexes are hard filters. Rule
+routing is deterministic and falls back to a configured LangChain provider only
+when course/index scope or intent remains unresolved; missing configuration,
+invalid JSON, or low confidence returns a successful `unknown_or_unsupported`
+run without searches, while provider/backend failures are fatal.
+
+The safe result contract extends `RetrievalResult` for file-level metadata
+results and adds `RouterOutput`, `RetrievalResultSet`, `RetrievalContribution`,
+`FusedRetrievalResult`, and `RetrievalRun`. RRF uses one-based unweighted
+`1 / (rrf_k + rank)` contributions, treats each semantic expansion as its own
+input list, and retains explicit provenance. Feature 08 does not rerank,
+inspect or execute source files, write retrieval tables, or create
+`notebooks/retrieval_eda.ipynb`; that notebook waits for Feature 09 traces.
+
 ## Acceptance Criteria
 
 - `uv run -m uni_rag_agent retrieve "query"` returns routed courses, indexes, and merged results.

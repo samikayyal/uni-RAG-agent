@@ -38,7 +38,8 @@ from .indexing import (
     keyword_search,
     sync_keyword_index,
 )
-from .retrieval import RetrievalResult
+from .retrieval import RetrievalError, RetrievalResult, RoutingError, retrieve
+from .retrieval.models import RetrievalRun
 from .storage import (
     StorageCheckResult,
     StorageError,
@@ -374,12 +375,21 @@ def _add_retrieve_command(subparsers: argparse._SubParsersAction) -> None:
         help="Retrieve source-grounded evidence for a query.",
     )
     retrieve_parser.add_argument("query", nargs="+", help="Query text.")
-    retrieve_parser.set_defaults(
-        handler=_not_implemented_handler(
-            "retrieve",
-            "Feature Spec 08: Query Routing and Hybrid Retrieval",
-        ),
+    retrieve_parser.add_argument(
+        "--model",
+        help="Supported Hugging Face profile; overrides UNI_RAG_EMBEDDING_MODEL.",
     )
+    retrieve_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print raw result sets and full RRF contribution diagnostics.",
+    )
+    retrieve_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print one complete safe RetrievalRun JSON object.",
+    )
+    retrieve_parser.set_defaults(handler=_handle_retrieve)
 
 
 def _handle_config_check(_: argparse.Namespace) -> int:
@@ -836,6 +846,182 @@ def _handle_search_semantic(args: argparse.Namespace) -> int:
     return SUCCESS
 
 
+def _handle_retrieve(args: argparse.Namespace) -> int:
+    command_name = "retrieve"
+    query_text = " ".join(args.query)
+    logger: Logger | None = None
+    model_label = "(unset)"
+    try:
+        config = load_config()
+        validate_config(config)
+        model_label = _embedding_model_log_label(config, args.model)
+        logger = _command_logger(config, command_name)
+        logger.info(
+            "retrieval started",
+            extra={
+                "event": "retrieval_started",
+                "command": command_name,
+                "status": "started",
+                "model": model_label,
+            },
+        )
+        run = retrieve(config, query_text, model=args.model)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except StorageError as exc:
+        if logger is not None:
+            logger.exception(
+                "retrieval failed",
+                extra={
+                    "event": "retrieval_failed",
+                    "command": command_name,
+                    "status": "failed",
+                },
+            )
+        print(f"Storage error: {exc}", file=sys.stderr)
+        return STORAGE_ERROR
+    except (RetrievalError, RoutingError) as exc:
+        if logger is not None:
+            logger.exception(
+                "retrieval failed",
+                extra={
+                    "event": "retrieval_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "model": model_label,
+                },
+            )
+        print(f"Retrieval error: {exc}", file=sys.stderr)
+        return SEARCH_ERROR
+
+    _log_retrieval_events(logger, run, model_label)
+    if args.json:
+        print(json.dumps(run.as_safe_dict(), indent=2, sort_keys=True))
+    else:
+        _print_retrieval_run(run, debug=args.debug)
+    return SUCCESS
+
+
+def _log_retrieval_events(
+    logger: Logger | None,
+    run: RetrievalRun,
+    model: str,
+) -> None:
+    if logger is None:
+        return
+    common = {
+        "command": "retrieve",
+        "model": model,
+        "courses": run.searched_courses,
+        "indexes": run.searched_indexes,
+        "query_type": run.router_output.query_type,
+        "route_source": run.router_output.route_source,
+        "semantic_query_count": len(run.semantic_queries),
+    }
+    logger.info(
+        "routing completed",
+        extra={
+            "event": "routing_unsupported"
+            if run.status == "unsupported"
+            else "routing_completed",
+            "status": run.status,
+            **common,
+        },
+    )
+    for result_set in run.result_sets:
+        logger.info(
+            f"{result_set.retrieval_method} search completed",
+            extra={
+                "event": f"{result_set.retrieval_method}_search_completed",
+                "status": "completed",
+                "count": len(result_set.results),
+                "result_count": len(result_set.results),
+                **common,
+            },
+        )
+    logger.info(
+        "retrieval completed",
+        extra={
+            "event": "retrieval_completed",
+            "status": run.status,
+            "count": len(run.results),
+            "final_count": len(run.results),
+            "weakness_count": len(run.weaknesses),
+            **common,
+        },
+    )
+
+
+def _print_retrieval_run(run: RetrievalRun, *, debug: bool) -> None:
+    route = run.router_output
+    print(f"status: {run.status}")
+    print(f"query: {run.query}")
+    print(f"query_type: {route.query_type}")
+    print(f"route_source: {route.route_source}")
+    print(f"route_confidence: {route.route_confidence:.6g}")
+    print(f"route_reason: {route.route_reason}")
+    print(f"embedding_model: {run.embedding_model}")
+    print(f"searched_courses: {', '.join(run.searched_courses) or 'none'}")
+    print(f"searched_indexes: {', '.join(run.searched_indexes) or 'none'}")
+    print(f"keyword_terms: {', '.join(run.keyword_terms) or 'none'}")
+    print(f"semantic_queries: {', '.join(run.semantic_queries) or 'none'}")
+    if run.results:
+        print(
+            "rank | rrf_score | course | file | source/location | contributions | snippet"
+        )
+        print(
+            "---- | --------- | ------ | ---- | --------------- | ------------- | -------"
+        )
+        for result in run.results:
+            contribution_summary = ", ".join(
+                f"{item.result_set_id}@{item.source_rank}:{item.rrf_contribution:.4f}"
+                for item in result.contributions
+            )
+            print(
+                " | ".join(
+                    (
+                        str(result.rank),
+                        f"{result.score:.6g}",
+                        _table_value(result.course or "", 28),
+                        _table_value(result.file_path, 48),
+                        _table_value(_format_source_location(result), 24),
+                        _table_value(contribution_summary, 34),
+                        _table_value(result.snippet.replace("\n", " "), 80),
+                    )
+                )
+            )
+    else:
+        print("No fused retrieval results")
+    if run.weaknesses:
+        print("weaknesses:")
+        for weakness in run.weaknesses:
+            print(f"- {weakness}")
+    if debug:
+        print("debug_result_sets:")
+        for result_set in run.result_sets:
+            print(
+                f"- {result_set.result_set_id} ({result_set.retrieval_method}) "
+                f"query={result_set.query!r} count={len(result_set.results)}"
+            )
+            for result in result_set.results:
+                print(
+                    f"  - rank={result.rank} score={result.score:.6g} "
+                    f"chunk_id={result.chunk_id} file_id={result.file_id} "
+                    f"path={result.file_path} "
+                    f"status={result.file_index_status or '-'} "
+                    f"reason={result.reason_not_indexed or '-'} "
+                    f"matched={','.join(result.matched_fields) or '-'}"
+                )
+        print("debug_rrf_contributions:")
+        for result in run.results:
+            print(
+                f"- rank={result.rank} chunk_id={result.chunk_id} file_id={result.file_id}"
+            )
+            for contribution in result.contributions:
+                print(f"  - {json.dumps(contribution.as_safe_dict(), sort_keys=True)}")
+
+
 def _print_storage_result(result: StorageCheckResult) -> None:
     safe = result.as_safe_dict()
     for key in (
@@ -1040,10 +1226,12 @@ def _print_semantic_search_results(results: Sequence[RetrievalResult]) -> None:
 
 def _format_source_location(result: RetrievalResult) -> str:
     if result.location_type and result.location_value:
-        return f"{result.source_type}:{result.location_type} {result.location_value}"
+        prefix = f"{result.source_type}:" if result.source_type else ""
+        return f"{prefix}{result.location_type} {result.location_value}"
     if result.location_type:
-        return f"{result.source_type}:{result.location_type}"
-    return result.source_type
+        prefix = f"{result.source_type}:" if result.source_type else ""
+        return f"{prefix}{result.location_type}"
+    return result.source_type or "file"
 
 
 def _table_value(value: str, max_chars: int) -> str:

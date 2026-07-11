@@ -683,6 +683,21 @@ Default retrieval parameters (configurable):
 - `keyword_top_k`: 20
 - `semantic_top_k`: 20
 - `final_top_k`: 10 (after merge and deduplication)
+- `metadata_top_k`: 20
+- `semantic_query_limit`: 3
+- `router_min_confidence`: 0.60
+- `course_fuzzy_threshold`: 90
+- `filename_fuzzy_threshold`: 85
+- `path_fuzzy_threshold`: 90
+
+Feature 08 treats a reviewed embedding-model selection as a strict precondition
+of `retrieve`, even when routing produces an unsupported run. Rule routing uses
+canonical course names, conservative aliases, file extensions, intent cues,
+and logical-index defaults before an optional LangChain fallback. Supported
+routes run metadata, keyword, and semantic retrieval; all backend failures are
+fatal and zero-hit lists become weaknesses. Result-level RRF provenance remains
+in memory for Feature 09; this feature does not write `search_runs` or
+`search_results`.
 
 ## Evidence Packet Schema
 

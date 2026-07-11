@@ -12,7 +12,12 @@ import importlib
 from typing import TYPE_CHECKING
 
 from .eligibility import ELIGIBLE_SOURCE_TYPES, INDEX_TO_SOURCE_TYPE
-from .keyword import keyword_query_terms, keyword_search, sync_keyword_index
+from .keyword import (
+    keyword_query_terms,
+    keyword_search,
+    keyword_search_terms,
+    sync_keyword_index,
+)
 from .models import (
     KeywordIndexError,
     KeywordIndexResult,
@@ -52,6 +57,7 @@ __all__ = [
     "build_embedding_model",
     "keyword_query_terms",
     "keyword_search",
+    "keyword_search_terms",
     "physical_collection_name",
     "resolve_embedding_profile",
     "semantic_search",

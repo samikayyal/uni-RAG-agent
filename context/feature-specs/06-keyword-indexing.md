@@ -59,7 +59,22 @@ keyword_search(
     indexes: list[str] | None = None,
     top_k: int | None = None,
 ) -> list[RetrievalResult]
+keyword_search_terms(
+    config: Config,
+    terms: Sequence[str],
+    *,
+    courses: Sequence[str] | None = None,
+    indexes: Sequence[str] | None = None,
+    top_k: int | None = None,
+) -> list[RetrievalResult]
 ```
+
+Both direct search APIs retain the singular `course` filter. Feature 08 may
+also provide multiple canonical `courses`; the search applies that set in SQL
+before the global limit. Supplying both forms is an error, an empty sequence
+returns no results, and unknown canonical names never broaden the search.
+`keyword_search_terms` preserves whitespace-containing terms as FTS phrases;
+the existing direct query and CLI retain plain-text token behavior.
 
 Result fields:
 

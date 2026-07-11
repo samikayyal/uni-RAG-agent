@@ -42,6 +42,12 @@ keyword_top_k
 semantic_top_k
 final_top_k
 rrf_k
+metadata_top_k
+semantic_query_limit
+router_min_confidence
+course_fuzzy_threshold
+filename_fuzzy_threshold
+path_fuzzy_threshold
 llm_provider: str | None
 llm_model: str | None
 embedding_model: str | None
@@ -61,6 +67,12 @@ UNI_RAG_KEYWORD_TOP_K
 UNI_RAG_SEMANTIC_TOP_K
 UNI_RAG_FINAL_TOP_K
 UNI_RAG_RRF_K
+UNI_RAG_METADATA_TOP_K
+UNI_RAG_SEMANTIC_QUERY_LIMIT
+UNI_RAG_ROUTER_MIN_CONFIDENCE
+UNI_RAG_COURSE_FUZZY_THRESHOLD
+UNI_RAG_FILENAME_FUZZY_THRESHOLD
+UNI_RAG_PATH_FUZZY_THRESHOLD
 UNI_RAG_LLM_PROVIDER
 UNI_RAG_LLM_MODEL
 UNI_RAG_EMBEDDING_MODEL
@@ -129,6 +141,10 @@ The implementation may add a lightweight schema version table if needed, but it 
 
 - Missing `Courses` root should fail `config check` with a clear path-specific error.
 - Unset optional model/provider values must not fail config checks.
+- `llm_provider` and `llm_model` are an atomic pair: both unset or both
+  nonblank. Providers are exactly `openai`, `anthropic`, `gemini`, or `ollama`.
+- Retrieval tuning values use Feature 08 defaults: metadata top-K 20, semantic
+  query limit 3, router confidence 0.60, and fuzzy thresholds 90/85/90.
 - Storage initialization must be idempotent.
 - The implementation must never create files under `Courses`.
 - `.env` values must not be logged verbatim if they look like secrets.

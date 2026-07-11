@@ -31,6 +31,9 @@ uv run -m uni_rag_agent extract status
 uv run -m uni_rag_agent index keyword
 uv run -m uni_rag_agent search keyword "mapreduce"
 uv run -m uni_rag_agent search keyword "mapreduce" --json
+uv run -m uni_rag_agent retrieve "Explain MapReduce from Information Retrieval" --model BAAI/bge-m3
+uv run -m uni_rag_agent retrieve "Find the Information Retrieval syllabus" --model BAAI/bge-m3 --debug
+uv run -m uni_rag_agent retrieve "query text" --model BAAI/bge-m3 --json
 ```
 
 Runtime configuration is loaded from `.env` with non-secret defaults documented
@@ -174,6 +177,18 @@ license, gating, token, or authentication requirements before running it.
 `index vector` writes lifecycle JSONL logs under `data/runs/`. Direct semantic
 search does not write `search_runs` or `search_results`.
 
+Feature 08 retrieval is read-only: it routes the query, runs metadata/keyword/
+semantic search, and merges ranked results with RRF. It does not write
+`search_runs`, `search_results`, evidence packets, or files under `Courses`.
+Retrieval requires an explicit reviewed embedding model and uses optional LLM
+integrations only for unresolved routing:
+
+```powershell
+uv sync --extra embeddings
+uv sync --extra llm
+uv sync --extra embeddings --extra llm
+```
+
 Remaining MVP command shapes are registered for later specs:
 
 ```powershell
@@ -182,8 +197,8 @@ uv run -m uni_rag_agent eval run
 uv run -m uni_rag_agent app serve
 ```
 
-`retrieve`, `eval`, and `app` are stubs until their feature specs are
-implemented. They should fail clearly and must not scan or mutate `Courses/`.
+`eval` and `app` are stubs until their feature specs are implemented. They
+should fail clearly and must not scan or mutate `Courses/`.
 
 ## MVP Module Order
 

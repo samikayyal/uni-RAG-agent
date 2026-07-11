@@ -72,6 +72,8 @@ semantic_search(
     indexes: Sequence[str] | None = None,
     top_k: int | None = None,
     model: str | None = None,
+    *,
+    courses: Sequence[str] | None = None,
 ) -> list[RetrievalResult]
 ```
 
@@ -80,6 +82,11 @@ mirrors the implemented `keyword_search(config, query, ...)` rather than the
 earlier query-first sketch, so the two direct-search entry points share one
 shape (config first, query second, then `course`/`indexes`/`top_k`). `top_k`
 defaults to `UNI_RAG_SEMANTIC_TOP_K` when omitted.
+
+`courses` is the plural Feature 08 compatibility extension. It is resolved to
+canonical SQLite course spelling, filtered in Chroma before top-K, and reapplied
+during authoritative SQLite hydration. The singular `course` remains supported;
+passing both is an error and an empty plural sequence returns no results.
 
 ### Embedding model selection
 

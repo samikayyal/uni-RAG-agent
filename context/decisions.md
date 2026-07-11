@@ -742,3 +742,42 @@ the real ChromaDB and SQLite pipeline through injected model boundaries. Existin
 local vector state created under the superseded contract must be cleared and
 rebuilt by its owner; this workspace has no generated vector state to migrate.
 
+---
+
+## DEC-032: Read-only routed hybrid retrieval with explicit model and RRF provenance
+
+* **Status**: Accepted
+* **Date**: 2026-07-11
+
+### Context
+
+Feature 08 connects the current inventory, FTS5, and ChromaDB slices without
+introducing persistence or answering behavior. The routing boundary must remain
+deterministic and auditable while supporting ambiguous queries through optional
+LangChain providers.
+
+### Decision
+
+- Every `retrieve` invocation requires a reviewed embedding model from `--model`
+  or `UNI_RAG_EMBEDDING_MODEL`, including unsupported routes.
+- Supported routes run metadata, keyword, and semantic retrieval. Candidate
+  courses and logical indexes are hard filters; zero hits are successful
+  weaknesses, while any enabled backend/provider failure is fatal.
+- Rule routing resolves obvious queries first. Ambiguous or incomplete scope
+  uses the configured exact-provider LLM fallback. Missing LLM configuration,
+  invalid output, or low confidence returns `unknown_or_unsupported` with no
+  searches; provider invocation failures fail the retrieval command.
+- Metadata may return file-level rows with `chunk_id = NULL`. Hybrid fusion
+  preserves method, semantic-query, source-rank, native-score, and RRF
+  contribution provenance, using one-based unweighted RRF without score
+  normalization or reranking.
+- Search-run/evidence persistence, source-file inspection, execution, and the
+  retrieval notebook remain Feature 09 or later concerns.
+
+### Consequences
+
+The result contract can be serialized directly for later persistence and makes
+weak coverage visible without mutating SQLite, ChromaDB, or `Courses`. Retrieval
+requires the optional embeddings runtime at execution time, while optional LLM
+integrations remain lazy behind `uv sync --extra llm`.
+

@@ -31,6 +31,7 @@ __all__ = [
     "INDEX_TO_SOURCE_TYPE",
     "keyword_query_terms",
     "keyword_search",
+    "keyword_search_terms",
     "sync_keyword_index",
 ]
 
@@ -82,12 +83,72 @@ def keyword_search(
     course: str | None = None,
     indexes: Sequence[str] | None = None,
     top_k: int | None = None,
+    *,
+    courses: Sequence[str] | None = None,
+) -> list[RetrievalResult]:
+    if course is not None and courses is not None:
+        raise KeywordSearchError("Specify either course or courses, not both")
+    if courses is not None and not courses:
+        return []
+    if courses is None and course is not None:
+        courses = (course,)
+    return _keyword_search(
+        config,
+        match_query=_plain_text_to_fts_query(query),
+        courses=courses,
+        indexes=indexes,
+        top_k=top_k,
+    )
+
+
+def keyword_search_terms(
+    config: Config,
+    terms: Sequence[str],
+    *,
+    courses: Sequence[str] | None = None,
+    indexes: Sequence[str] | None = None,
+    top_k: int | None = None,
+) -> list[RetrievalResult]:
+    """Search routed terms, retaining whitespace-containing phrases."""
+    if courses is not None and not courses:
+        return []
+    normalized_terms = tuple(
+        _strip_outer_quotes(term.strip()) for term in terms if term.strip()
+    )
+    if not normalized_terms:
+        raise KeywordSearchError(
+            "Keyword query must contain at least one word or number."
+        )
+    match_query = " OR ".join(
+        f'"{term.replace(chr(34), chr(34) * 2)}"' for term in normalized_terms
+    )
+    return _keyword_search(
+        config,
+        match_query=match_query,
+        courses=courses,
+        indexes=indexes,
+        top_k=top_k,
+    )
+
+
+def _strip_outer_quotes(term: str) -> str:
+    if len(term) >= 2 and term[0] == term[-1] == '"':
+        return term[1:-1].replace('""', '"').strip()
+    return term
+
+
+def _keyword_search(
+    config: Config,
+    *,
+    match_query: str,
+    courses: Sequence[str] | None,
+    indexes: Sequence[str] | None,
+    top_k: int | None,
 ) -> list[RetrievalResult]:
     limit = top_k if top_k is not None else config.keyword_top_k
     if limit <= 0:
         raise KeywordSearchError("top_k must be greater than zero")
 
-    match_query = _plain_text_to_fts_query(query)
     source_types = source_types_for_indexes(indexes, error=KeywordSearchError)
     if source_types == ():
         return []
@@ -100,9 +161,12 @@ def keyword_search(
         details = "; ".join(storage.diagnostics) or "storage is not ready"
         raise KeywordSearchError(f"Keyword search storage check failed: {details}")
 
+    canonical_courses = _canonical_courses(config, courses)
+    if courses is not None and not canonical_courses:
+        return []
     sql, params = _build_search_sql(
         match_query=match_query,
-        course=course,
+        courses=canonical_courses,
         source_types=search_source_types,
         limit=limit,
     )
@@ -127,6 +191,9 @@ def keyword_search(
             rank=rank,
             score=-float(row["raw_score"]),
             snippet=row["snippet"] or "",
+            file_category=row["file_category"],
+            file_index_status=row["file_index_status"],
+            reason_not_indexed=row["reason_not_indexed"],
         )
         for rank, row in enumerate(rows, start=1)
     ]
@@ -157,7 +224,7 @@ def _plain_text_to_fts_query(query: str) -> str:
 def _build_search_sql(
     *,
     match_query: str,
-    course: str | None,
+    courses: Sequence[str] | None,
     source_types: Sequence[str],
     limit: int,
 ) -> tuple[str, list[object]]:
@@ -167,9 +234,9 @@ def _build_search_sql(
     ]
     params: list[object] = [match_query, *source_types]
 
-    if course is not None:
-        where.append("LOWER(courses.name) = LOWER(?)")
-        params.append(course)
+    if courses is not None:
+        where.append(f"courses.name IN ({', '.join('?' for _ in courses)})")
+        params.extend(courses)
 
     params.append(limit)
     return (
@@ -182,6 +249,9 @@ def _build_search_sql(
             chunks.source_type AS source_type,
             chunks.location_type AS location_type,
             chunks.location_value AS location_value,
+            files.category AS file_category,
+            files.index_status AS file_index_status,
+            files.reason_not_indexed AS reason_not_indexed,
             bm25(chunk_fts) AS raw_score,
             snippet(chunk_fts, -1, '[', ']', '...', 32) AS snippet
         FROM chunk_fts
@@ -193,6 +263,35 @@ def _build_search_sql(
         LIMIT ?
         """,
         params,
+    )
+
+
+def _canonical_courses(
+    config: Config,
+    courses: Sequence[str] | None,
+) -> tuple[str, ...] | None:
+    if courses is None:
+        return None
+    requested: list[str] = []
+    seen: set[str] = set()
+    for course in courses:
+        normalized = course.strip().casefold()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            requested.append(course.strip())
+    if not requested:
+        return ()
+    placeholders = ", ".join("?" for _ in requested)
+    with closing(connect_sqlite_read_only(config)) as connection:
+        rows = connection.execute(
+            f"SELECT name FROM courses WHERE LOWER(name) IN ({placeholders})",
+            [value.casefold() for value in requested],
+        ).fetchall()
+    canonical_by_key = {str(row["name"]).casefold(): str(row["name"]) for row in rows}
+    return tuple(
+        canonical_by_key[value.casefold()]
+        for value in requested
+        if value.casefold() in canonical_by_key
     )
 
 

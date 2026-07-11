@@ -16,6 +16,12 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_KEYWORD_TOP_K",
     "UNI_RAG_LLM_MODEL",
     "UNI_RAG_LLM_PROVIDER",
+    "UNI_RAG_METADATA_TOP_K",
+    "UNI_RAG_SEMANTIC_QUERY_LIMIT",
+    "UNI_RAG_ROUTER_MIN_CONFIDENCE",
+    "UNI_RAG_COURSE_FUZZY_THRESHOLD",
+    "UNI_RAG_FILENAME_FUZZY_THRESHOLD",
+    "UNI_RAG_PATH_FUZZY_THRESHOLD",
     "UNI_RAG_LOG_LEVEL",
     "UNI_RAG_OCR_ENABLED",
     "UNI_RAG_RRF_K",
@@ -48,6 +54,12 @@ def test_defaults_resolve_from_repo_root(tmp_path: Path) -> None:
     assert config.semantic_top_k == 20
     assert config.final_top_k == 10
     assert config.rrf_k == 60
+    assert config.metadata_top_k == 20
+    assert config.semantic_query_limit == 3
+    assert config.router_min_confidence == 0.60
+    assert config.course_fuzzy_threshold == 90
+    assert config.filename_fuzzy_threshold == 85
+    assert config.path_fuzzy_threshold == 90
     assert config.embedding_model is None
     assert config.llm_provider is None
     assert config.llm_model is None
@@ -73,6 +85,12 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
                 "UNI_RAG_SEMANTIC_TOP_K=8",
                 "UNI_RAG_FINAL_TOP_K=3",
                 "UNI_RAG_RRF_K=42",
+                "UNI_RAG_METADATA_TOP_K=7",
+                "UNI_RAG_SEMANTIC_QUERY_LIMIT=4",
+                "UNI_RAG_ROUTER_MIN_CONFIDENCE=0.75",
+                "UNI_RAG_COURSE_FUZZY_THRESHOLD=91",
+                "UNI_RAG_FILENAME_FUZZY_THRESHOLD=86",
+                "UNI_RAG_PATH_FUZZY_THRESHOLD=92",
                 "UNI_RAG_LLM_PROVIDER=ollama",
                 "UNI_RAG_LLM_MODEL=llama3.2",
                 "UNI_RAG_EMBEDDING_MODEL=BAAI/bge-m3",
@@ -94,6 +112,12 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
     assert config.semantic_top_k == 8
     assert config.final_top_k == 3
     assert config.rrf_k == 42
+    assert config.metadata_top_k == 7
+    assert config.semantic_query_limit == 4
+    assert config.router_min_confidence == 0.75
+    assert config.course_fuzzy_threshold == 91
+    assert config.filename_fuzzy_threshold == 86
+    assert config.path_fuzzy_threshold == 92
     assert config.embedding_model == "BAAI/bge-m3"
     assert config.llm_provider == "ollama"
     assert config.llm_model == "llama3.2"
@@ -209,3 +233,34 @@ def test_safe_dict_excludes_injected_secret_values(
     assert "secret-anthropic-value" not in safe.values()
     assert "secret-google-value" not in safe.values()
     assert safe["courses_root"] == str(tmp_path / "Courses")
+
+
+@pytest.mark.parametrize(
+    ("env_line", "expected_message"),
+    [
+        (
+            "UNI_RAG_METADATA_TOP_K=0",
+            "UNI_RAG_METADATA_TOP_K must be greater than zero",
+        ),
+        (
+            "UNI_RAG_SEMANTIC_QUERY_LIMIT=-1",
+            "UNI_RAG_SEMANTIC_QUERY_LIMIT must be greater than zero",
+        ),
+        ("UNI_RAG_ROUTER_MIN_CONFIDENCE=1.1", "must be between 0 and 1"),
+        ("UNI_RAG_COURSE_FUZZY_THRESHOLD=101", "must be between 0 and 100"),
+        ("UNI_RAG_LLM_PROVIDER=openai", "must be set together"),
+        ("UNI_RAG_LLM_PROVIDER=unknown\nUNI_RAG_LLM_MODEL=model", "must be one of"),
+    ],
+)
+def test_feature_08_config_validation(
+    tmp_path: Path,
+    env_line: str,
+    expected_message: str,
+) -> None:
+    (tmp_path / "Courses").mkdir()
+    env_file = tmp_path / ".env"
+    env_file.write_text(env_line, encoding="utf-8")
+
+    with pytest.raises(ConfigError, match=expected_message):
+        config = load_config(repo_root=tmp_path, env_file=env_file)
+        validate_config(config)
