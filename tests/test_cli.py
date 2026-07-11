@@ -65,8 +65,6 @@ def test_inventory_run_cli_fills_temp_storage(tmp_path: Path) -> None:
             "UNI_RAG_SQLITE_PATH": str(data_dir / "uni_rag.sqlite"),
             "UNI_RAG_CHROMA_DIR": str(data_dir / "indexes" / "vector"),
             "UNI_RAG_RUNS_DIR": str(data_dir / "runs"),
-            "UNI_RAG_USE_FAKE_LLM": "true",
-            "UNI_RAG_USE_FAKE_EMBEDDINGS": "true",
         }
     )
 
@@ -117,8 +115,6 @@ def test_inventory_cli_validates_paths_before_creating_run_log(tmp_path: Path) -
             "UNI_RAG_SQLITE_PATH": str(data_dir / "uni_rag.sqlite"),
             "UNI_RAG_CHROMA_DIR": str(data_dir / "indexes" / "vector"),
             "UNI_RAG_RUNS_DIR": str(courses_root / "runs"),
-            "UNI_RAG_USE_FAKE_LLM": "true",
-            "UNI_RAG_USE_FAKE_EMBEDDINGS": "true",
         }
     )
 
@@ -149,8 +145,6 @@ def test_extract_run_cli_writes_chunks_and_status(tmp_path: Path) -> None:
             "UNI_RAG_SQLITE_PATH": str(data_dir / "uni_rag.sqlite"),
             "UNI_RAG_CHROMA_DIR": str(data_dir / "indexes" / "vector"),
             "UNI_RAG_RUNS_DIR": str(data_dir / "runs"),
-            "UNI_RAG_USE_FAKE_LLM": "true",
-            "UNI_RAG_USE_FAKE_EMBEDDINGS": "true",
         }
     )
 

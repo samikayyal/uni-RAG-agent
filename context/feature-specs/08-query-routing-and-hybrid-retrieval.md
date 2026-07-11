@@ -130,16 +130,16 @@ Writing `search_runs` and `search_results` belongs to spec 09. This spec should 
 - Verify exact course-name matching preserves misspellings such as `High Preformance Computing for Big Data`.
 - Verify file-finding queries prioritize metadata and keyword search.
 - Verify code and data queries select code/data schema indexes.
-- Verify ambiguous queries use fake LLM fallback only when enabled.
+- Verify ambiguous queries use an injected test-only chat model in isolation from production configuration.
 - Verify RRF ranking is deterministic and does not normalize scores from different systems.
 - Verify `notebooks/retrieval_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
-- Optional smoke: run retrieval against a tiny fixture database with keyword and fake vector results.
+- Optional smoke: run retrieval against a tiny fixture database with keyword and synthetic fixture vector results.
 
 ## Acceptance Criteria
 
 - `uv run -m uni_rag_agent retrieve "query"` returns routed courses, indexes, and merged results.
 - The router works without an LLM for obvious course/file/index queries.
-- LLM fallback is config-driven and testable with a fake adapter.
+- LLM fallback is config-driven and testable with an injected test-only chat model.
 - Hybrid retrieval uses metadata, keyword, and semantic search where appropriate.
 - No reranker is required or invoked for MVP.
 - `notebooks/retrieval_eda.ipynb` exists once retrieval traces are persisted and can inspect route/retrieval behavior without mutating generated or source data.

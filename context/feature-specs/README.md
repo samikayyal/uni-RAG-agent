@@ -21,7 +21,7 @@ The root `project-overview.md` remains the fuller narrative background, but impl
 | 04 | [Text Extraction and Chunking](04-text-extraction-and-chunking.md) | Extractors, natural chunks, source locations |
 | 05 | [Data Schema Summaries](05-data-schema-summaries.md) | CSV/XLSX/JSON/SQLite summaries and sample rows |
 | 06 | [Keyword Indexing](06-keyword-indexing.md) | SQLite FTS5 synchronization and search |
-| 07 | [Vector Indexing](07-vector-indexing.md) | LangChain embeddings, Chroma collections, test fakes |
+| 07 | [Vector Indexing](07-vector-indexing.md) | Reviewed Hugging Face embeddings, Chroma collections, injected test doubles |
 | 08 | [Query Routing and Hybrid Retrieval](08-query-routing-and-hybrid-retrieval.md) | Query types, rule router, optional LLM fallback, RRF |
 | 09 | [Evidence Packets and Coverage](09-evidence-packets-and-coverage.md) | Evidence packet contract, weakness reporting, persistence |
 | 10 | [Answering and Citations](10-answering-and-citations.md) | Evidence-only answers, inline citations, references |
@@ -66,7 +66,7 @@ EDA notebooks are planned only for stages that produce generated artifacts worth
 | 06 | `notebooks/keyword_index_eda.ipynb` | Planned | `chunk_fts`, keyword coverage, source-type distribution, query smoke checks. |
 | 07 | `notebooks/vector_index_eda.ipynb` | Planned | `embeddings`, Chroma collection metadata, embedding model/dimension coverage. |
 | 08-09 | `notebooks/retrieval_eda.ipynb` | Planned | Router outputs, `search_runs`, `search_results`, RRF mix, evidence packets, weaknesses. |
-| 10 | `notebooks/answering_eda.ipynb` | Planned | `answers`, citation validation, limitations, model/fake-adapter traces. |
+| 10 | `notebooks/answering_eda.ipynb` | Planned | `answers`, citation validation, limitations, model traces, injected-test behavior. |
 | 11 | None required for MVP | Not applicable | UI behavior is covered by API/UI tests; inspect underlying traces through retrieval/answering notebooks. |
 | 12 | `notebooks/evaluation_eda.ipynb` | Planned | `data/runs/eval/` reports, retrieval/citation scores, failures, runtime summaries. |
 
@@ -82,7 +82,7 @@ EDA notebooks are planned only for stages that produce generated artifacts worth
 - Clear notebook outputs and execution counts before committing unless a future decision explicitly permits committed output snapshots.
 - Keep `.env` local and ignored. Commit `.env.example`.
 - Treat the SQLite schema in `context/architecture.md` as the MVP storage contract.
-- Keep LLM and embedding provider/model choices in configuration. Tests must use deterministic fake adapters.
+- Keep optional LLM settings and the reviewed embedding model choice in configuration. Production providers are real/configured; tests inject deterministic doubles at model-loader or chat-model boundaries.
 - Automated tests must use small committed fixtures. Full `Courses` archive checks are optional smoke tests only.
 
 ## Standard Spec Shape

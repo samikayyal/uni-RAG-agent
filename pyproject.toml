@@ -21,9 +21,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Real Hugging Face local embedding models. Kept optional so the fake-default
-# test path stays offline and lightweight: langchain-huggingface pulls in
-# sentence-transformers, which depends on transformers and torch.
+# The base environment supports non-vector Features 01-06. Vector indexing
+# requires the optional local Hugging Face model stack below.
 embeddings = [
     "langchain-huggingface>=0.1.0",
     "sentence-transformers>=3.0.0",

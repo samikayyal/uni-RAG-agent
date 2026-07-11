@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define configuration loading and initialize the generated local storage layout. This spec makes paths, provider settings, retrieval limits, SQLite, and ChromaDB persistence explicit before feature modules write data.
+Define configuration loading and initialize the generated local storage layout. This spec makes paths, optional model settings, retrieval limits, SQLite, and ChromaDB persistence explicit before feature modules write data.
 
 ## Depends On
 
@@ -17,8 +17,8 @@ Define configuration loading and initialize the generated local storage layout. 
 - Create and validate the `data/` directory layout.
 - Initialize `data/uni_rag.sqlite` with the MVP schema from `context/architecture.md`.
 - Define ChromaDB persistence under `data/indexes/vector/`.
-- Define provider/model config keys without requiring a specific paid/cloud provider.
-- Provide deterministic fake provider settings for tests.
+- Define optional LLM provider/model settings without requiring a specific paid/cloud provider.
+- Define the optional reviewed embedding model setting used by Feature 07.
 
 ## Out of Scope
 
@@ -42,13 +42,9 @@ keyword_top_k
 semantic_top_k
 final_top_k
 rrf_k
-llm_provider
-llm_model
-embedding_provider
-embedding_model
-embedding_dim
-use_fake_llm
-use_fake_embeddings
+llm_provider: str | None
+llm_model: str | None
+embedding_model: str | None
 ocr_enabled
 ```
 
@@ -67,11 +63,7 @@ UNI_RAG_FINAL_TOP_K
 UNI_RAG_RRF_K
 UNI_RAG_LLM_PROVIDER
 UNI_RAG_LLM_MODEL
-UNI_RAG_EMBEDDING_PROVIDER
 UNI_RAG_EMBEDDING_MODEL
-UNI_RAG_EMBEDDING_DIM
-UNI_RAG_USE_FAKE_LLM
-UNI_RAG_USE_FAKE_EMBEDDINGS
 UNI_RAG_OCR_ENABLED
 ```
 
@@ -136,7 +128,7 @@ The implementation may add a lightweight schema version table if needed, but it 
 ## Failure and Safety Rules
 
 - Missing `Courses` root should fail `config check` with a clear path-specific error.
-- Missing API keys must not fail config checks when fake providers are enabled.
+- Unset optional model/provider values must not fail config checks.
 - Storage initialization must be idempotent.
 - The implementation must never create files under `Courses`.
 - `.env` values must not be logged verbatim if they look like secrets.
@@ -148,12 +140,12 @@ The implementation may add a lightweight schema version table if needed, but it 
 - Verify `.env` overrides are loaded.
 - Verify `storage init` creates the expected directories and all required tables.
 - Verify FTS5 table creation works or returns a clear diagnostic if unavailable.
-- Verify fake provider config requires no API keys.
+- Verify unset optional model/provider values are reported as `null`/`None` without invented defaults.
 - Optional smoke: run `uv run -m uni_rag_agent storage check` against the real repo without traversing `Courses`.
 
 ## Acceptance Criteria
 
-- `uv run -m uni_rag_agent config check` reports paths and provider mode without secrets.
+- `uv run -m uni_rag_agent config check` reports paths and optional model/provider values without secrets.
 - `uv run -m uni_rag_agent storage init` creates `data/uni_rag.sqlite` and required directories.
 - The SQLite schema matches the architecture contract.
 - Chroma persistence path is configured under `data/indexes/vector/`.

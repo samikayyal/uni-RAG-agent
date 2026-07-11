@@ -100,7 +100,7 @@ If later persistence is useful, add an explicit architecture update before intro
 - Real archive smoke evals require an explicit `--smoke-real-archive` flag.
 - Eval runs must not mutate `Courses`.
 - Do not use LLM judging as the sole pass/fail mechanism.
-- Missing provider credentials should not block fake-adapter evals.
+- Test-only injected model/chat dependencies should keep fixture evals independent of provider credentials.
 - Reports should avoid storing secrets or full environment values.
 - The EDA notebook must read generated eval reports and app traces only; it must not mutate reports, SQLite, indexes, or `Courses`.
 - Notebook outputs and execution counts should be cleared before commit.

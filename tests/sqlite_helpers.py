@@ -191,10 +191,10 @@ def insert_embedding_row(
     connection: sqlite3.Connection,
     *,
     chunk_id: int,
-    vector_collection: str = "document_index__fake-embedding__0000000000",
+    vector_collection: str = "document_index__baai-bge-m3__0000000000",
     vector_id: str | None = None,
-    embedding_model: str = "fake-embedding",
-    embedding_dim: int = 384,
+    embedding_model: str = "BAAI/bge-m3",
+    embedding_dim: int = 8,
     vector_backend: str = "chroma",
     timestamp: str = TEST_TIMESTAMP,
 ) -> int:

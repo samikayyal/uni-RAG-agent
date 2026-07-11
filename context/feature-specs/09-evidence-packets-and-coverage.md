@@ -122,7 +122,7 @@ Evidence packet JSON must be stored exactly as given to the answer generator. Do
 
 ## Tests
 
-- Automated fixture tests build packets from fake retrieval results.
+- Automated fixture tests build packets from synthetic fixture retrieval results.
 - Verify empty retrieval produces a valid insufficient-evidence packet.
 - Verify selected results are marked in `search_results`.
 - Verify evidence items include course, file, source type, location, text, score, and retrieval method.

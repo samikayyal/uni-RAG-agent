@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from uuid import uuid4
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -92,8 +93,9 @@ def build_run_log_path(
     now: datetime | None = None,
 ) -> Path:
     timestamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
+    run_suffix = uuid4().hex[:8]
     slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", command_name.strip().lower()).strip("-")
-    return runs_dir / f"{timestamp}-{slug or 'run'}.jsonl"
+    return runs_dir / f"{timestamp}-{run_suffix}-{slug or 'run'}.jsonl"
 
 
 def _logging_level(level: str | int) -> int:

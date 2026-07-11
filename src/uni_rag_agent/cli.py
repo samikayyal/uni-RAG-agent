@@ -263,8 +263,8 @@ def _add_index_commands(subparsers: argparse._SubParsersAction) -> None:
     vector_parser.add_argument(
         "--model",
         help=(
-            "Embedding model: 'fake-embedding' or a known real profile such as "
-            "BAAI/bge-m3. Overrides UNI_RAG_USE_FAKE_EMBEDDINGS for this command."
+            "Supported Hugging Face profile; falls back to "
+            "UNI_RAG_EMBEDDING_MODEL when omitted."
         ),
     )
     vector_parser.add_argument(
@@ -335,7 +335,10 @@ def _add_search_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     semantic_parser.add_argument(
         "--model",
-        help="Embedding model to query. Must match the model used to index.",
+        help=(
+            "Supported Hugging Face profile; falls back to "
+            "UNI_RAG_EMBEDDING_MODEL when omitted. Must match the indexed model."
+        ),
     )
     semantic_parser.add_argument(
         "--json",
@@ -702,12 +705,12 @@ def _handle_index_vector(args: argparse.Namespace) -> int:
     logger: Logger | None = None
     base_extra = {
         "command": command_name,
-        "model": args.model or "(config)",
         "collection": args.collection or "all",
     }
     try:
         config = load_config()
         validate_config(config)
+        base_extra["model"] = _embedding_model_log_label(config, args.model)
         logger = _command_logger(config, command_name)
         logger.info(
             "vector index started",
@@ -766,11 +769,11 @@ def _handle_search_semantic(args: argparse.Namespace) -> int:
         "command": command_name,
         "course": args.course,
         "indexes": args.indexes or (),
-        "model": args.model or "(config)",
     }
     try:
         config = load_config()
         validate_config(config)
+        base_extra["model"] = _embedding_model_log_label(config, args.model)
         top_k = args.top_k if args.top_k is not None else config.semantic_top_k
         logger = _command_logger(config, command_name)
         logger.info(
@@ -1056,6 +1059,12 @@ def _command_logger(config: Config, command_name: str) -> Logger:
         jsonl_path=build_run_log_path(config.runs_dir, command_name),
         console=False,
     )
+
+
+def _embedding_model_log_label(config: Config, explicit_model: str | None) -> str:
+    """Return the normalized model selection represented in command telemetry."""
+    explicit = explicit_model.strip() if explicit_model else ""
+    return explicit or config.embedding_model or "(unset)"
 
 
 def _print_count_mapping(label: str, counts: Mapping[str, int]) -> None:

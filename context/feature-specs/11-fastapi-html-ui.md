@@ -112,13 +112,13 @@ Session memory may be in-process for MVP and should not require cross-session pe
 
 ## Tests
 
-- Automated FastAPI tests with test client and fake retrieval/answering adapters.
+- Automated FastAPI tests with test client and injected retrieval/answering doubles.
 - Verify `/health` works without initialized real providers.
 - Verify `/config` hides secrets.
 - Verify `/api/ask` returns answer IDs, citations, references, and coverage.
 - Verify insufficient-evidence responses render as successful API responses.
 - Verify static UI file loads.
-- Optional smoke: start app with fake adapters and ask against a tiny fixture database.
+- Optional smoke: start the app with explicitly configured production models and ask against a tiny fixture database.
 
 ## Acceptance Criteria
 

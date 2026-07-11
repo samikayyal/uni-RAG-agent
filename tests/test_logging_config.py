@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 from uni_rag_agent.logging_config import build_run_log_path, configure_logging
@@ -35,8 +36,11 @@ def test_jsonl_logging_writes_valid_json_objects(tmp_path) -> None:
     assert "api_key" not in payload
 
 
-def test_build_run_log_path_sanitizes_command_name(tmp_path) -> None:
+def test_build_run_log_path_sanitizes_command_name_and_is_unique(tmp_path) -> None:
     now = datetime(2026, 6, 23, 12, 30, 0, tzinfo=timezone.utc)
     path = build_run_log_path(tmp_path, "inventory run", now=now)
+    second_path = build_run_log_path(tmp_path, "inventory run", now=now)
 
-    assert path == tmp_path / "20260623T123000Z-inventory-run.jsonl"
+    assert path.parent == tmp_path
+    assert re.fullmatch(r"20260623T123000Z-[0-9a-f]{8}-inventory-run\.jsonl", path.name)
+    assert second_path != path

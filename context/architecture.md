@@ -99,7 +99,7 @@ Stage notebooks are created when the producing stage is implemented. Do not add 
 | Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Implemented | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
 | Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Implemented | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |
 | Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Planned when Features 08-09 land | `search_runs`, `search_results`, `evidence_packets` | Router behavior, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
-| Answering / 10 | `notebooks/answering_eda.ipynb` | Planned when Feature 10 lands | `answers`, `evidence_packets` | Citation validity, limitations, model/fake-adapter traces, insufficient-evidence behavior. |
+| Answering / 10 | `notebooks/answering_eda.ipynb` | Planned when Feature 10 lands | `answers`, `evidence_packets` | Citation validity, limitations, model traces, injected-test behavior, insufficient-evidence handling. |
 | UI / 11 | None required for MVP | Not applicable | FastAPI responses and UI tests | UI correctness is covered by API/UI tests; use retrieval/answering notebooks for underlying traces. |
 | Evaluation / 12 | `notebooks/evaluation_eda.ipynb` | Planned when Feature 12 lands | `data/runs/eval/` reports, optional answer/search traces | Eval score trends, failures, citation quality, retrieval quality, runtime summaries. |
 
@@ -610,8 +610,9 @@ Rules:
   rows, restores mappings whose Chroma vectors disappeared, then embeds current
   eligible chunks missing the selected physical profile; `--rebuild` clears and
   repopulates only the selected model/profile and optional logical collection;
-- the fake embedding adapter is the deterministic, offline default; real Hugging
-  Face local models load lazily through the optional `embeddings` extra (DEC-030).
+- production vector commands require an explicitly configured or selected reviewed
+  Hugging Face profile; the local model stack loads lazily through the optional
+  `embeddings` extra (DEC-031).
 - semantic search accepts a Chroma hit only when its exact backend, physical
   collection, vector id, and chunk mapping still exist in SQLite; course filters
   are resolved before the final top-K limit so they cannot silently discard a

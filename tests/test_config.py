@@ -11,9 +11,7 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_COURSES_DIR",
     "UNI_RAG_COURSES_ROOT",
     "UNI_RAG_DATA_DIR",
-    "UNI_RAG_EMBEDDING_DIM",
     "UNI_RAG_EMBEDDING_MODEL",
-    "UNI_RAG_EMBEDDING_PROVIDER",
     "UNI_RAG_FINAL_TOP_K",
     "UNI_RAG_KEYWORD_TOP_K",
     "UNI_RAG_LLM_MODEL",
@@ -24,8 +22,6 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_RUNS_DIR",
     "UNI_RAG_SEMANTIC_TOP_K",
     "UNI_RAG_SQLITE_PATH",
-    "UNI_RAG_USE_FAKE_EMBEDDINGS",
-    "UNI_RAG_USE_FAKE_LLM",
 }
 
 
@@ -52,9 +48,13 @@ def test_defaults_resolve_from_repo_root(tmp_path: Path) -> None:
     assert config.semantic_top_k == 20
     assert config.final_top_k == 10
     assert config.rrf_k == 60
-    assert config.embedding_dim == 384
-    assert config.use_fake_llm is True
-    assert config.use_fake_embeddings is True
+    assert config.embedding_model is None
+    assert config.llm_provider is None
+    assert config.llm_model is None
+    safe = config.as_safe_dict()
+    assert safe["embedding_model"] is None
+    assert safe["llm_provider"] is None
+    assert safe["llm_model"] is None
     assert config.ocr_enabled is False
 
 
@@ -73,9 +73,9 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
                 "UNI_RAG_SEMANTIC_TOP_K=8",
                 "UNI_RAG_FINAL_TOP_K=3",
                 "UNI_RAG_RRF_K=42",
-                "UNI_RAG_EMBEDDING_DIM=12",
-                "UNI_RAG_USE_FAKE_LLM=false",
-                "UNI_RAG_USE_FAKE_EMBEDDINGS=false",
+                "UNI_RAG_LLM_PROVIDER=ollama",
+                "UNI_RAG_LLM_MODEL=llama3.2",
+                "UNI_RAG_EMBEDDING_MODEL=BAAI/bge-m3",
                 "UNI_RAG_OCR_ENABLED=true",
             ]
         ),
@@ -94,10 +94,25 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
     assert config.semantic_top_k == 8
     assert config.final_top_k == 3
     assert config.rrf_k == 42
-    assert config.embedding_dim == 12
-    assert config.use_fake_llm is False
-    assert config.use_fake_embeddings is False
+    assert config.embedding_model == "BAAI/bge-m3"
+    assert config.llm_provider == "ollama"
+    assert config.llm_model == "llama3.2"
     assert config.ocr_enabled is True
+
+
+def test_blank_optional_model_and_provider_values_are_unset(tmp_path: Path) -> None:
+    (tmp_path / "Courses").mkdir()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "UNI_RAG_EMBEDDING_MODEL=   \nUNI_RAG_LLM_PROVIDER=\nUNI_RAG_LLM_MODEL=  \n",
+        encoding="utf-8",
+    )
+
+    config = load_config(repo_root=tmp_path, env_file=env_file)
+
+    assert config.embedding_model is None
+    assert config.llm_provider is None
+    assert config.llm_model is None
 
 
 def test_legacy_courses_dir_env_alias_is_supported(

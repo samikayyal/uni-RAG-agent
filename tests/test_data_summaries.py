@@ -249,8 +249,6 @@ def test_data_summary_cli_writes_run_log(tmp_path: Path) -> None:
             "UNI_RAG_SQLITE_PATH": str(data_dir / "uni_rag.sqlite"),
             "UNI_RAG_CHROMA_DIR": str(data_dir / "indexes" / "vector"),
             "UNI_RAG_RUNS_DIR": str(data_dir / "runs"),
-            "UNI_RAG_USE_FAKE_LLM": "true",
-            "UNI_RAG_USE_FAKE_EMBEDDINGS": "true",
         }
     )
 

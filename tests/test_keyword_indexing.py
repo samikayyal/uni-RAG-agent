@@ -327,8 +327,9 @@ def test_keyword_cli_indexes_and_searches(
             "UNI_RAG_SQLITE_PATH": str(data_dir / "uni_rag.sqlite"),
             "UNI_RAG_CHROMA_DIR": str(data_dir / "indexes" / "vector"),
             "UNI_RAG_RUNS_DIR": str(data_dir / "runs"),
-            "UNI_RAG_USE_FAKE_LLM": "true",
-            "UNI_RAG_USE_FAKE_EMBEDDINGS": "true",
+            # Override any repo-root .env model selection so this test keeps
+            # exercising the intentionally unconfigured semantic CLI path.
+            "UNI_RAG_EMBEDDING_MODEL": "",
         }
     )
 
@@ -374,12 +375,14 @@ def test_keyword_cli_indexes_and_searches(
     assert search_events[-1]["count"] == 1
     assert search_events[-1]["result_count"] == 1
 
-    # Semantic search runs even before vector indexing: no Chroma collections
-    # yet, so it returns no results rather than failing.
-    assert semantic_result.returncode == 0, semantic_result.stderr
-    assert "No semantic results" in semantic_result.stdout
-    assert semantic_json_result.returncode == 0, semantic_json_result.stderr
-    assert json.loads(semantic_json_result.stdout) == []
+    # Semantic search now requires an explicitly selected or configured model,
+    # even when no vector collections have been created yet.
+    assert semantic_result.returncode == 7
+    assert "No embedding model selected" in semantic_result.stderr
+    assert semantic_json_result.returncode == 7
+    assert "No embedding model selected" in semantic_json_result.stderr
+    semantic_events = _run_log_events(data_dir, "search-semantic")
+    assert semantic_events[0]["model"] == "(unset)"
 
     # Keyword JSON now carries the shared nullable vector fields without
     # breaking existing subset assertions.

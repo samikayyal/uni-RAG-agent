@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import math
 import os
 import sqlite3
 import subprocess
@@ -15,12 +14,10 @@ import pytest
 
 from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.indexing import (
-    REAL_EMBEDDING_PROFILES,
-    FakeDeterministicEmbeddings,
+    EMBEDDING_PROFILES,
     SemanticSearchError,
     VectorIndexError,
     build_embedding_model,
-    get_embedding_model,
     physical_collection_name,
     resolve_embedding_profile,
     semantic_search,
@@ -29,8 +26,14 @@ from uni_rag_agent.indexing import (
 from uni_rag_agent.indexing import embeddings as embeddings_module
 from uni_rag_agent.indexing import vector as vector_module
 from uni_rag_agent.retrieval import RetrievalResult
+from uni_rag_agent import cli as cli_module
 from uni_rag_agent.storage import connect_sqlite, ensure_data_dirs, initialize_schema
 from tests.sqlite_helpers import insert_minimal_chunk
+from tests.embedding_doubles import (
+    DeterministicTestEmbeddings,
+    TEST_EMBEDDING_DIMENSIONS,
+    embeddings_for_model,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UNI_RAG_ENV_PREFIX = "UNI_RAG_"
@@ -40,9 +43,21 @@ def make_config(tmp_path: Path, **overrides: object) -> Config:
     courses = tmp_path / "Courses"
     courses.mkdir(exist_ok=True)
     config = load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
-    if overrides:
-        config = dataclasses.replace(config, **overrides)
+    overrides.setdefault("embedding_model", "BAAI/bge-m3")
+    config = dataclasses.replace(config, **overrides)
     return config
+
+
+@pytest.fixture(autouse=True)
+def patch_huggingface_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    def load_test_embeddings(**kwargs: object) -> DeterministicTestEmbeddings:
+        return embeddings_for_model(str(kwargs["model_name"]))
+
+    monkeypatch.setattr(
+        embeddings_module,
+        "_require_huggingface",
+        lambda *_args, **_kwargs: load_test_embeddings,
+    )
 
 
 def _initialized_connection(config: Config) -> sqlite3.Connection:
@@ -57,41 +72,29 @@ def _initialized_connection(config: Config) -> sqlite3.Connection:
 # --------------------------------------------------------------------------- #
 
 
-def test_resolve_profile_follows_config_fake_default(tmp_path: Path) -> None:
-    config = make_config(tmp_path)
-    profile = resolve_embedding_profile(config, None)
-
-    assert profile.is_fake is True
-    assert profile.provider == "fake"
-    assert profile.dimension == config.embedding_dim
-    assert profile.metric == "cosine"
-
-
-def test_fake_default_never_uses_a_configured_real_model_name(tmp_path: Path) -> None:
+def test_resolve_profile_follows_configured_model(tmp_path: Path) -> None:
     config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
 
     profile = resolve_embedding_profile(config)
 
-    assert profile.is_fake is True
-    assert profile.provider == "fake"
-    assert profile.model_name == "fake-embedding"
+    assert profile.model_name == "BAAI/bge-m3"
+    assert profile.provider == "huggingface"
+    assert profile.dimension > 0
 
 
-def test_explicit_fake_model_selects_fake_profile(tmp_path: Path) -> None:
-    config = make_config(tmp_path, use_fake_embeddings=False, embedding_model="x")
-    profile = resolve_embedding_profile(config, "fake-embedding")
-
-    assert profile.is_fake is True
-
-
-def test_explicit_real_model_overrides_fake_default(tmp_path: Path) -> None:
-    config = make_config(tmp_path)  # use_fake_embeddings defaults to True
+def test_explicit_model_overrides_unset_configuration(tmp_path: Path) -> None:
+    config = make_config(tmp_path, embedding_model=None)
     profile = resolve_embedding_profile(config, "BAAI/bge-m3")
 
-    assert profile.is_fake is False
-    assert profile.provider == "huggingface"
-    assert profile.requires_extra == "embeddings"
-    assert profile.dimension == 1024
+    assert profile.model_name == "BAAI/bge-m3"
+
+
+def test_missing_model_fails_with_supported_profiles(tmp_path: Path) -> None:
+    config = make_config(tmp_path, embedding_model=None)
+    with pytest.raises(VectorIndexError, match="UNI_RAG_EMBEDDING_MODEL"):
+        resolve_embedding_profile(config)
+    with pytest.raises(SemanticSearchError, match="Supported profiles"):
+        resolve_embedding_profile(config, error=SemanticSearchError)
 
 
 def test_unknown_model_fails_clearly(tmp_path: Path) -> None:
@@ -100,80 +103,123 @@ def test_unknown_model_fails_clearly(tmp_path: Path) -> None:
         resolve_embedding_profile(config, "no/such-model")
 
 
-def test_fake_disabled_with_unknown_config_model_fails_clearly(tmp_path: Path) -> None:
-    config = make_config(
-        tmp_path,
-        use_fake_embeddings=False,
-        embedding_provider="huggingface",
-        embedding_model="fake-embedding",
-    )
-    with pytest.raises(SemanticSearchError, match="Fake embeddings are disabled"):
-        resolve_embedding_profile(config, None, error=SemanticSearchError)
+def test_unknown_configured_model_fails_generically(tmp_path: Path) -> None:
+    config = make_config(tmp_path, embedding_model="no/such-model")
+    with pytest.raises(SemanticSearchError, match="Unknown embedding model"):
+        resolve_embedding_profile(config, error=SemanticSearchError)
 
 
 def test_real_profile_registry_metadata() -> None:
-    assert set(REAL_EMBEDDING_PROFILES) == {
+    assert set(EMBEDDING_PROFILES) == {
         "BAAI/bge-m3",
         "jinaai/jina-embeddings-v3",
         "jinaai/jina-embeddings-v5-text-small",
         "google/embeddinggemma-300m",
     }
-    for profile in REAL_EMBEDDING_PROFILES.values():
+    for profile in EMBEDDING_PROFILES.values():
         assert profile.provider == "huggingface"
-        assert profile.is_fake is False
         assert profile.requires_extra == "embeddings"
         assert profile.metric == "cosine"
         assert profile.access_notes
 
-    assert REAL_EMBEDDING_PROFILES["BAAI/bge-m3"].dimension == 1024
-    assert (
-        REAL_EMBEDDING_PROFILES["jinaai/jina-embeddings-v3"].trust_remote_code is True
-    )
-    gemma = REAL_EMBEDDING_PROFILES["google/embeddinggemma-300m"]
+    assert EMBEDDING_PROFILES["jinaai/jina-embeddings-v3"].trust_remote_code is True
+    assert EMBEDDING_PROFILES["BAAI/bge-m3"].dimension == 1024
+    gemma = EMBEDDING_PROFILES["google/embeddinggemma-300m"]
     assert gemma.gated is True
     assert gemma.dimension == 768
 
 
 # --------------------------------------------------------------------------- #
-# Fake adapter (deterministic, offline)
+# Test embedding double (deterministic, offline)
 # --------------------------------------------------------------------------- #
 
 
-def test_fake_embeddings_are_deterministic_and_normalized(tmp_path: Path) -> None:
-    fake = FakeDeterministicEmbeddings(64)
-    first = fake.embed_query("distributed computation")
-    second = fake.embed_query("distributed computation")
+def test_test_embeddings_are_deterministic_and_normalized() -> None:
+    embeddings = DeterministicTestEmbeddings(16)
+    first = embeddings.embed_query("distributed computation")
+    second = embeddings.embed_query("distributed computation")
 
     assert first == second
-    assert len(first) == 64
-    assert math.isclose(
-        math.sqrt(sum(value * value for value in first)), 1.0, rel_tol=1e-9
-    )
+    assert len(first) == 16
+    assert sum(value * value for value in first) == pytest.approx(1.0)
 
-    # Identical text -> cosine distance 0 (dot product 1).
-    assert math.isclose(sum(a * b for a, b in zip(first, second)), 1.0, rel_tol=1e-9)
-    # Disjoint tokens -> much lower similarity than an exact match.
-    disjoint = fake.embed_query("xylophone qwerty")
-    assert sum(a * b for a, b in zip(first, disjoint)) < 0.5
+    assert sum(a * b for a, b in zip(first, second)) == pytest.approx(1.0)
+    shared = embeddings.embed_query("distributed systems")
+    disjoint = embeddings.embed_query("xylophone qwerty")
+    shared_similarity = sum(a * b for a, b in zip(first, shared))
+    disjoint_similarity = sum(a * b for a, b in zip(first, disjoint))
+    assert shared_similarity > disjoint_similarity
+    assert disjoint_similarity < 0.5
+    assert embeddings.embed_query("")
 
 
-def test_get_embedding_model_uses_config_dimension(tmp_path: Path) -> None:
-    config = make_config(tmp_path, embedding_dim=128)
+def test_test_embeddings_return_normalized_vectors_for_token_text() -> None:
+    embeddings = DeterministicTestEmbeddings(8)
+
+    vector = embeddings.embed_query("computation overview")
+
+    assert len(vector) == 8
+    assert sum(value * value for value in vector) == pytest.approx(1.0)
+
+
+def test_test_embedding_dimensions_match_reviewed_profiles() -> None:
+    assert set(TEST_EMBEDDING_DIMENSIONS) == set(EMBEDDING_PROFILES)
+
+
+def test_build_embedding_model_uses_runtime_test_dimension(tmp_path: Path) -> None:
+    config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
     built = build_embedding_model(config)
 
-    assert isinstance(built.embeddings, FakeDeterministicEmbeddings)
-    assert built.dimension == 128
-    assert len(get_embedding_model(config).embed_query("probe")) == 128
+    assert isinstance(built.embeddings, DeterministicTestEmbeddings)
+    assert built.dimension == TEST_EMBEDDING_DIMENSIONS["BAAI/bge-m3"]
+    assert (
+        len(built.embeddings.embed_query("probe"))
+        == TEST_EMBEDDING_DIMENSIONS["BAAI/bge-m3"]
+    )
 
 
-def test_invalid_direct_config_uses_the_callers_domain_error(tmp_path: Path) -> None:
-    config = make_config(tmp_path, embedding_dim=0)
+def test_model_loader_forwards_trust_remote_code_to_jina_profiles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def test_constructor(**kwargs: object) -> DeterministicTestEmbeddings:
+        captured.update(kwargs)
+        return embeddings_for_model(str(kwargs["model_name"]))
+
+    monkeypatch.setattr(
+        embeddings_module,
+        "_require_huggingface",
+        lambda *_args, **_kwargs: test_constructor,
+    )
+
+    build_embedding_model(make_config(tmp_path), "jinaai/jina-embeddings-v3")
+
+    assert captured["model_name"] == "jinaai/jina-embeddings-v3"
+    assert captured["model_kwargs"] == {"trust_remote_code": True}
+
+
+def test_embedding_model_log_label_normalizes_whitespace_override(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
+
+    assert cli_module._embedding_model_log_label(config, "  ") == "BAAI/bge-m3"
+    assert (
+        cli_module._embedding_model_log_label(config, "  google/embeddinggemma-300m  ")
+        == "google/embeddinggemma-300m"
+    )
+
+
+def test_missing_model_uses_the_callers_domain_error(tmp_path: Path) -> None:
+    config = make_config(tmp_path, embedding_model=None)
     with _initialized_connection(config):
         pass
 
-    with pytest.raises(VectorIndexError, match="Embedding dimension"):
+    with pytest.raises(VectorIndexError, match="No embedding model selected"):
         sync_vector_index(config)
-    with pytest.raises(SemanticSearchError, match="Embedding dimension"):
+    with pytest.raises(SemanticSearchError, match="No embedding model selected"):
         semantic_search(config, "distributed")
 
 
@@ -184,22 +230,24 @@ def test_invalid_direct_config_uses_the_callers_domain_error(tmp_path: Path) -> 
 
 @pytest.fixture()
 def force_missing_embeddings_extra(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_require(profile: object, *, error: type[Exception]) -> object:
+    def require_missing_extra(profile: object, *, error: type[Exception]) -> object:
         raise error(
             "Embedding model requires the optional 'embeddings' extra. "
             "Install it with: uv sync --extra embeddings"
         )
 
-    monkeypatch.setattr(embeddings_module, "_require_huggingface", fake_require)
+    monkeypatch.setattr(
+        embeddings_module, "_require_huggingface", require_missing_extra
+    )
 
 
-def test_real_model_missing_extra_fails_clearly_for_get_model(
+def test_model_missing_extra_fails_clearly_for_builder(
     tmp_path: Path,
     force_missing_embeddings_extra: None,
 ) -> None:
     config = make_config(tmp_path)
     with pytest.raises(VectorIndexError, match="uv sync --extra embeddings"):
-        get_embedding_model(config, "BAAI/bge-m3")
+        build_embedding_model(config, "BAAI/bge-m3")
 
 
 def test_real_model_missing_extra_fails_clearly_for_sync_and_search(
@@ -222,36 +270,36 @@ def test_real_model_missing_extra_fails_clearly_for_sync_and_search(
 
 
 def test_physical_collection_name_is_model_namespaced_and_stable() -> None:
-    fake = physical_collection_name(
+    first = physical_collection_name(
         "document_index",
-        provider="fake",
-        model_name="fake-embedding",
-        dimension=384,
+        provider="huggingface",
+        model_name="BAAI/bge-m3",
+        dimension=8,
         metric="cosine",
     )
     same = physical_collection_name(
         "document_index",
-        provider="fake",
-        model_name="fake-embedding",
-        dimension=384,
-        metric="cosine",
-    )
-    real = physical_collection_name(
-        "document_index",
         provider="huggingface",
         model_name="BAAI/bge-m3",
-        dimension=1024,
+        dimension=8,
+        metric="cosine",
+    )
+    second = physical_collection_name(
+        "document_index",
+        provider="huggingface",
+        model_name="google/embeddinggemma-300m",
+        dimension=16,
         metric="cosine",
     )
 
-    assert fake == same
-    assert fake != real
-    assert fake.startswith("document_index__fake-embedding__")
-    assert real.startswith("document_index__baai-bge-m3__")
+    assert first == same
+    assert first != second
+    assert first.startswith("document_index__baai-bge-m3__")
+    assert second.startswith("document_index__google-embeddinggemma-300m__")
 
 
 # --------------------------------------------------------------------------- #
-# Vector sync (fake embeddings + ChromaDB)
+# Vector sync (test embeddings + ChromaDB)
 # --------------------------------------------------------------------------- #
 
 
@@ -302,8 +350,8 @@ def test_sync_indexes_only_current_eligible_chunks(tmp_path: Path) -> None:
     result = sync_vector_index(config)
 
     assert result.rebuild is False
-    assert result.model == "fake-embedding"
-    assert result.provider == "fake"
+    assert result.model == "BAAI/bge-m3"
+    assert result.provider == "huggingface"
     assert result.chunks_seen == 2
     assert result.vectors_indexed == 2
     assert result.embeddings_total == 2
@@ -324,8 +372,8 @@ def test_sync_indexes_only_current_eligible_chunks(tmp_path: Path) -> None:
     for row in rows:
         assert row["vector_backend"] == "chroma"
         assert row["vector_id"] == f"chunk:{row['chunk_id']}"
-        assert row["embedding_model"] == "fake-embedding"
-        assert row["embedding_dim"] == config.embedding_dim
+        assert row["embedding_model"] == "BAAI/bge-m3"
+        assert row["embedding_dim"] == TEST_EMBEDDING_DIMENSIONS["BAAI/bge-m3"]
     document_row = next(r for r in rows if r["chunk_id"] == document.chunk_id)
     assert document_row["vector_collection"].startswith("document_index__")
 
@@ -349,10 +397,10 @@ def test_sync_is_idempotent(tmp_path: Path) -> None:
     assert total == 2
 
 
-def test_sync_rolls_over_to_a_new_fake_dimension_and_rebuilds_it(
+def test_sync_rolls_over_to_a_second_profile_and_rebuilds_it(
     tmp_path: Path,
 ) -> None:
-    config = make_config(tmp_path, embedding_dim=8)
+    config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
     with _initialized_connection(config) as connection:
         stored = insert_minimal_chunk(
             connection,
@@ -363,7 +411,10 @@ def test_sync_rolls_over_to_a_new_fake_dimension_and_rebuilds_it(
         connection.commit()
 
     first = sync_vector_index(config)
-    changed = dataclasses.replace(config, embedding_dim=16)
+    changed = dataclasses.replace(
+        config,
+        embedding_model="google/embeddinggemma-300m",
+    )
     rollover = sync_vector_index(changed)
     rebuilt = sync_vector_index(changed, rebuild=True)
 
@@ -383,10 +434,7 @@ def test_sync_rolls_over_to_a_new_fake_dimension_and_rebuilds_it(
     assert len({row["vector_collection"] for row in rows}) == 2
 
 
-def test_fake_then_real_profile_creates_distinct_mappings(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_two_profiles_create_distinct_mappings(tmp_path: Path) -> None:
     config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
     with _initialized_connection(config) as connection:
         stored = insert_minimal_chunk(
@@ -397,22 +445,21 @@ def test_fake_then_real_profile_creates_distinct_mappings(
         )
         connection.commit()
 
-    def fake_huggingface_embeddings(**_kwargs: object) -> FakeDeterministicEmbeddings:
-        return FakeDeterministicEmbeddings(1024)
-
-    monkeypatch.setattr(
-        embeddings_module,
-        "_require_huggingface",
-        lambda _profile, *, error: fake_huggingface_embeddings,
+    first_result = sync_vector_index(config)
+    second_result = sync_vector_index(
+        config,
+        model="google/embeddinggemma-300m",
     )
 
-    fake_result = sync_vector_index(config)
-    real_result = sync_vector_index(config, model="BAAI/bge-m3")
-
-    assert fake_result.model == "fake-embedding"
-    assert real_result.model == "BAAI/bge-m3"
-    assert fake_result.vectors_indexed == 1
-    assert real_result.vectors_indexed == 1
+    assert first_result.model == "BAAI/bge-m3"
+    assert second_result.model == "google/embeddinggemma-300m"
+    assert first_result.embedding_dim == TEST_EMBEDDING_DIMENSIONS["BAAI/bge-m3"]
+    assert (
+        second_result.embedding_dim
+        == TEST_EMBEDDING_DIMENSIONS["google/embeddinggemma-300m"]
+    )
+    assert first_result.vectors_indexed == 1
+    assert second_result.vectors_indexed == 1
     with closing(connect_sqlite(config)) as connection:
         rows = connection.execute(
             """
@@ -425,7 +472,7 @@ def test_fake_then_real_profile_creates_distinct_mappings(
         ).fetchall()
     assert [row["embedding_model"] for row in rows] == [
         "BAAI/bge-m3",
-        "fake-embedding",
+        "google/embeddinggemma-300m",
     ]
     assert len({row["vector_collection"] for row in rows}) == 2
 
@@ -616,7 +663,7 @@ def test_sync_reports_no_eligible_chunks(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Semantic search (fake embeddings)
+# Semantic search (test embeddings)
 # --------------------------------------------------------------------------- #
 
 
@@ -847,8 +894,8 @@ def test_vector_cli_indexes_and_searches(tmp_path: Path) -> None:
             "UNI_RAG_SQLITE_PATH": str(data_dir / "uni_rag.sqlite"),
             "UNI_RAG_CHROMA_DIR": str(data_dir / "indexes" / "vector"),
             "UNI_RAG_RUNS_DIR": str(data_dir / "runs"),
-            "UNI_RAG_USE_FAKE_LLM": "true",
-            "UNI_RAG_USE_FAKE_EMBEDDINGS": "true",
+            "UNI_RAG_EMBEDDING_MODEL": "BAAI/bge-m3",
+            "PYTHONPATH": _subprocess_shim_pythonpath(),
         }
     )
 
@@ -870,7 +917,19 @@ def test_vector_cli_indexes_and_searches(tmp_path: Path) -> None:
         "vector_index_completed",
     ]
     assert index_events[-1]["count"] == 1
-    assert index_events[-1]["model"] == "fake-embedding"
+    assert index_events[0]["model"] == "BAAI/bge-m3"
+    assert index_events[-1]["model"] == "BAAI/bge-m3"
+
+    with sqlite3.connect(data_dir / "uni_rag.sqlite") as connection:
+        embedding = connection.execute(
+            """
+            SELECT embedding_model, embedding_dim, vector_collection
+            FROM embeddings
+            """
+        ).fetchone()
+    assert embedding[0] == "BAAI/bge-m3"
+    assert embedding[1] == TEST_EMBEDDING_DIMENSIONS["BAAI/bge-m3"]
+    assert "__baai-bge-m3__" in embedding[2]
 
     assert json_result.returncode == 0, json_result.stderr
     payload = json.loads(json_result.stdout)
@@ -959,3 +1018,9 @@ def _subprocess_env(overrides: dict[str, str]) -> dict[str, str]:
     }
     env.update(overrides)
     return env
+
+
+def _subprocess_shim_pythonpath() -> str:
+    shim = REPO_ROOT / "tests" / "subprocess_shim"
+    existing = os.environ.get("PYTHONPATH")
+    return os.pathsep.join(part for part in (str(shim), existing) if part)

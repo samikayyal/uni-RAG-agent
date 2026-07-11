@@ -29,10 +29,8 @@ uv run -m uni_rag_agent extract run
 uv run -m uni_rag_agent extract data-summaries
 uv run -m uni_rag_agent extract status
 uv run -m uni_rag_agent index keyword
-uv run -m uni_rag_agent index vector
 uv run -m uni_rag_agent search keyword "mapreduce"
 uv run -m uni_rag_agent search keyword "mapreduce" --json
-uv run -m uni_rag_agent search semantic "distributed computation"
 ```
 
 Runtime configuration is loaded from `.env` with non-secret defaults documented
@@ -55,15 +53,14 @@ uv run -m uni_rag_agent extract data-summaries --file-id 123
 uv run -m uni_rag_agent extract status
 uv run -m uni_rag_agent index keyword
 uv run -m uni_rag_agent index keyword --rebuild
-uv run -m uni_rag_agent index vector
-uv run -m uni_rag_agent index vector --collection document_index
+uv run -m uni_rag_agent index vector --model BAAI/bge-m3 --collection document_index
 uv run -m uni_rag_agent index vector --model BAAI/bge-m3 --rebuild
 uv run -m uni_rag_agent search keyword "mapreduce"
 uv run -m uni_rag_agent search keyword "mapreduce" --course "Information Retrieval"
 uv run -m uni_rag_agent search keyword "mapreduce" --index slides_index --top-k 10
 uv run -m uni_rag_agent search keyword "mapreduce" --json
-uv run -m uni_rag_agent search semantic "distributed computation"
-uv run -m uni_rag_agent search semantic "distributed computation" --index slides_index --course "Information Retrieval" --top-k 10 --json
+uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3
+uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3 --index slides_index --course "Information Retrieval" --top-k 10 --json
 uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py tests/test_extraction.py tests/test_data_summaries.py tests/test_keyword_indexing.py tests/test_vector_indexing.py
 ```
 
@@ -127,30 +124,53 @@ traces belong to later evidence/retrieval specs.
 
 Vector indexing embeds current eligible chunks into ChromaDB (one
 model-namespaced collection per logical index, cosine distance) and records
-`embeddings` mapping rows in SQLite. The default `index vector` run is
-incremental; `--rebuild` clears and repopulates only the selected
+`embeddings` mapping rows in SQLite. There is no default embedding adapter or
+model. An unqualified `index vector` or `search semantic` command fails clearly
+until `UNI_RAG_EMBEDDING_MODEL` is configured or `--model` is supplied. The
+default run is incremental; `--rebuild` clears and repopulates only the selected
 model/profile and optional `--collection`. Semantic search queries those
-collections and joins ids back to SQLite for chunk text and citations:
+collections and joins ids back to SQLite for chunk text and citations.
 
-```powershell
-uv run -m uni_rag_agent index vector
-uv run -m uni_rag_agent index vector --collection document_index
-uv run -m uni_rag_agent search semantic "distributed computation"
-uv run -m uni_rag_agent search semantic "distributed computation" --index slides_index --top-k 10 --json
+The lightweight base installation is enough for Features 01-06, including
+configuration, storage, inventory, extraction, data summaries, and keyword
+search. Vector commands require the optional local-model stack and one of these
+reviewed profiles:
+
+```text
+BAAI/bge-m3
+jinaai/jina-embeddings-v3
+jinaai/jina-embeddings-v5-text-small
+google/embeddinggemma-300m
 ```
 
-The default embedding adapter is a deterministic, offline fake sized by
-`UNI_RAG_EMBEDDING_DIM`, so vector indexing and semantic search work without
-network access or API keys. Real Hugging Face local models are an optional
-extra:
+Use either supported workflow after `uv sync --extra embeddings`:
 
 ```powershell
-uv sync --extra embeddings
+# Configure once, then omit --model from vector commands.
+$env:UNI_RAG_EMBEDDING_MODEL = "BAAI/bge-m3"
+uv run -m uni_rag_agent index vector
+uv run -m uni_rag_agent search semantic "distributed computation"
+
+# Or select a reviewed profile on each vector command.
 uv run -m uni_rag_agent index vector --model BAAI/bge-m3 --rebuild
 uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3 --json
 ```
 
-An explicit `--model` overrides `UNI_RAG_USE_FAKE_EMBEDDINGS` for that command.
+For a manual real-model smoke run against the fixture or a small local corpus:
+
+```powershell
+uv sync --extra embeddings
+$env:UNI_RAG_EMBEDDING_MODEL = "BAAI/bge-m3"
+uv run -m uni_rag_agent storage init
+uv run -m uni_rag_agent inventory run
+uv run -m uni_rag_agent extract run
+uv run -m uni_rag_agent index vector --rebuild
+uv run -m uni_rag_agent search semantic "distributed computation" --json
+```
+
+The first model run may download weights. Review any model-specific remote-code,
+license, gating, token, or authentication requirements before running it.
+
 `index vector` writes lifecycle JSONL logs under `data/runs/`. Direct semantic
 search does not write `search_runs` or `search_results`.
 

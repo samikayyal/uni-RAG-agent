@@ -22,24 +22,18 @@ from .models import (
     VectorIndexResult,
 )
 from .profiles import (
-    REAL_EMBEDDING_PROFILES,
+    EMBEDDING_PROFILES,
     EmbeddingProfile,
     physical_collection_name,
     resolve_embedding_profile,
 )
 
 if TYPE_CHECKING:
-    from .embeddings import (
-        FakeDeterministicEmbeddings,
-        build_embedding_model,
-        get_embedding_model,
-    )
+    from .embeddings import build_embedding_model
     from .vector import semantic_search, sync_vector_index
 
 _LAZY_EXPORTS = {
-    "FakeDeterministicEmbeddings": "embeddings",
     "build_embedding_model": "embeddings",
-    "get_embedding_model": "embeddings",
     "semantic_search": "vector",
     "sync_vector_index": "vector",
 }
@@ -47,9 +41,8 @@ _LAZY_EXPORTS = {
 __all__ = [
     "ELIGIBLE_SOURCE_TYPES",
     "INDEX_TO_SOURCE_TYPE",
-    "REAL_EMBEDDING_PROFILES",
+    "EMBEDDING_PROFILES",
     "EmbeddingProfile",
-    "FakeDeterministicEmbeddings",
     "KeywordIndexError",
     "KeywordIndexResult",
     "KeywordSearchError",
@@ -57,7 +50,6 @@ __all__ = [
     "VectorIndexError",
     "VectorIndexResult",
     "build_embedding_model",
-    "get_embedding_model",
     "keyword_query_terms",
     "keyword_search",
     "physical_collection_name",

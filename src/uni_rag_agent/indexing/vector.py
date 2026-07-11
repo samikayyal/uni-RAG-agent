@@ -586,7 +586,19 @@ def _query_candidates(
         result = collection.query(  # type: ignore[attr-defined]
             **query_kwargs,
         )
-        for chunk_id, distance, vector_id in _iter_query_hits(result):
+        hits = list(_iter_query_hits(result))
+        if course is not None and not hits:
+            # Chroma's filtered HNSW query can occasionally exhaust its search
+            # frontier before reaching a sparse metadata partition. Fall back
+            # to exact local scoring of that partition so a course filter is
+            # always applied before final top-K truncation.
+            hits = _course_filter_fallback_hits(
+                collection,
+                course=course,
+                query_vector=query_vector,
+                limit=limit,
+            )
+        for chunk_id, distance, vector_id in hits:
             current = candidates.get(chunk_id)
             if current is None or distance < current.distance:
                 candidates[chunk_id] = _Candidate(
@@ -596,6 +608,59 @@ def _query_candidates(
                     vector_id=vector_id,
                 )
     return candidates
+
+
+def _course_filter_fallback_hits(
+    collection: object,
+    *,
+    course: str,
+    query_vector: Sequence[float],
+    limit: int,
+) -> list[tuple[int, float, str]]:
+    """Return exact top results from a course partition missed by HNSW."""
+    result = collection.get(  # type: ignore[attr-defined]
+        where={"course": course},
+        include=["embeddings"],
+    )
+    ids = result.get("ids") if isinstance(result, dict) else None
+    embeddings = result.get("embeddings") if isinstance(result, dict) else None
+    if not ids or embeddings is None:
+        return []
+
+    scored: list[tuple[int, float, str]] = []
+    for vector_id, embedding in zip(ids, embeddings):
+        if not isinstance(vector_id, str):
+            continue
+        chunk_id = _chunk_id_from_vector_id(vector_id)
+        if chunk_id is None:
+            continue
+        distance = _cosine_distance(query_vector, embedding)
+        if distance is not None:
+            scored.append((chunk_id, distance, vector_id))
+    return sorted(scored, key=lambda hit: (hit[1], hit[0]))[:limit]
+
+
+def _chunk_id_from_vector_id(vector_id: str) -> int | None:
+    if ":" not in vector_id:
+        return None
+    try:
+        return int(vector_id.split(":", 1)[1])
+    except ValueError:
+        return None
+
+
+def _cosine_distance(
+    query_vector: Sequence[float],
+    embedding: Sequence[float],
+) -> float | None:
+    if len(query_vector) != len(embedding):
+        return None
+    dot_product = sum(left * right for left, right in zip(query_vector, embedding))
+    query_norm = sum(value * value for value in query_vector) ** 0.5
+    embedding_norm = sum(value * value for value in embedding) ** 0.5
+    if query_norm == 0.0 or embedding_norm == 0.0:
+        return None
+    return 1.0 - (dot_product / (query_norm * embedding_norm))
 
 
 def _iter_query_hits(result: object) -> Iterator[tuple[int, float, str]]:

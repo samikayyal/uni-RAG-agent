@@ -14,9 +14,9 @@ This document records the key decisions made during the design and development o
 | **DEC-006** | Keep binaries, archives, installers, and model artifacts metadata-only | `Accepted` | 2026-06-21 |
 | **DEC-007** | Defer video/audio transcription and index only existing transcripts initially | `Accepted` | 2026-06-21 |
 | **DEC-008** | Restrict Python/code execution tools by default | `Accepted` | 2026-06-21 |
-| **DEC-009** | Use `uv` for Python dependency and run workflows | `Accepted` | 2026-06-21 |
+| **DEC-009** | Use `uv` for Python dependency and run workflows | `Accepted; amended by DEC-031` | 2026-06-21 |
 | **DEC-010** | Use LangChain as core framework | `Accepted` | 2026-06-21 |
-| **DEC-011** | Use ChromaDB with separate collections per logical index | `Accepted` | 2026-06-21 |
+| **DEC-011** | Use ChromaDB with separate collections per logical index | `Accepted; amended by DEC-031` | 2026-06-21 |
 | **DEC-012** | Hybrid chunking for MVP, defer semantic chunking | `Accepted` | 2026-06-21 |
 | **DEC-013** | Two-stage query routing with rule-based pre-filter and LLM fallback | `Accepted` | 2026-06-21 |
 | **DEC-014** | Skip reranking for MVP, use Reciprocal Rank Fusion for score merging | `Accepted` | 2026-06-21 |
@@ -35,7 +35,8 @@ This document records the key decisions made during the design and development o
 | **DEC-027** | Use read-only EDA notebooks for generated app data | `Accepted` | 2026-06-26 |
 | **DEC-028** | Null stale search-result chunk references on chunk deletion | `Accepted` | 2026-06-27 |
 | **DEC-029** | Exclude non-current source files from retrieval indexes | `Accepted` | 2026-06-30 |
-| **DEC-030** | Fake-default embeddings with optional real models and model-namespaced vector collections | `Accepted` | 2026-07-01 |
+| **DEC-030** | Fake-default embeddings with optional real models and model-namespaced vector collections | `Superseded by DEC-031` | 2026-07-01 |
+| **DEC-031** | Real-only production models with injected test doubles | `Accepted` | 2026-07-11 |
 
 ---
 
@@ -216,6 +217,10 @@ Use `uv add package_name` for dependencies and `uv run ...` for execution.
 
 Documentation, scripts, and commands should assume `uv`. Avoid ad-hoc package installation or direct interpreter execution unless there is a clear reason.
 
+**Amendment:** DEC-031 governs the current model/dependency setup: the base
+installation supports non-vector Features 01-06, while vector indexing uses the
+optional Hugging Face extra and a reviewed configured profile.
+
 ---
 
 ## DEC-010: Use LangChain as core framework
@@ -233,13 +238,13 @@ Use LangChain as the core framework for LLM abstraction, embedding abstraction, 
 
 ### Consequences
 
-LangChain becomes a foundational dependency. All LLM calls, embedding pipelines, and retrieval chains use LangChain interfaces. Provider switching is a configuration change. The MVP must define provider/model environment variables and deterministic fake adapters for tests, but should not hardcode a paid or cloud provider as required.
+LangChain becomes a foundational dependency. All LLM calls, embedding pipelines, and retrieval chains use LangChain interfaces. Provider switching is a configuration change. Production model/provider values remain optional until their consumers are implemented; automated tests inject deterministic doubles at model-loader or chat-model boundaries.
 
 ---
 
 ## DEC-011: Use ChromaDB with separate collections per logical index
 
-* **Status**: Accepted
+* **Status**: Accepted; affected model/collection guidance amended by DEC-031
 * **Date**: 2026-06-21
 
 ### Context
@@ -252,7 +257,12 @@ Use ChromaDB as the vector store. Create separate ChromaDB collections per logic
 
 ### Consequences
 
-ChromaDB is LangChain-native and simple to set up with disk persistence. Separate collections give clean isolation but cross-index queries require multiple searches. Collection dimensionality depends on the configured embedding model, and tests should use a deterministic fake embedding implementation.
+ChromaDB is LangChain-native and simple to set up with disk persistence. Separate collections give clean isolation but cross-index queries require multiple searches. Collection dimensionality depends on the configured embedding model, and tests should use a deterministic injected embedding double.
+
+**Amendment:** DEC-031 replaces the former provider-selection guidance in this
+decision's historical text with reviewed real production profiles, explicit model
+selection, lazy optional dependencies, runtime dimension probing, and test-only
+injection at the model-loader boundary.
 
 ---
 
@@ -627,7 +637,7 @@ rows, but answer-time retrieval uses only the current indexed corpus.
 
 ## DEC-030: Fake-default embeddings with optional real models and model-namespaced vector collections
 
-* **Status**: Accepted
+* **Status**: Superseded by DEC-031
 * **Date**: 2026-07-01
 
 ### Context
@@ -683,4 +693,52 @@ and gated/access notes; their dependencies and weights are only needed when
 selected. Side-by-side profiles never share a physical collection, stale
 embedding rows cannot point at deleted chunks, and drift between Chroma and
 SQLite is reconciled before incremental indexing.
+
+---
+
+## DEC-031: Real-only production models with injected test doubles
+
+* **Status**: Accepted
+* **Date**: 2026-07-11
+
+### Context
+
+The implemented vector feature previously exposed a deterministic runtime
+embedding path so the base installation and automated tests could run without
+the optional Hugging Face stack. That path made the production contract
+ambiguous: a vector command could silently select a non-production model and
+configuration reported invented provider/model defaults. The future routing and
+answering features also need optional production LLM settings without runtime
+test providers.
+
+### Decision
+
+- Production vector commands accept only the four reviewed Hugging Face profiles:
+  `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
+  `jinaai/jina-embeddings-v5-text-small`, and
+  `google/embeddinggemma-300m`.
+- There is no default embedding model. `index vector` and `search semantic`
+  require a nonblank `--model` or `UNI_RAG_EMBEDDING_MODEL`, and report the
+  supported profile list when selection is missing or unknown.
+- `langchain-huggingface` and `sentence-transformers` remain in the optional
+  `embeddings` extra. Model construction and runtime dimension probing stay
+  lazy, while the probed dimension remains part of collection identity and
+  SQLite telemetry.
+- Production LLM provider/model settings are nullable and unset by default until
+  routing and answering are implemented.
+- Automated tests inject deterministic LangChain embedding and chat doubles at
+  model-loader boundaries. Test doubles are not production exports, registry
+  profiles, CLI options, or configuration values.
+- The existing ChromaDB/SQLite reconciliation, model-namespaced collections,
+  authoritative SQLite hydration, course filtering, and read-only semantic
+  search contracts remain unchanged.
+
+### Consequences
+
+Plain `uv sync` remains sufficient for non-vector Features 01-06. Vector setup
+requires `uv sync --extra embeddings`, a reviewed model selection, and any
+model-specific access requirements. Automated tests remain offline and exercise
+the real ChromaDB and SQLite pipeline through injected model boundaries. Existing
+local vector state created under the superseded contract must be cleared and
+rebuilt by its owner; this workspace has no generated vector state to migrate.
 

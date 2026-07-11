@@ -14,7 +14,7 @@ Generate final user-facing answers strictly from evidence packets, with inline c
 
 - Load an evidence packet and generate an answer using only packet evidence.
 - Use LangChain chat model abstraction with configurable provider/model.
-- Provide deterministic fake answerer for tests.
+- Use an injected test-only chat model for deterministic answer-generation tests.
 - Enforce inline citation format.
 - Include a references section listing cited files and locations.
 - Refuse or qualify answers when evidence is insufficient.
@@ -45,7 +45,7 @@ Notebook:
 notebooks/answering_eda.ipynb
 ```
 
-Create this notebook when answering is implemented. It should inspect `answers`, joined `evidence_packets`, citation JSON, limitations, model/fake-adapter traces, and insufficient-evidence behavior.
+Create this notebook when answering is implemented. It should inspect `answers`, joined `evidence_packets`, citation JSON, limitations, model traces, injected-test behavior, and insufficient-evidence handling.
 
 Internal interfaces:
 
@@ -94,11 +94,11 @@ Populate:
 1. Load evidence packet by ID or receive packet from the ask pipeline.
 2. If evidence is empty or weak, produce an insufficient-evidence answer using searched/found/missing coverage.
 3. Build a prompt that includes only packet evidence and answer constraints.
-4. Generate answer via configured LangChain chat model or fake answerer.
+4. Generate answer via the configured LangChain chat model.
 5. Validate that every citation maps to packet evidence.
 6. Add or repair references section when possible.
 7. Store answer text, citations, limitations, and model name.
-8. Keep `notebooks/answering_eda.ipynb` aligned with answer fields, citation JSON shape, limitation semantics, model trace fields, and fake-answerer behavior.
+8. Keep `notebooks/answering_eda.ipynb` aligned with answer fields, citation JSON shape, limitation semantics, model trace fields, and injected-test behavior.
 
 ## Failure and Safety Rules
 
@@ -112,13 +112,13 @@ Populate:
 
 ## Tests
 
-- Automated fake-answerer tests for cited answer, insufficient evidence, weak retrieval, and invalid citation repair/refusal.
+- Automated tests inject a deterministic test-only chat model for cited answer, insufficient evidence, weak retrieval, and invalid citation repair/refusal.
 - Verify every inline citation maps to a packet evidence item.
 - Verify references section includes full file paths and locations.
 - Verify answers with empty evidence do not invent facts.
-- Verify fake model mode requires no API keys.
+- Verify answer-generation tests do not require production model credentials.
 - Verify `notebooks/answering_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
-- Optional smoke: run `uv run -m uni_rag_agent ask "query"` against a tiny fixture index using fake adapters.
+- Optional smoke: run `uv run -m uni_rag_agent ask "query"` against a tiny fixture index with explicitly configured production models.
 
 ## Acceptance Criteria
 

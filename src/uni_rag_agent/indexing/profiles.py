@@ -1,10 +1,10 @@
 """Embedding model profiles, selection, and physical collection naming.
 
 This module is pure and dependency-light: it never imports ``langchain`` or
-``chromadb``. It resolves which embedding profile a command should use (fake vs
-a known real Hugging Face profile) and derives the model-namespaced ChromaDB
-collection name. Building the actual embedding object lives in ``embeddings.py``
-so the heavy/optional dependencies stay lazy.
+``chromadb``. It resolves which registered Hugging Face embedding profile a
+command should use and derives the model-namespaced ChromaDB collection name.
+Building the actual embedding object lives in ``embeddings.py`` so the
+heavy/optional dependencies stay lazy.
 """
 
 from __future__ import annotations
@@ -17,9 +17,6 @@ from uni_rag_agent.config import Config
 
 from .models import VectorIndexError
 
-#: Names that always select the deterministic offline fake adapter.
-FAKE_MODEL_NAMES = frozenset({"fake", "fake-embedding"})
-
 DEFAULT_DISTANCE_METRIC = "cosine"
 
 
@@ -27,27 +24,24 @@ DEFAULT_DISTANCE_METRIC = "cosine"
 class EmbeddingProfile:
     """Static description of one embedding model.
 
-    For real profiles ``dimension`` is the documented/declared dimension. The
-    actual runtime dimension is verified from the loaded model when a real
-    profile is built; the fake profile's declared dimension always equals the
-    configured ``UNI_RAG_EMBEDDING_DIM``.
+    ``dimension`` is the documented/declared dimension. The actual runtime
+    dimension is verified from the loaded model when a profile is built.
     """
 
     model_name: str
     provider: str
     dimension: int
     metric: str = DEFAULT_DISTANCE_METRIC
-    is_fake: bool = False
     trust_remote_code: bool = False
     gated: bool = False
     requires_extra: str | None = None
     access_notes: str | None = None
 
 
-#: Known real Hugging Face local-model profiles. These are registry entries
+#: Reviewed Hugging Face local-model profiles. These are registry entries
 #: only; their optional dependencies (the ``embeddings`` extra) and model
 #: weights are not required unless a real profile is actually selected and run.
-REAL_EMBEDDING_PROFILES: dict[str, EmbeddingProfile] = {
+EMBEDDING_PROFILES: dict[str, EmbeddingProfile] = {
     "BAAI/bge-m3": EmbeddingProfile(
         model_name="BAAI/bge-m3",
         provider="huggingface",
@@ -96,63 +90,28 @@ REAL_EMBEDDING_PROFILES: dict[str, EmbeddingProfile] = {
 }
 
 
-def fake_profile(config: Config) -> EmbeddingProfile:
-    """Return the deterministic fake profile sized by ``UNI_RAG_EMBEDDING_DIM``."""
-    return EmbeddingProfile(
-        # Keep fake vectors in their own stable identity even if a user has
-        # configured a real model name while experimenting. Otherwise a fake
-        # mapping can suppress a later real-model run for that same name.
-        model_name="fake-embedding",
-        provider="fake",
-        dimension=config.embedding_dim,
-        is_fake=True,
-    )
-
-
 def resolve_embedding_profile(
     config: Config,
     model: str | None = None,
     *,
     error: type[Exception] = VectorIndexError,
 ) -> EmbeddingProfile:
-    """Choose the embedding profile for a command.
-
-    Selection rules (mirroring the Feature 07 contract):
-
-    * An explicit ``model`` of ``fake``/``fake-embedding`` always selects the
-      fake adapter.
-    * An explicit real ``model`` selects that real profile and overrides
-      ``UNI_RAG_USE_FAKE_EMBEDDINGS=true`` for this command only.
-    * Without ``model``, follow config: fake when ``use_fake_embeddings`` is
-      true, otherwise the configured ``embedding_model`` must resolve to a known
-      real profile or this fails clearly with ``error``.
-    """
-    requested = model.strip() if model else None
-
-    if requested:
-        if requested.casefold() in FAKE_MODEL_NAMES:
-            return fake_profile(config)
-        profile = REAL_EMBEDDING_PROFILES.get(requested)
-        if profile is not None:
-            return profile
+    """Resolve an explicit or configured model to a reviewed profile."""
+    requested = model.strip() if model and model.strip() else None
+    if requested is None and config.embedding_model:
+        requested = config.embedding_model.strip() or None
+    if not requested:
         raise error(
-            f"Unknown embedding model '{requested}'. Known real profiles: "
-            f"{', '.join(sorted(REAL_EMBEDDING_PROFILES))}. "
-            "Use 'fake-embedding' for offline runs."
+            "No embedding model selected. Set UNI_RAG_EMBEDDING_MODEL or pass "
+            f"--model. Supported profiles: {', '.join(sorted(EMBEDDING_PROFILES))}."
         )
 
-    if config.use_fake_embeddings:
-        return fake_profile(config)
-
-    profile = REAL_EMBEDDING_PROFILES.get(config.embedding_model)
+    profile = EMBEDDING_PROFILES.get(requested)
     if profile is not None:
         return profile
     raise error(
-        "Fake embeddings are disabled but the configured embedding model "
-        f"'{config.embedding_model}' (provider '{config.embedding_provider}') is "
-        "not a known real profile. Set UNI_RAG_USE_FAKE_EMBEDDINGS=true, choose a "
-        f"known model ({', '.join(sorted(REAL_EMBEDDING_PROFILES))}), or pass "
-        "--model."
+        f"Unknown embedding model '{requested}'. Supported profiles: "
+        f"{', '.join(sorted(EMBEDDING_PROFILES))}."
     )
 
 

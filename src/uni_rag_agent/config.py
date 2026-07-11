@@ -31,16 +31,12 @@ class Config:
     semantic_top_k: int
     final_top_k: int
     rrf_k: int
-    llm_provider: str
-    llm_model: str
-    embedding_provider: str
-    embedding_model: str
-    embedding_dim: int
-    use_fake_llm: bool
-    use_fake_embeddings: bool
+    llm_provider: str | None
+    llm_model: str | None
+    embedding_model: str | None
     ocr_enabled: bool
 
-    def as_safe_dict(self) -> dict[str, str | int | bool]:
+    def as_safe_dict(self) -> dict[str, str | int | bool | None]:
         return {
             "repo_root": str(self.repo_root),
             "courses_root": str(self.courses_root),
@@ -55,11 +51,7 @@ class Config:
             "rrf_k": self.rrf_k,
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
-            "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
-            "embedding_dim": self.embedding_dim,
-            "use_fake_llm": self.use_fake_llm,
-            "use_fake_embeddings": self.use_fake_embeddings,
             "ocr_enabled": self.ocr_enabled,
         }
 
@@ -82,9 +74,6 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
     env = _merged_env(dotenv_path)
 
     data_dir = _path_from_env(root, env, "UNI_RAG_DATA_DIR", "data")
-    llm_provider = _str_from_env(env, "UNI_RAG_LLM_PROVIDER", "fake")
-    embedding_provider = _str_from_env(env, "UNI_RAG_EMBEDDING_PROVIDER", "fake")
-
     return Config(
         repo_root=root,
         courses_root=_path_from_env(
@@ -118,25 +107,9 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
         semantic_top_k=_int_from_env(env, "UNI_RAG_SEMANTIC_TOP_K", 20),
         final_top_k=_int_from_env(env, "UNI_RAG_FINAL_TOP_K", 10),
         rrf_k=_int_from_env(env, "UNI_RAG_RRF_K", 60),
-        llm_provider=llm_provider,
-        llm_model=_str_from_env(env, "UNI_RAG_LLM_MODEL", "fake-chat"),
-        embedding_provider=embedding_provider,
-        embedding_model=_str_from_env(
-            env,
-            "UNI_RAG_EMBEDDING_MODEL",
-            "fake-embedding",
-        ),
-        embedding_dim=_int_from_env(env, "UNI_RAG_EMBEDDING_DIM", 384),
-        use_fake_llm=_bool_from_env(
-            env,
-            "UNI_RAG_USE_FAKE_LLM",
-            llm_provider == "fake",
-        ),
-        use_fake_embeddings=_bool_from_env(
-            env,
-            "UNI_RAG_USE_FAKE_EMBEDDINGS",
-            embedding_provider == "fake",
-        ),
+        llm_provider=_optional_str_from_env(env, "UNI_RAG_LLM_PROVIDER"),
+        llm_model=_optional_str_from_env(env, "UNI_RAG_LLM_MODEL"),
+        embedding_model=_optional_str_from_env(env, "UNI_RAG_EMBEDDING_MODEL"),
         ocr_enabled=_bool_from_env(env, "UNI_RAG_OCR_ENABLED", False),
     )
 
@@ -189,11 +162,12 @@ def _path_from_env(
     return path.resolve()
 
 
-def _str_from_env(env: Mapping[str, str], name: str, default: str) -> str:
-    value = env.get(name, default).strip()
-    if not value:
-        raise ConfigError(f"{name} cannot be empty")
-    return value
+def _optional_str_from_env(env: Mapping[str, str], name: str) -> str | None:
+    value = env.get(name)
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _bool_from_env(env: Mapping[str, str], name: str, default: bool) -> bool:

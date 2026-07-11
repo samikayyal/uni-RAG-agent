@@ -267,8 +267,6 @@ def test_storage_init_cli_uses_temp_config_and_prints_health(tmp_path: Path) -> 
             "UNI_RAG_SQLITE_PATH": str(data_dir / "uni_rag.sqlite"),
             "UNI_RAG_CHROMA_DIR": str(data_dir / "indexes" / "vector"),
             "UNI_RAG_RUNS_DIR": str(data_dir / "runs"),
-            "UNI_RAG_USE_FAKE_LLM": "true",
-            "UNI_RAG_USE_FAKE_EMBEDDINGS": "true",
         }
     )
 

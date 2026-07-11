@@ -15,7 +15,8 @@ Embed extracted chunks into ChromaDB collections using LangChain embedding abstr
 ## In Scope
 
 - Configure embeddings through LangChain.
-- Provide deterministic fake embeddings for tests.
+- Restrict production selection to the reviewed Hugging Face profile registry.
+- Inject deterministic test-only embeddings at the model-loader boundary.
 - Create one ChromaDB collection per logical index.
 - Embed eligible chunks.
 - Store Chroma vector IDs and embedding metadata in SQLite.
@@ -36,11 +37,10 @@ Embed extracted chunks into ChromaDB collections using LangChain embedding abstr
 Commands:
 
 ```powershell
-uv run -m uni_rag_agent index vector
-uv run -m uni_rag_agent index vector --collection document_index
 uv run -m uni_rag_agent index vector --model BAAI/bge-m3
+uv run -m uni_rag_agent index vector --model BAAI/bge-m3 --collection document_index
 uv run -m uni_rag_agent index vector --model BAAI/bge-m3 --rebuild
-uv run -m uni_rag_agent search semantic "distributed computation"
+uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3
 uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3 --index slides_index --course "Information Retrieval" --top-k 10 --json
 ```
 
@@ -55,7 +55,10 @@ Create this notebook when vector indexing is implemented. It should inspect `emb
 Internal interfaces:
 
 ```python
-get_embedding_model(config: Config, model: str | None = None) -> Embeddings
+build_embedding_model(
+    config: Config,
+    model: str | None = None,
+) -> BuiltEmbeddingModel
 sync_vector_index(
     config: Config,
     collection: str | None = None,
@@ -80,22 +83,25 @@ defaults to `UNI_RAG_SEMANTIC_TOP_K` when omitted.
 
 ### Embedding model selection
 
-- Without `--model`, selection follows config: when `UNI_RAG_USE_FAKE_EMBEDDINGS`
-  is true `get_embedding_model` returns the deterministic fake adapter; when it
-  is false the configured `UNI_RAG_EMBEDDING_MODEL` must resolve to a known real
-  profile or the command fails clearly.
-- An explicit real `--model BAAI/bge-m3` overrides `UNI_RAG_USE_FAKE_EMBEDDINGS=true`
-  for that command so experiments do not require editing `.env`.
-- An explicit `--model fake-embedding` is always allowed for fake runs.
+- Resolve a nonblank explicit `--model` first, then nonblank
+  `UNI_RAG_EMBEDDING_MODEL`/`config.embedding_model`.
+- If neither value is set, raise the caller's domain-specific error and explain
+  how to set `UNI_RAG_EMBEDDING_MODEL` or pass `--model`, including the supported
+  profile list.
+- Accept only `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
+  `jinaai/jina-embeddings-v5-text-small`, and `google/embeddinggemma-300m`.
+- Reject unknown identifiers generically with the supported profile list. Do not
+  provide an offline production selection.
 
 ### Dependencies
 
-Core dependencies are `chromadb` and `langchain-core`. Real Hugging Face local
-models live in the optional `embeddings` extra (`langchain-huggingface` plus the
-Sentence Transformers stack, which pulls in `transformers` and `torch`). Those
-imports are lazy and only happen when a real Hugging Face profile is selected,
-so the fake-default test path stays offline and lightweight. Install the extra
-with `uv sync --extra embeddings`.
+Core dependencies are `chromadb` and `langchain-core`. Hugging Face local models
+live in the optional `embeddings` extra (`langchain-huggingface` plus the Sentence
+Transformers stack, which pulls in `transformers` and `torch`). Those imports are
+lazy and happen only when a reviewed profile is selected. Install the extra with
+`uv sync --extra embeddings`. Automated tests inject a deterministic LangChain
+embedding object at the loader boundary and continue to use real ChromaDB and
+SQLite.
 
 ### Side-by-side models and collections
 
@@ -107,9 +113,9 @@ distance. `embeddings` rows store `vector_backend='chroma'`, the physical
 `vector_collection`, a stable `vector_id='chunk:<chunk_id>'`, the selected
 `embedding_model`, the dimension, and a timestamp. The physical collection is
 the canonical profile identity: a chunk may have one mapping per physical
-collection, so fake and real runs or dimension rollovers cannot suppress one
-another. Fake embeddings always use the stable `fake-embedding` identity even
-when config names a real model.
+collection, so side-by-side reviewed profiles and runtime-dimension rollovers
+cannot suppress one another. Runtime dimensions are probed from the selected
+embedding object and drive collection identity and SQLite telemetry.
 
 ### Shared retrieval contract
 
@@ -181,7 +187,7 @@ SQLite remains authoritative. Chroma metadata should include chunk ID and enough
 
 ## Workflow
 
-1. Load config and embedding adapter.
+1. Resolve the explicit/configured reviewed model and load its embedding object.
 2. Map chunks to logical Chroma collections by `source_type`.
 3. Reconcile each selected physical collection with SQLite: delete Chroma-only vectors and stale SQLite mappings, and make SQLite mappings with missing Chroma vectors eligible for re-embedding.
 4. Select chunks missing embeddings for the configured physical profile.
@@ -189,12 +195,13 @@ SQLite remains authoritative. Chroma metadata should include chunk ID and enough
 6. Upsert vectors into ChromaDB.
 7. Store `embeddings` rows with vector backend, collection, vector ID, model, dimension, and timestamp.
 8. Implement semantic search by querying selected collections, validating exact `embeddings` mappings, and then joining result IDs back to SQLite metadata. Apply course filtering before final top-K truncation.
-8. Keep `notebooks/vector_index_eda.ipynb` aligned with embedding fields, collection names, vector metadata, model/dimension semantics, and search result shape.
+9. Keep `notebooks/vector_index_eda.ipynb` aligned with embedding fields, collection names, vector metadata, model/dimension semantics, and search result shape.
 
 ## Failure and Safety Rules
 
-- Tests must not require network or API keys.
-- If provider credentials are missing and fake embeddings are disabled, fail with a clear config error.
+- Tests must not require network or API keys; they inject test-only model doubles.
+- If the optional embedding dependency or model access is unavailable, fail with
+  a clear installation/access diagnostic.
 - Do not embed chunks from metadata-only files.
 - Do not embed empty or whitespace-only chunks.
 - Batch failures should be recoverable without corrupting existing embeddings.
@@ -206,22 +213,24 @@ SQLite remains authoritative. Chroma metadata should include chunk ID and enough
 
 ## Tests
 
-- Automated tests with deterministic fake embeddings.
+- Automated tests with `DeterministicTestEmbeddings` injected at the Hugging Face
+  constructor boundary, plus a subprocess-only constructor shim for CLI coverage.
 - Verify collection mapping for document, slide, notebook, code, data schema, and transcript chunks.
 - Verify embedding sync is idempotent.
-- Verify fake-to-real and embedding-dimension rollovers create distinct physical mappings and remain searchable.
+- Verify two legitimate profiles with injected dimensions create distinct physical mappings and remain searchable.
 - Verify incremental sync removes orphaned vectors and restores missing collections/vectors.
 - Verify semantic search returns chunk metadata joined from SQLite.
 - Verify semantic search validates the exact SQLite mapping and applies course filters before final top-K truncation.
 - Verify metadata-only files are never embedded.
-- Verify missing real provider config fails clearly when fake embeddings are disabled.
+- Verify missing model selection fails clearly for indexing and semantic search.
 - Verify `notebooks/vector_index_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
-- Optional smoke: vector-index a tiny fixture corpus with fake embeddings.
+- Manual smoke only: after `uv sync --extra embeddings`, select a reviewed model and
+  index a tiny corpus; do not make network/model loading part of pytest.
 
 ## Acceptance Criteria
 
-- `uv run -m uni_rag_agent index vector` populates ChromaDB and `embeddings`.
+- `uv run -m uni_rag_agent index vector --model <reviewed-profile>` populates ChromaDB and `embeddings`.
 - Semantic search works across selected logical collections.
-- The implementation is provider-configurable and testable without API keys.
+- The implementation is configured from reviewed profiles and testable without API keys through injected doubles.
 - SQLite remains the source of truth for chunk text, paths, and citation metadata.
 - `notebooks/vector_index_eda.ipynb` exists once this feature lands and can inspect embedding/vector coverage without mutating generated or source data.
