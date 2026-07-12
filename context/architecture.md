@@ -98,7 +98,7 @@ Stage notebooks are created when the producing stage is implemented. Do not add 
 | Data summaries / 05 | `notebooks/data_schema_eda.ipynb` | Implemented | `data_summaries`, `chunks`, `files` | Dataset summary coverage, row/column/table counts, sample availability, large/failed data files. |
 | Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Implemented | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
 | Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Implemented | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |
-| Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Planned when Features 08-09 land | `search_runs`, `search_results`, `evidence_packets` | Router behavior, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
+| Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Planned when Features 08-09 land | `search_runs`, `search_results`, `evidence_packets` | Query-plan behavior, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
 | Answering / 10 | `notebooks/answering_eda.ipynb` | Planned when Feature 10 lands | `answers`, `evidence_packets` | Citation validity, limitations, model traces, injected-test behavior, insufficient-evidence handling. |
 | UI / 11 | None required for MVP | Not applicable | FastAPI responses and UI tests | UI correctness is covered by API/UI tests; use retrieval/answering notebooks for underlying traces. |
 | Evaluation / 12 | `notebooks/evaluation_eda.ipynb` | Planned when Feature 12 lands | `data/runs/eval/` reports, optional answer/search traces | Eval score trends, failures, citation quality, retrieval quality, runtime summaries. |
@@ -418,7 +418,7 @@ CREATE TABLE search_runs (
     id INTEGER PRIMARY KEY,
     query TEXT NOT NULL,
     query_type TEXT,
-    router_output_json TEXT NOT NULL,
+    query_plan_json TEXT NOT NULL,
     searched_courses_json TEXT NOT NULL,
     searched_indexes_json TEXT NOT NULL,
     keyword_terms_json TEXT NOT NULL,
@@ -512,9 +512,9 @@ data_schema -> data_schema_index: CSV/XLSX/JSON/JSONL/SQLite/DB summaries
 transcript -> transcript_index: VTT transcript chunks
 ```
 
-The router chooses candidate logical indexes for each query.
+The LLM query planner chooses candidate logical indexes for each query.
 
-Each logical chunk `source_type` maps to one logical index, and each logical index maps to a separate ChromaDB collection. The router selects which collections to search per query. Cross-index queries search multiple collections and merge results.
+Each logical chunk `source_type` maps to one logical index, and each logical index maps to a separate ChromaDB collection. The validated query plan selects which collections to search per query. Cross-index queries search multiple collections and merge results.
 
 ## Ingestion Pipeline
 
@@ -618,19 +618,21 @@ Rules:
   are resolved before the final top-K limit so they cannot silently discard a
   matching chunk outside a cross-course candidate window.
 
-## Query Routing
+## LLM Query Planning
 
-Router output should be structured:
+Every `retrieve` request first obtains a structured LLM query plan. The planner receives the original query, current canonical course names, logical indexes, supported query types, and a bounded validated conversation context; it returns exactly this schema:
 
 ```json
 {
   "query_type": "concept_explanation",
   "candidate_courses": ["Information Retrieval", "NLP", "Data Mining"],
   "candidate_indexes": ["document_index", "slides_index", "notebook_index"],
-  "needs_keyword_search": true,
-  "needs_semantic_search": true,
+  "keyword_terms": ["mapreduce"],
+  "semantic_queries": ["explain MapReduce"],
   "needs_file_inspection": true,
-  "needs_python": false
+  "needs_python": false,
+  "plan_confidence": 0.92,
+  "plan_reason": "The query asks for a course-grounded concept explanation."
 }
 ```
 
@@ -649,21 +651,7 @@ portfolio_resume
 unknown_or_unsupported
 ```
 
-The router should combine:
-
-- course folder names;
-- file names;
-- metadata search;
-- keyword hits;
-- semantic search over course summaries/chunks;
-- LLM classification if available.
-
-Routing is two-stage:
-
-1. Fast rule-based pre-filter: match course names, file extensions, and exact terms in the query text.
-2. If the rule-based pass is ambiguous or returns no candidates, fall back to LLM classification.
-
-Most queries that mention a course name or file type are resolved without an LLM call.
+The planner validates every output field and canonicalizes course-name casing before deterministic retrieval begins. A supported plan has a supported non-unknown type, nonempty canonical course and logical-index scopes, nonblank keyword terms, one to `semantic_query_limit` semantic queries, boolean inspection/Python flags, a nonblank reason, and confidence at or above the configured threshold. `unknown_or_unsupported` is valid only with empty retrieval scopes and produces a successful empty run without backend searches. Missing provider/model configuration, provider construction or invocation failures, malformed or invalid output, and low-confidence plans are retrieval failures.
 
 ## Retrieval Flow
 
@@ -685,17 +673,16 @@ Default retrieval parameters (configurable):
 - `final_top_k`: 10 (after merge and deduplication)
 - `metadata_top_k`: 20
 - `semantic_query_limit`: 3
-- `router_min_confidence`: 0.60
-- `course_fuzzy_threshold`: 90
+- `query_plan_min_confidence`: 0.60
 - `filename_fuzzy_threshold`: 85
 - `path_fuzzy_threshold`: 90
 
 Feature 08 treats a reviewed embedding-model selection as a strict precondition
-of `retrieve`, even when routing produces an unsupported run. Rule routing uses
-canonical course names, conservative aliases, file extensions, intent cues,
-and logical-index defaults before an optional LangChain fallback. Supported
-routes run metadata, keyword, and semantic retrieval; all backend failures are
-fatal and zero-hit lists become weaknesses. Result-level RRF provenance remains
+of `retrieve`, even when LLM planning produces an unsupported run. The optional
+`llm` dependency extra and a configured provider/model pair are mandatory only
+when `retrieve` executes. Supported plans run metadata, keyword, and semantic
+retrieval with planned courses and indexes as hard filters; all backend failures
+are fatal and zero-hit lists become weaknesses. Result-level RRF provenance remains
 in memory for Feature 09; this feature does not write `search_runs` or
 `search_results`.
 
@@ -793,7 +780,7 @@ Tools should be exposed through LangChain tool interfaces for integration with t
 4. Data schema summarization.
 5. Keyword search.
 6. Vector search.
-7. Query router.
+7. LLM query planner.
 8. Evidence packet builder.
 9. Answer generator with citations.
 10. Evaluation set and retrieval quality checks.

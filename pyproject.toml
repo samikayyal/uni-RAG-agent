@@ -28,7 +28,7 @@ embeddings = [
     "langchain-huggingface>=0.1.0",
     "sentence-transformers>=3.0.0",
 ]
-# Query-routing LLM integrations are optional and imported lazily.
+# LLM integrations are lazy; the `llm` extra is required only by `retrieve`.
 llm = [
     "langchain-anthropic>=1.4.8",
     "langchain-google-genai>=4.2.7",

@@ -469,7 +469,7 @@ CREATE TABLE IF NOT EXISTS search_runs (
     id INTEGER PRIMARY KEY,
     query TEXT NOT NULL,
     query_type TEXT,
-    router_output_json TEXT NOT NULL,
+    query_plan_json TEXT NOT NULL,
     searched_courses_json TEXT NOT NULL,
     searched_indexes_json TEXT NOT NULL,
     keyword_terms_json TEXT NOT NULL,

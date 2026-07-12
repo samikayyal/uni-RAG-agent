@@ -12,7 +12,7 @@ The system should not be a generic "chat with a folder" wrapper. It should route
 
 ```mermaid
 graph TD
-    A["User query"] --> B["Query router"]
+    A["User query"] --> B["LLM query planner"]
     B --> C["Retrieval / research orchestrator"]
     C --> D["Metadata search"]
     C --> E["Keyword search"]
@@ -29,7 +29,7 @@ graph TD
 Core flow:
 
 1. User asks a question.
-2. Query router classifies the intent and candidate courses/indexes.
+2. A configured LLM produces a validated query plan with intent and candidate courses/indexes.
 3. Retrieval layer combines metadata, keyword, and semantic search.
 4. Research tools inspect exact files/chunks when needed.
 5. System builds an evidence packet containing search coverage, sources, evidence, scores, and weaknesses.
@@ -68,7 +68,7 @@ Core flow:
 * **Document Extraction**: PyMuPDF for PDFs, with optional Tesseract OCR fallback for scanned PDFs only when `UNI_RAG_OCR_ENABLED` is true and Tesseract is installed; `python-pptx` for PPTX; `python-docx` for DOCX; `nbformat` for notebooks; pandas/openpyxl for tabular summaries.
 * **Notebook EDA**: pandas for tabular analysis and matplotlib-backed pandas plots for lightweight diagnostic charts over generated app data.
 * **App/API Layer**: FastAPI backend with a simple HTML/JS frontend.
-* **LLM Provider**: Multi-provider via LangChain. Production LLM and embedding provider/model values are optional configuration loaded from environment variables; production vector commands use only reviewed Hugging Face profiles. Tests inject deterministic LangChain doubles at model-loader boundaries. Do not hardcode a paid or cloud provider as required.
+* **LLM Provider**: Multi-provider via LangChain. Production LLM and embedding provider/model values are nullable configuration loaded from environment variables; a configured LLM provider/model and the optional `llm` extra are mandatory when executing `retrieve`, while production vector commands use only reviewed Hugging Face profiles. Tests inject deterministic LangChain doubles at model-loader boundaries. Do not hardcode a paid or cloud provider as required.
 * **Configuration**: Environment variables loaded from a `.env` file via `python-dotenv`.
 
 ## Key System Constraints

@@ -238,7 +238,7 @@ def insert_search_result(
         INSERT INTO search_runs (
             query,
             query_type,
-            router_output_json,
+            query_plan_json,
             searched_courses_json,
             searched_indexes_json,
             keyword_terms_json,

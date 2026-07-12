@@ -1,4 +1,4 @@
-"""JSON-safe contracts shared by routing, retrieval, and later evidence work."""
+"""JSON-safe contracts shared by query planning, retrieval, and evidence work."""
 
 from __future__ import annotations
 
@@ -79,19 +79,16 @@ LOGICAL_INDEXES = (
 
 
 @dataclass(frozen=True)
-class RouterOutput:
+class QueryPlan:
     query_type: str
     candidate_courses: tuple[str, ...]
     candidate_indexes: tuple[str, ...]
     keyword_terms: tuple[str, ...]
     semantic_queries: tuple[str, ...]
-    needs_keyword_search: bool
-    needs_semantic_search: bool
     needs_file_inspection: bool
     needs_python: bool
-    route_confidence: float
-    route_reason: str
-    route_source: str = "rule"
+    plan_confidence: float
+    plan_reason: str
 
     def as_safe_dict(self) -> dict[str, object]:
         return {
@@ -100,13 +97,10 @@ class RouterOutput:
             "candidate_indexes": list(self.candidate_indexes),
             "keyword_terms": list(self.keyword_terms),
             "semantic_queries": list(self.semantic_queries),
-            "needs_keyword_search": self.needs_keyword_search,
-            "needs_semantic_search": self.needs_semantic_search,
             "needs_file_inspection": self.needs_file_inspection,
             "needs_python": self.needs_python,
-            "route_confidence": self.route_confidence,
-            "route_reason": self.route_reason,
-            "route_source": self.route_source,
+            "plan_confidence": self.plan_confidence,
+            "plan_reason": self.plan_reason,
         }
 
 
@@ -196,7 +190,7 @@ class RetrievalResultSet:
 class RetrievalRun:
     query: str
     embedding_model: str
-    router_output: RouterOutput
+    query_plan: QueryPlan
     result_sets: tuple[RetrievalResultSet, ...]
     results: tuple[FusedRetrievalResult, ...]
     searched_courses: tuple[str, ...]
@@ -210,7 +204,7 @@ class RetrievalRun:
         return {
             "query": self.query,
             "embedding_model": self.embedding_model,
-            "router_output": self.router_output.as_safe_dict(),
+            "query_plan": self.query_plan.as_safe_dict(),
             "result_sets": [item.as_safe_dict() for item in self.result_sets],
             "results": [item.as_safe_dict() for item in self.results],
             "searched_courses": list(self.searched_courses),

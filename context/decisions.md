@@ -18,7 +18,7 @@ This document records the key decisions made during the design and development o
 | **DEC-010** | Use LangChain as core framework | `Accepted` | 2026-06-21 |
 | **DEC-011** | Use ChromaDB with separate collections per logical index | `Accepted; amended by DEC-031` | 2026-06-21 |
 | **DEC-012** | Hybrid chunking for MVP, defer semantic chunking | `Accepted` | 2026-06-21 |
-| **DEC-013** | Two-stage query routing with rule-based pre-filter and LLM fallback | `Accepted` | 2026-06-21 |
+| **DEC-013** | Two-stage query routing with rule-based pre-filter and LLM fallback | `Superseded by DEC-033` | 2026-06-21 |
 | **DEC-014** | Skip reranking for MVP, use Reciprocal Rank Fusion for score merging | `Accepted` | 2026-06-21 |
 | **DEC-015** | PyMuPDF with Tesseract OCR fallback for scanned PDFs | `Accepted` | 2026-06-21 |
 | **DEC-016** | AST-based code extraction for Python, regex fallback for other languages | `Accepted` | 2026-06-21 |
@@ -135,7 +135,7 @@ University materials contain exact terms, abbreviations, file-name hints, course
 
 ### Decision
 
-Use metadata filtering, keyword/BM25 search, semantic vector search, and RRF result merging for the MVP. The router should not rely only on an LLM; it should combine course names, file names, extracted headings, keyword hits, and embeddings. Reranking is a later optimization only if evaluation shows RRF is insufficient.
+Use metadata filtering, keyword/BM25 search, semantic vector search, and RRF result merging for the MVP. Query planning may use an LLM, but retrieval execution remains deterministic: the application applies planned hard filters and invokes all three search methods before RRF. Reranking is a later optimization only if evaluation shows RRF is insufficient.
 
 ### Consequences
 
@@ -746,7 +746,7 @@ rebuilt by its owner; this workspace has no generated vector state to migrate.
 
 ## DEC-032: Read-only routed hybrid retrieval with explicit model and RRF provenance
 
-* **Status**: Accepted
+* **Status**: Superseded by DEC-033
 * **Date**: 2026-07-11
 
 ### Context
@@ -780,4 +780,44 @@ The result contract can be serialized directly for later persistence and makes
 weak coverage visible without mutating SQLite, ChromaDB, or `Courses`. Retrieval
 requires the optional embeddings runtime at execution time, while optional LLM
 integrations remain lazy behind `uv sync --extra llm`.
+
+---
+
+## DEC-033: Mandatory LLM query planning for read-only hybrid retrieval
+
+* **Status**: Accepted
+* **Date**: 2026-07-11
+
+### Context
+
+The Feature 08 rule router duplicated brittle knowledge about course aliases,
+intent cues, extensions, and fuzzy matching. It also made the LLM path an
+optional fallback even though query interpretation needs structured planning.
+
+### Decision
+
+- Supersede DEC-013's two-stage rule/LLM router and the rule/fallback language
+  in DEC-032. Remove aliases, cues, extension routing, fuzzy course routing,
+  and all router-named runtime/public contracts.
+- Every `retrieve` invocation first calls exactly the configured LangChain
+  provider/model to produce and validate a `QueryPlan`. Provider/model settings
+  remain nullable during global config loading, but the pair and the optional
+  `llm` extra are mandatory at query-planning/retrieval time.
+- A supported plan supplies canonical course and logical-index scopes, keyword
+  terms, semantic queries, inspection flags, confidence, and a reason. The
+  deterministic application then runs metadata, keyword, and semantic search
+  with hard planned filters and merges them only with RRF (DEC-014).
+- A valid `unknown_or_unsupported` plan has empty scopes, performs no backend
+  search, and returns a successful empty run with the LLM reason as a weakness.
+  Invalid/low-confidence plans and provider failures are fatal retrieval errors.
+- Keep the reviewed embedding-model precondition, read-only Feature 08 scope,
+  fatal backend failures, and RRF provenance from DEC-032 unchanged.
+
+### Consequences
+
+Query intent and search scope are consistently represented by one validated
+LLM plan instead of two independently evolving mechanisms. Automated tests
+inject chat-model doubles at the planner boundary; no runtime fake provider or
+prebuilt-plan bypass exists. Non-retrieval commands remain usable without the
+LLM dependency.
 

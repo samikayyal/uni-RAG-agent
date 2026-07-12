@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -12,9 +13,9 @@ from uni_rag_agent.indexing import (
 )
 from uni_rag_agent.retrieval import (
     FusedRetrievalResult,
+    QueryPlan,
     RetrievalResult,
     RetrievalResultSet,
-    RouterOutput,
     RetrievalError,
     merge_with_rrf,
     metadata_search,
@@ -26,7 +27,11 @@ from tests.sqlite_helpers import insert_minimal_chunk
 
 def _config(tmp_path: Path) -> Config:
     (tmp_path / "Courses").mkdir()
-    config = load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
+    (tmp_path / ".env").write_text(
+        "UNI_RAG_LLM_PROVIDER=ollama\nUNI_RAG_LLM_MODEL=test-planner\n",
+        encoding="utf-8",
+    )
+    config = load_config(repo_root=tmp_path, env_file=tmp_path / ".env")
     ensure_data_dirs(config)
     with connect_sqlite(config) as connection:
         initialize_schema(connection)
@@ -231,19 +236,23 @@ def test_retrieve_runs_each_semantic_query_without_persistence(
             text="BM25 retrieval",
         )
         connection.commit()
-    route = RouterOutput(
-        query_type="concept_explanation",
-        candidate_courses=("Information Retrieval",),
-        candidate_indexes=("document_index",),
-        keyword_terms=("BM25",),
-        semantic_queries=("BM25 explanation", "ranking explanation"),
-        needs_keyword_search=True,
-        needs_semantic_search=True,
-        needs_file_inspection=False,
-        needs_python=False,
-        route_confidence=1.0,
-        route_reason="test route",
-    )
+
+    class FakeChat:
+        def invoke(self, _: str) -> str:
+            return json.dumps(
+                {
+                    "query_type": "concept_explanation",
+                    "candidate_courses": ["Information Retrieval"],
+                    "candidate_indexes": ["document_index"],
+                    "keyword_terms": ["BM25"],
+                    "semantic_queries": ["BM25 explanation", "ranking explanation"],
+                    "needs_file_inspection": False,
+                    "needs_python": False,
+                    "plan_confidence": 1.0,
+                    "plan_reason": "test plan",
+                }
+            )
+
     monkeypatch.setattr(
         "uni_rag_agent.retrieval.core.metadata_search",
         lambda *args, **kwargs: [],
@@ -261,7 +270,12 @@ def test_retrieve_runs_each_semantic_query_without_persistence(
         ),
     )
 
-    run = retrieve(config, "BM25", router_output=route, model="BAAI/bge-m3")
+    run = retrieve(
+        config,
+        "BM25",
+        model="BAAI/bge-m3",
+        chat_model=FakeChat(),
+    )
 
     assert run.status == "completed"
     assert [item.result_set_id for item in run.result_sets] == [
@@ -281,3 +295,39 @@ def test_retrieve_requires_model_before_unsupported_routing(tmp_path: Path) -> N
 
     with pytest.raises(RetrievalError, match="No embedding model selected"):
         retrieve(config, "unsupported nonsense")
+
+
+def test_retrieve_uses_planner_and_skips_backends_for_supported_unsupported_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    planned: list[str] = []
+
+    def planned_unsupported(*args: object, **kwargs: object) -> QueryPlan:
+        planned.append(str(args[1]))
+        return QueryPlan(
+            query_type="unknown_or_unsupported",
+            candidate_courses=(),
+            candidate_indexes=(),
+            keyword_terms=(),
+            semantic_queries=(),
+            needs_file_inspection=False,
+            needs_python=False,
+            plan_confidence=0.9,
+            plan_reason="Outside the indexed course archive.",
+        )
+
+    monkeypatch.setattr("uni_rag_agent.retrieval.core.plan_query", planned_unsupported)
+    for backend in ("metadata_search", "keyword_search_terms", "semantic_search"):
+        monkeypatch.setattr(
+            f"uni_rag_agent.retrieval.core.{backend}",
+            lambda *args, **kwargs: pytest.fail("unsupported plans must not search"),
+        )
+
+    run = retrieve(config, "Write a poem", model="BAAI/bge-m3")
+
+    assert planned == ["Write a poem"]
+    assert run.status == "unsupported"
+    assert run.results == ()
+    assert run.weaknesses == ("Outside the indexed course archive.",)

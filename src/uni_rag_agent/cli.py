@@ -38,7 +38,7 @@ from .indexing import (
     keyword_search,
     sync_keyword_index,
 )
-from .retrieval import RetrievalError, RetrievalResult, RoutingError, retrieve
+from .retrieval import QueryPlanningError, RetrievalError, RetrievalResult, retrieve
 from .retrieval.models import RetrievalRun
 from .storage import (
     StorageCheckResult,
@@ -881,7 +881,7 @@ def _handle_retrieve(args: argparse.Namespace) -> int:
             )
         print(f"Storage error: {exc}", file=sys.stderr)
         return STORAGE_ERROR
-    except (RetrievalError, RoutingError) as exc:
+    except (RetrievalError, QueryPlanningError) as exc:
         if logger is not None:
             logger.exception(
                 "retrieval failed",
@@ -895,7 +895,7 @@ def _handle_retrieve(args: argparse.Namespace) -> int:
         print(f"Retrieval error: {exc}", file=sys.stderr)
         return SEARCH_ERROR
 
-    _log_retrieval_events(logger, run, model_label)
+    _log_retrieval_events(logger, run, model_label, config)
     if args.json:
         print(json.dumps(run.as_safe_dict(), indent=2, sort_keys=True))
     else:
@@ -907,6 +907,7 @@ def _log_retrieval_events(
     logger: Logger | None,
     run: RetrievalRun,
     model: str,
+    config: Config,
 ) -> None:
     if logger is None:
         return
@@ -915,16 +916,18 @@ def _log_retrieval_events(
         "model": model,
         "courses": run.searched_courses,
         "indexes": run.searched_indexes,
-        "query_type": run.router_output.query_type,
-        "route_source": run.router_output.route_source,
+        "query_type": run.query_plan.query_type,
+        "plan_confidence": run.query_plan.plan_confidence,
+        "llm_provider": config.llm_provider,
+        "llm_model": config.llm_model,
         "semantic_query_count": len(run.semantic_queries),
     }
     logger.info(
-        "routing completed",
+        "query planning completed",
         extra={
-            "event": "routing_unsupported"
+            "event": "query_planning_unsupported"
             if run.status == "unsupported"
-            else "routing_completed",
+            else "query_planning_completed",
             "status": run.status,
             **common,
         },
@@ -954,13 +957,12 @@ def _log_retrieval_events(
 
 
 def _print_retrieval_run(run: RetrievalRun, *, debug: bool) -> None:
-    route = run.router_output
+    plan = run.query_plan
     print(f"status: {run.status}")
     print(f"query: {run.query}")
-    print(f"query_type: {route.query_type}")
-    print(f"route_source: {route.route_source}")
-    print(f"route_confidence: {route.route_confidence:.6g}")
-    print(f"route_reason: {route.route_reason}")
+    print(f"query_type: {plan.query_type}")
+    print(f"plan_confidence: {plan.plan_confidence:.6g}")
+    print(f"plan_reason: {plan.plan_reason}")
     print(f"embedding_model: {run.embedding_model}")
     print(f"searched_courses: {', '.join(run.searched_courses) or 'none'}")
     print(f"searched_indexes: {', '.join(run.searched_indexes) or 'none'}")

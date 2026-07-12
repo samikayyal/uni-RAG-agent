@@ -16,8 +16,8 @@ from uni_rag_agent.indexing.profiles import resolve_embedding_profile
 from uni_rag_agent.storage import StorageError, check_storage
 
 from .metadata import MetadataSearchError, metadata_search
-from .models import RetrievalResultSet, RetrievalRun, RouterOutput
-from .router import RoutingError, normalize_query, route_query, validate_router_output
+from .models import RetrievalResultSet, RetrievalRun
+from .planner import QueryPlanningError, normalize_query, plan_query
 from .rrf import merge_with_rrf
 
 
@@ -28,9 +28,10 @@ class RetrievalError(RuntimeError):
 def retrieve(
     config: Config,
     query: str,
-    router_output: RouterOutput | None = None,
     conversation_context: Sequence[dict[str, str]] | None = None,
     model: str | None = None,
+    *,
+    chat_model: object | None = None,
 ) -> RetrievalRun:
     """Run metadata, keyword, and semantic retrieval without persistence."""
     normalized_query = normalize_query(query)
@@ -41,27 +42,24 @@ def retrieve(
         details = "; ".join(storage.diagnostics) or "storage is not ready"
         raise StorageError(f"Retrieval storage check failed: {details}")
 
-    output = router_output or route_query(
+    query_plan = plan_query(
         config,
         query,
         conversation_context=conversation_context,
+        chat_model=chat_model,
     )
-    validate_router_output(config, output)
-    if (
-        output.route_source == "unsupported"
-        or output.query_type == "unknown_or_unsupported"
-    ):
+    if query_plan.query_type == "unknown_or_unsupported":
         return RetrievalRun(
             query=query,
             embedding_model=profile.model_name,
-            router_output=output,
+            query_plan=query_plan,
             result_sets=(),
             results=(),
             searched_courses=(),
             searched_indexes=(),
             keyword_terms=(),
             semantic_queries=(),
-            weaknesses=(output.route_reason,),
+            weaknesses=(query_plan.plan_reason,),
             status="unsupported",
         )
 
@@ -70,8 +68,8 @@ def retrieve(
         metadata_results = metadata_search(
             config,
             normalized_query,
-            courses=output.candidate_courses,
-            indexes=output.candidate_indexes,
+            courses=query_plan.candidate_courses,
+            indexes=query_plan.candidate_indexes,
             extensions=_query_extensions(normalized_query),
         )
         result_sets.append(
@@ -85,27 +83,27 @@ def retrieve(
 
         keyword_results = keyword_search_terms(
             config,
-            output.keyword_terms,
-            courses=output.candidate_courses,
-            indexes=output.candidate_indexes,
+            query_plan.keyword_terms,
+            courses=query_plan.candidate_courses,
+            indexes=query_plan.candidate_indexes,
         )
         result_sets.append(
             RetrievalResultSet(
                 result_set_id="keyword",
                 retrieval_method="keyword",
-                query=" OR ".join(output.keyword_terms),
+                query=" OR ".join(query_plan.keyword_terms),
                 results=tuple(keyword_results),
             )
         )
 
         for semantic_index, semantic_query in enumerate(
-            output.semantic_queries, start=1
+            query_plan.semantic_queries, start=1
         ):
             semantic_results = semantic_search(
                 config,
                 semantic_query,
-                courses=output.candidate_courses,
-                indexes=output.candidate_indexes,
+                courses=query_plan.candidate_courses,
+                indexes=query_plan.candidate_indexes,
                 model=model or profile.model_name,
             )
             result_sets.append(
@@ -118,7 +116,7 @@ def retrieve(
             )
     except (MetadataSearchError, KeywordSearchError, SemanticSearchError) as exc:
         raise RetrievalError(f"Retrieval backend failed: {exc}") from exc
-    except (StorageError, RoutingError):
+    except (StorageError, QueryPlanningError):
         raise
     except Exception as exc:  # noqa: BLE001 - backend failures are fatal
         raise RetrievalError(f"Retrieval backend failed: {exc}") from exc
@@ -136,13 +134,13 @@ def retrieve(
     return RetrievalRun(
         query=query,
         embedding_model=profile.model_name,
-        router_output=output,
+        query_plan=query_plan,
         result_sets=tuple(result_sets),
         results=tuple(results),
-        searched_courses=output.candidate_courses,
-        searched_indexes=output.candidate_indexes,
-        keyword_terms=output.keyword_terms,
-        semantic_queries=output.semantic_queries,
+        searched_courses=query_plan.candidate_courses,
+        searched_indexes=query_plan.candidate_indexes,
+        keyword_terms=query_plan.keyword_terms,
+        semantic_queries=query_plan.semantic_queries,
         weaknesses=tuple(weaknesses),
         status="completed",
     )

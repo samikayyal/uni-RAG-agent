@@ -38,8 +38,7 @@ class Config:
     ocr_enabled: bool
     metadata_top_k: int = 20
     semantic_query_limit: int = 3
-    router_min_confidence: float = 0.60
-    course_fuzzy_threshold: int = 90
+    query_plan_min_confidence: float = 0.60
     filename_fuzzy_threshold: int = 85
     path_fuzzy_threshold: int = 90
 
@@ -62,8 +61,7 @@ class Config:
             "ocr_enabled": self.ocr_enabled,
             "metadata_top_k": self.metadata_top_k,
             "semantic_query_limit": self.semantic_query_limit,
-            "router_min_confidence": self.router_min_confidence,
-            "course_fuzzy_threshold": self.course_fuzzy_threshold,
+            "query_plan_min_confidence": self.query_plan_min_confidence,
             "filename_fuzzy_threshold": self.filename_fuzzy_threshold,
             "path_fuzzy_threshold": self.path_fuzzy_threshold,
         }
@@ -126,11 +124,8 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
         ocr_enabled=_bool_from_env(env, "UNI_RAG_OCR_ENABLED", False),
         metadata_top_k=_int_from_env(env, "UNI_RAG_METADATA_TOP_K", 20),
         semantic_query_limit=_int_from_env(env, "UNI_RAG_SEMANTIC_QUERY_LIMIT", 3),
-        router_min_confidence=_float_from_env(
-            env, "UNI_RAG_ROUTER_MIN_CONFIDENCE", 0.60
-        ),
-        course_fuzzy_threshold=_bounded_int_from_env(
-            env, "UNI_RAG_COURSE_FUZZY_THRESHOLD", 90
+        query_plan_min_confidence=_float_from_env(
+            env, "UNI_RAG_QUERY_PLAN_MIN_CONFIDENCE", 0.60
         ),
         filename_fuzzy_threshold=_bounded_int_from_env(
             env, "UNI_RAG_FILENAME_FUZZY_THRESHOLD", 85
@@ -165,10 +160,9 @@ def validate_config(config: Config) -> None:
 
     _validate_positive_value("metadata_top_k", config.metadata_top_k)
     _validate_positive_value("semantic_query_limit", config.semantic_query_limit)
-    if not 0.0 <= config.router_min_confidence <= 1.0:
-        raise ConfigError("UNI_RAG_ROUTER_MIN_CONFIDENCE must be between 0 and 1")
+    if not 0.0 <= config.query_plan_min_confidence <= 1.0:
+        raise ConfigError("UNI_RAG_QUERY_PLAN_MIN_CONFIDENCE must be between 0 and 1")
     for name, value in {
-        "UNI_RAG_COURSE_FUZZY_THRESHOLD": config.course_fuzzy_threshold,
         "UNI_RAG_FILENAME_FUZZY_THRESHOLD": config.filename_fuzzy_threshold,
         "UNI_RAG_PATH_FUZZY_THRESHOLD": config.path_fuzzy_threshold,
     }.items():

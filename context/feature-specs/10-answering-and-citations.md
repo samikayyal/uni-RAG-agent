@@ -19,7 +19,7 @@ Generate final user-facing answers strictly from evidence packets, with inline c
 - Include a references section listing cited files and locations.
 - Refuse or qualify answers when evidence is insufficient.
 - Store final answer traces.
-- Support per-session conversation context for follow-up routing while keeping each packet self-contained.
+- Support per-session conversation context for follow-up query planning while keeping each packet self-contained.
 - Add or update the answering EDA notebook for persisted answer and citation traces.
 
 ## Out of Scope

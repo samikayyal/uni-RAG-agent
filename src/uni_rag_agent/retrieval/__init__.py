@@ -1,4 +1,4 @@
-"""Routing and hybrid retrieval public API.
+"""LLM query planning and hybrid retrieval public API.
 
 The model contracts are eager and dependency-light. Retrieval implementations
 are loaded lazily so the existing keyword/vector packages can import
@@ -15,18 +15,17 @@ from .models import (
     RetrievalResult,
     RetrievalResultSet,
     RetrievalRun,
-    RouterOutput,
+    QueryPlan,
 )
 
 _LAZY_EXPORTS = {
     "MetadataSearchError": "metadata",
     "RetrievalError": "core",
-    "RoutingError": "router",
+    "QueryPlanningError": "planner",
     "merge_with_rrf": "rrf",
     "metadata_search": "metadata",
     "retrieve": "core",
-    "route_query": "router",
-    "validate_router_output": "router",
+    "plan_query": "planner",
 }
 
 __all__ = [
@@ -37,13 +36,12 @@ __all__ = [
     "RetrievalResult",
     "RetrievalResultSet",
     "RetrievalRun",
-    "RouterOutput",
-    "RoutingError",
+    "QueryPlan",
+    "QueryPlanningError",
     "merge_with_rrf",
     "metadata_search",
     "retrieve",
-    "route_query",
-    "validate_router_output",
+    "plan_query",
 ]
 
 

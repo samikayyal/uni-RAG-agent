@@ -47,7 +47,7 @@ This notebook is shared with spec 08. Once evidence packets are implemented, it 
 Internal interfaces:
 
 ```python
-record_search_run(query: str, router_output: RouterOutput) -> int
+record_search_run(query: str, query_plan: QueryPlan) -> int
 record_search_results(search_run_id: int, results: list[RetrievalResult]) -> None
 build_evidence_packet(search_run_id: int, results: list[RetrievalResult]) -> EvidencePacket
 load_evidence_packet(evidence_packet_id: int) -> EvidencePacket
@@ -100,12 +100,12 @@ Evidence packet JSON must be stored exactly as given to the answer generator. Do
 
 ## Workflow
 
-1. Start a `search_runs` row before retrieval or immediately after router output is available.
+1. Start a `search_runs` row before retrieval or immediately after the query plan is available.
 2. Persist raw retrieval results with method, rank, score, and result JSON.
 3. Deduplicate and select final evidence up to `final_top_k`.
 4. Load full chunk text and source metadata from SQLite.
 5. Build citation-ready evidence items.
-6. Generate weaknesses from router/retrieval/index metadata.
+6. Generate weaknesses from query-plan/retrieval/index metadata.
 7. Store the packet JSON and evidence count.
 8. Return the packet to the answer generator.
 9. Keep `notebooks/retrieval_eda.ipynb` aligned with `search_runs`, `search_results`, `evidence_packets`, packet JSON shape, weakness semantics, and selected-evidence rules.

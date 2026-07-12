@@ -44,8 +44,7 @@ final_top_k
 rrf_k
 metadata_top_k
 semantic_query_limit
-router_min_confidence
-course_fuzzy_threshold
+query_plan_min_confidence
 filename_fuzzy_threshold
 path_fuzzy_threshold
 llm_provider: str | None
@@ -69,8 +68,7 @@ UNI_RAG_FINAL_TOP_K
 UNI_RAG_RRF_K
 UNI_RAG_METADATA_TOP_K
 UNI_RAG_SEMANTIC_QUERY_LIMIT
-UNI_RAG_ROUTER_MIN_CONFIDENCE
-UNI_RAG_COURSE_FUZZY_THRESHOLD
+UNI_RAG_QUERY_PLAN_MIN_CONFIDENCE
 UNI_RAG_FILENAME_FUZZY_THRESHOLD
 UNI_RAG_PATH_FUZZY_THRESHOLD
 UNI_RAG_LLM_PROVIDER
@@ -144,7 +142,7 @@ The implementation may add a lightweight schema version table if needed, but it 
 - `llm_provider` and `llm_model` are an atomic pair: both unset or both
   nonblank. Providers are exactly `openai`, `anthropic`, `gemini`, or `ollama`.
 - Retrieval tuning values use Feature 08 defaults: metadata top-K 20, semantic
-  query limit 3, router confidence 0.60, and fuzzy thresholds 90/85/90.
+  query limit 3, query-plan confidence 0.60, and metadata fuzzy thresholds 85/90.
 - Storage initialization must be idempotent.
 - The implementation must never create files under `Courses`.
 - `.env` values must not be logged verbatim if they look like secrets.

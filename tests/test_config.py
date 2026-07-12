@@ -18,8 +18,7 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_LLM_PROVIDER",
     "UNI_RAG_METADATA_TOP_K",
     "UNI_RAG_SEMANTIC_QUERY_LIMIT",
-    "UNI_RAG_ROUTER_MIN_CONFIDENCE",
-    "UNI_RAG_COURSE_FUZZY_THRESHOLD",
+    "UNI_RAG_QUERY_PLAN_MIN_CONFIDENCE",
     "UNI_RAG_FILENAME_FUZZY_THRESHOLD",
     "UNI_RAG_PATH_FUZZY_THRESHOLD",
     "UNI_RAG_LOG_LEVEL",
@@ -56,8 +55,7 @@ def test_defaults_resolve_from_repo_root(tmp_path: Path) -> None:
     assert config.rrf_k == 60
     assert config.metadata_top_k == 20
     assert config.semantic_query_limit == 3
-    assert config.router_min_confidence == 0.60
-    assert config.course_fuzzy_threshold == 90
+    assert config.query_plan_min_confidence == 0.60
     assert config.filename_fuzzy_threshold == 85
     assert config.path_fuzzy_threshold == 90
     assert config.embedding_model is None
@@ -87,8 +85,7 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
                 "UNI_RAG_RRF_K=42",
                 "UNI_RAG_METADATA_TOP_K=7",
                 "UNI_RAG_SEMANTIC_QUERY_LIMIT=4",
-                "UNI_RAG_ROUTER_MIN_CONFIDENCE=0.75",
-                "UNI_RAG_COURSE_FUZZY_THRESHOLD=91",
+                "UNI_RAG_QUERY_PLAN_MIN_CONFIDENCE=0.75",
                 "UNI_RAG_FILENAME_FUZZY_THRESHOLD=86",
                 "UNI_RAG_PATH_FUZZY_THRESHOLD=92",
                 "UNI_RAG_LLM_PROVIDER=ollama",
@@ -114,8 +111,7 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
     assert config.rrf_k == 42
     assert config.metadata_top_k == 7
     assert config.semantic_query_limit == 4
-    assert config.router_min_confidence == 0.75
-    assert config.course_fuzzy_threshold == 91
+    assert config.query_plan_min_confidence == 0.75
     assert config.filename_fuzzy_threshold == 86
     assert config.path_fuzzy_threshold == 92
     assert config.embedding_model == "BAAI/bge-m3"
@@ -246,8 +242,7 @@ def test_safe_dict_excludes_injected_secret_values(
             "UNI_RAG_SEMANTIC_QUERY_LIMIT=-1",
             "UNI_RAG_SEMANTIC_QUERY_LIMIT must be greater than zero",
         ),
-        ("UNI_RAG_ROUTER_MIN_CONFIDENCE=1.1", "must be between 0 and 1"),
-        ("UNI_RAG_COURSE_FUZZY_THRESHOLD=101", "must be between 0 and 100"),
+        ("UNI_RAG_QUERY_PLAN_MIN_CONFIDENCE=1.1", "must be between 0 and 1"),
         ("UNI_RAG_LLM_PROVIDER=openai", "must be set together"),
         ("UNI_RAG_LLM_PROVIDER=unknown\nUNI_RAG_LLM_MODEL=model", "must be one of"),
     ],

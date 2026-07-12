@@ -177,11 +177,12 @@ license, gating, token, or authentication requirements before running it.
 `index vector` writes lifecycle JSONL logs under `data/runs/`. Direct semantic
 search does not write `search_runs` or `search_results`.
 
-Feature 08 retrieval is read-only: it routes the query, runs metadata/keyword/
+Feature 08 retrieval is read-only: a configured LLM first produces a validated
+query plan, then it runs metadata/keyword/
 semantic search, and merges ranked results with RRF. It does not write
 `search_runs`, `search_results`, evidence packets, or files under `Courses`.
-Retrieval requires an explicit reviewed embedding model and uses optional LLM
-integrations only for unresolved routing:
+Retrieval requires an explicit reviewed embedding model and the optional `llm`
+extra with a configured LLM provider/model. Other commands do not require it:
 
 ```powershell
 uv sync --extra embeddings
@@ -209,7 +210,7 @@ should fail clearly and must not scan or mutate `Courses/`.
 5. Data schema summaries
 6. Keyword indexing
 7. Vector indexing
-8. Query routing and hybrid retrieval
+8. LLM query planning and hybrid retrieval
 9. Evidence packets and coverage
 10. Answering and citations
 11. FastAPI HTML UI
