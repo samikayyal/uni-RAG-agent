@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sqlite3
 import subprocess
 import sys
@@ -8,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.storage import (
     REQUIRED_TABLES,
     StorageError,
@@ -24,14 +22,9 @@ from tests.sqlite_helpers import (
     insert_minimal_chunk,
     insert_search_result,
 )
+from tests.support import clean_subprocess_env, make_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-UNI_RAG_ENV_PREFIX = "UNI_RAG_"
-
-
-def make_config(tmp_path: Path) -> Config:
-    (tmp_path / "Courses").mkdir()
-    return load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
 
 
 def test_storage_init_creates_expected_directories_and_schema(tmp_path: Path) -> None:
@@ -235,7 +228,6 @@ def test_initialize_schema_reports_clear_fts5_failure(
         "check_fts5_available",
         lambda _connection: (False, "no such module: fts5"),
     )
-
     with connect_sqlite(config) as connection:
         with pytest.raises(StorageError, match="SQLite FTS5 is not available"):
             initialize_schema(connection)
@@ -260,7 +252,7 @@ def test_storage_init_cli_uses_temp_config_and_prints_health(tmp_path: Path) -> 
     courses_root = tmp_path / "Courses"
     data_dir = tmp_path / "data"
     courses_root.mkdir()
-    env = _subprocess_env(
+    env = clean_subprocess_env(
         {
             "UNI_RAG_COURSES_ROOT": str(courses_root),
             "UNI_RAG_DATA_DIR": str(data_dir),
@@ -290,7 +282,7 @@ def test_storage_init_cli_uses_temp_config_and_prints_health(tmp_path: Path) -> 
 def test_storage_check_cli_fails_clearly_before_init(tmp_path: Path) -> None:
     courses_root = tmp_path / "Courses"
     courses_root.mkdir()
-    env = _subprocess_env(
+    env = clean_subprocess_env(
         {
             "UNI_RAG_COURSES_ROOT": str(courses_root),
             "UNI_RAG_DATA_DIR": str(tmp_path / "data"),
@@ -355,13 +347,3 @@ def _replace_search_results_with_legacy_chunk_fk(
         )
         """
     )
-
-
-def _subprocess_env(overrides: dict[str, str]) -> dict[str, str]:
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(UNI_RAG_ENV_PREFIX)
-    }
-    env.update(overrides)
-    return env

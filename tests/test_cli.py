@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
+import pytest
 import uni_rag_agent
+from tests.support import clean_subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-UNI_RAG_ENV_PREFIX = "UNI_RAG_"
 
 
-def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+def run_cli(
+    *args: str,
+    env: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "uni_rag_agent", *args],
         cwd=REPO_ROOT,
+        env=clean_subprocess_env(env),
         text=True,
         capture_output=True,
         check=False,
@@ -50,6 +55,17 @@ def test_retrieve_requires_an_explicit_embedding_model() -> None:
     assert "No embedding model selected" in result.stderr
 
 
+def test_run_cli_ignores_unrelated_host_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UNI_RAG_EMBEDDING_MODEL", "BAAI/bge-m3")
+
+    result = run_cli("retrieve", "query text")
+
+    assert result.returncode == 7
+    assert "No embedding model selected" in result.stderr
+
+
 def test_inventory_run_cli_fills_temp_storage(tmp_path: Path) -> None:
     courses_root = tmp_path / "Courses"
     data_dir = tmp_path / "data"
@@ -57,7 +73,7 @@ def test_inventory_run_cli_fills_temp_storage(tmp_path: Path) -> None:
     course_dir.mkdir(parents=True)
     (course_dir / "syllabus.txt").write_text("BM25", encoding="utf-8")
     (course_dir / "lecture.mp4").write_bytes(b"mp4")
-    env = _subprocess_env(
+    env = clean_subprocess_env(
         {
             "UNI_RAG_COURSES_ROOT": str(courses_root),
             "UNI_RAG_DATA_DIR": str(data_dir),
@@ -67,22 +83,8 @@ def test_inventory_run_cli_fills_temp_storage(tmp_path: Path) -> None:
         }
     )
 
-    run_result = subprocess.run(
-        [sys.executable, "-m", "uni_rag_agent", "inventory", "run"],
-        cwd=REPO_ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    summary_result = subprocess.run(
-        [sys.executable, "-m", "uni_rag_agent", "inventory", "summary"],
-        cwd=REPO_ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    run_result = run_cli("inventory", "run", env=env)
+    summary_result = run_cli("inventory", "summary", env=env)
 
     assert run_result.returncode == 0, run_result.stderr
     assert run_result.stdout.strip()
@@ -107,7 +109,7 @@ def test_inventory_cli_validates_paths_before_creating_run_log(tmp_path: Path) -
     courses_root = tmp_path / "Courses"
     data_dir = tmp_path / "data"
     courses_root.mkdir()
-    env = _subprocess_env(
+    env = clean_subprocess_env(
         {
             "UNI_RAG_COURSES_ROOT": str(courses_root),
             "UNI_RAG_DATA_DIR": str(data_dir),
@@ -117,14 +119,7 @@ def test_inventory_cli_validates_paths_before_creating_run_log(tmp_path: Path) -
         }
     )
 
-    result = subprocess.run(
-        [sys.executable, "-m", "uni_rag_agent", "inventory", "run"],
-        cwd=REPO_ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    result = run_cli("inventory", "run", env=env)
 
     assert result.returncode == 2
     assert "must not point inside the Courses root" in result.stderr
@@ -137,7 +132,7 @@ def test_extract_run_cli_writes_chunks_and_status(tmp_path: Path) -> None:
     course_dir = courses_root / "Information Retrieval"
     course_dir.mkdir(parents=True)
     (course_dir / "syllabus.txt").write_text("BM25 keyword search", encoding="utf-8")
-    env = _subprocess_env(
+    env = clean_subprocess_env(
         {
             "UNI_RAG_COURSES_ROOT": str(courses_root),
             "UNI_RAG_DATA_DIR": str(data_dir),
@@ -147,30 +142,9 @@ def test_extract_run_cli_writes_chunks_and_status(tmp_path: Path) -> None:
         }
     )
 
-    inventory_result = subprocess.run(
-        [sys.executable, "-m", "uni_rag_agent", "inventory", "run"],
-        cwd=REPO_ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    extract_result = subprocess.run(
-        [sys.executable, "-m", "uni_rag_agent", "extract", "run"],
-        cwd=REPO_ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    status_result = subprocess.run(
-        [sys.executable, "-m", "uni_rag_agent", "extract", "status"],
-        cwd=REPO_ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    inventory_result = run_cli("inventory", "run", env=env)
+    extract_result = run_cli("extract", "run", env=env)
+    status_result = run_cli("extract", "status", env=env)
 
     assert inventory_result.returncode == 0, inventory_result.stderr
     assert extract_result.returncode == 0, extract_result.stderr
@@ -216,13 +190,3 @@ def _run_log_events(data_dir: Path, slug: str) -> list[dict[str, object]]:
         json.loads(line)
         for line in log_files[-1].read_text(encoding="utf-8").splitlines()
     ]
-
-
-def _subprocess_env(overrides: dict[str, str]) -> dict[str, str]:
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(UNI_RAG_ENV_PREFIX)
-    }
-    env.update(overrides)
-    return env

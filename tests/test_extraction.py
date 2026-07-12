@@ -8,7 +8,6 @@ from pathlib import Path
 import nbformat
 import pytest
 
-from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.extraction import (
     DEFAULT_MAX_CHUNK_TOKENS,
     LEGACY_FORMAT_REASON,
@@ -23,13 +22,9 @@ from uni_rag_agent.extraction.constants import NO_TEXT_REASON
 from uni_rag_agent.inventory import inventory_courses
 from uni_rag_agent.storage import connect_sqlite
 from tests.sqlite_helpers import insert_search_result
+from tests.support import make_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def make_config(tmp_path: Path) -> Config:
-    (tmp_path / "Courses").mkdir()
-    return load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
 
 
 def _pending_file(

@@ -12,7 +12,6 @@ from pathlib import Path
 import nbformat
 import pytest
 
-from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.indexing import (
     EMBEDDING_PROFILES,
     SemanticSearchError,
@@ -27,28 +26,28 @@ from uni_rag_agent.indexing import embeddings as embeddings_module
 from uni_rag_agent.indexing import vector as vector_module
 from uni_rag_agent.retrieval import RetrievalResult
 from uni_rag_agent import cli as cli_module
-from uni_rag_agent.storage import connect_sqlite, ensure_data_dirs, initialize_schema
+from uni_rag_agent.storage import connect_sqlite
 from tests.sqlite_helpers import insert_minimal_chunk
 from tests.embedding_doubles import (
     DeterministicTestEmbeddings,
     TEST_EMBEDDING_DIMENSIONS,
     embeddings_for_model,
 )
+from tests.support import (
+    clean_subprocess_env,
+    initialized_connection,
+    make_config as make_test_config,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-UNI_RAG_ENV_PREFIX = "UNI_RAG_"
 
 
-def make_config(tmp_path: Path, **overrides: object) -> Config:
-    courses = tmp_path / "Courses"
-    courses.mkdir(exist_ok=True)
-    config = load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
+def make_config(tmp_path: Path, **overrides: object):
     overrides.setdefault("embedding_model", "BAAI/bge-m3")
-    config = dataclasses.replace(config, **overrides)
-    return config
+    return make_test_config(tmp_path, **overrides)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def patch_huggingface_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     def load_test_embeddings(**kwargs: object) -> DeterministicTestEmbeddings:
         return embeddings_for_model(str(kwargs["model_name"]))
@@ -58,13 +57,6 @@ def patch_huggingface_loader(monkeypatch: pytest.MonkeyPatch) -> None:
         "_require_huggingface",
         lambda *_args, **_kwargs: load_test_embeddings,
     )
-
-
-def _initialized_connection(config: Config) -> sqlite3.Connection:
-    ensure_data_dirs(config)
-    connection = connect_sqlite(config)
-    initialize_schema(connection)
-    return connection
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +158,10 @@ def test_test_embedding_dimensions_match_reviewed_profiles() -> None:
     assert set(TEST_EMBEDDING_DIMENSIONS) == set(EMBEDDING_PROFILES)
 
 
-def test_build_embedding_model_uses_runtime_test_dimension(tmp_path: Path) -> None:
+def test_build_embedding_model_uses_runtime_test_dimension(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
     built = build_embedding_model(config)
 
@@ -181,6 +176,7 @@ def test_build_embedding_model_uses_runtime_test_dimension(tmp_path: Path) -> No
 def test_model_loader_forwards_trust_remote_code_to_jina_profiles(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    patch_huggingface_loader: None,
 ) -> None:
     captured: dict[str, object] = {}
 
@@ -214,7 +210,7 @@ def test_embedding_model_log_label_normalizes_whitespace_override(
 
 def test_missing_model_uses_the_callers_domain_error(tmp_path: Path) -> None:
     config = make_config(tmp_path, embedding_model=None)
-    with _initialized_connection(config):
+    with initialized_connection(config):
         pass
 
     with pytest.raises(VectorIndexError, match="No embedding model selected"):
@@ -255,7 +251,7 @@ def test_real_model_missing_extra_fails_clearly_for_sync_and_search(
     force_missing_embeddings_extra: None,
 ) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config):
+    with initialized_connection(config):
         pass
 
     with pytest.raises(VectorIndexError, match="embeddings' extra"):
@@ -303,9 +299,12 @@ def test_physical_collection_name_is_model_namespaced_and_stable() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_sync_indexes_only_current_eligible_chunks(tmp_path: Path) -> None:
+def test_sync_indexes_only_current_eligible_chunks(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         document = insert_minimal_chunk(
             connection,
             config,
@@ -378,9 +377,12 @@ def test_sync_indexes_only_current_eligible_chunks(tmp_path: Path) -> None:
     assert document_row["vector_collection"].startswith("document_index__")
 
 
-def test_sync_is_idempotent(tmp_path: Path) -> None:
+def test_sync_is_idempotent(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         insert_minimal_chunk(connection, config, filename="a.md", text="alpha beta")
         insert_minimal_chunk(connection, config, filename="b.md", text="gamma delta")
         connection.commit()
@@ -399,9 +401,10 @@ def test_sync_is_idempotent(tmp_path: Path) -> None:
 
 def test_sync_rolls_over_to_a_second_profile_and_rebuilds_it(
     tmp_path: Path,
+    patch_huggingface_loader: None,
 ) -> None:
     config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         stored = insert_minimal_chunk(
             connection,
             config,
@@ -434,9 +437,12 @@ def test_sync_rolls_over_to_a_second_profile_and_rebuilds_it(
     assert len({row["vector_collection"] for row in rows}) == 2
 
 
-def test_two_profiles_create_distinct_mappings(tmp_path: Path) -> None:
+def test_two_profiles_create_distinct_mappings(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         stored = insert_minimal_chunk(
             connection,
             config,
@@ -477,9 +483,12 @@ def test_two_profiles_create_distinct_mappings(tmp_path: Path) -> None:
     assert len({row["vector_collection"] for row in rows}) == 2
 
 
-def test_sync_collection_filter_limits_to_one_logical_index(tmp_path: Path) -> None:
+def test_sync_collection_filter_limits_to_one_logical_index(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         document = insert_minimal_chunk(
             connection, config, filename="notes.md", source_type="document", text="doc"
         )
@@ -504,9 +513,12 @@ def test_sync_collection_filter_limits_to_one_logical_index(tmp_path: Path) -> N
     assert [row["chunk_id"] for row in rows] == [document.chunk_id]
 
 
-def test_sync_unknown_collection_fails_clearly(tmp_path: Path) -> None:
+def test_sync_unknown_collection_fails_clearly(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config):
+    with initialized_connection(config):
         pass
     with pytest.raises(VectorIndexError, match="Unknown logical index"):
         sync_vector_index(config, collection="slides")
@@ -514,9 +526,10 @@ def test_sync_unknown_collection_fails_clearly(tmp_path: Path) -> None:
 
 def test_rebuild_removes_stale_rows_and_repopulates_selected_model(
     tmp_path: Path,
+    patch_huggingface_loader: None,
 ) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         keep = insert_minimal_chunk(
             connection, config, filename="keep.md", text="alpha beta"
         )
@@ -545,9 +558,12 @@ def test_rebuild_removes_stale_rows_and_repopulates_selected_model(
     assert [row["chunk_id"] for row in rows] == [keep.chunk_id]
 
 
-def test_sync_reconciles_orphaned_vectors_and_reused_chunk_ids(tmp_path: Path) -> None:
+def test_sync_reconciles_orphaned_vectors_and_reused_chunk_ids(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         old = insert_minimal_chunk(
             connection,
             config,
@@ -583,9 +599,12 @@ def test_sync_reconciles_orphaned_vectors_and_reused_chunk_ids(tmp_path: Path) -
     ]
 
 
-def test_sync_restores_a_missing_physical_collection(tmp_path: Path) -> None:
+def test_sync_restores_a_missing_physical_collection(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         stored = insert_minimal_chunk(
             connection,
             config,
@@ -616,9 +635,12 @@ def test_sync_restores_a_missing_physical_collection(tmp_path: Path) -> None:
     ]
 
 
-def test_sync_restores_a_missing_individual_vector(tmp_path: Path) -> None:
+def test_sync_restores_a_missing_individual_vector(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         stored = insert_minimal_chunk(
             connection,
             config,
@@ -650,9 +672,12 @@ def test_sync_restores_a_missing_individual_vector(tmp_path: Path) -> None:
     ]
 
 
-def test_sync_reports_no_eligible_chunks(tmp_path: Path) -> None:
+def test_sync_reports_no_eligible_chunks(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config):
+    with initialized_connection(config):
         pass
 
     result = sync_vector_index(config)
@@ -667,9 +692,12 @@ def test_sync_reports_no_eligible_chunks(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_semantic_search_returns_sqlite_joined_results(tmp_path: Path) -> None:
+def test_semantic_search_returns_sqlite_joined_results(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         relevant = insert_minimal_chunk(
             connection,
             config,
@@ -709,9 +737,12 @@ def test_semantic_search_returns_sqlite_joined_results(tmp_path: Path) -> None:
     assert safe["vector_id"] == f"chunk:{relevant.chunk_id}"
 
 
-def test_semantic_search_applies_course_index_and_top_k_filters(tmp_path: Path) -> None:
+def test_semantic_search_applies_course_index_and_top_k_filters(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         ir_doc = insert_minimal_chunk(
             connection,
             config,
@@ -747,9 +778,12 @@ def test_semantic_search_applies_course_index_and_top_k_filters(tmp_path: Path) 
     assert semantic_search(config, "distributed computation", indexes=[]) == []
 
 
-def test_semantic_search_course_filter_is_applied_before_top_k(tmp_path: Path) -> None:
+def test_semantic_search_course_filter_is_applied_before_top_k(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         # This exceeds the old 4x overfetch window for top_k=1. Chroma must
         # apply the canonical course filter before semantic top-K selection.
         for number in range(334):
@@ -780,9 +814,12 @@ def test_semantic_search_course_filter_is_applied_before_top_k(tmp_path: Path) -
     assert [result.chunk_id for result in results] == [target.chunk_id]
 
 
-def test_semantic_search_without_collections_returns_empty(tmp_path: Path) -> None:
+def test_semantic_search_without_collections_returns_empty(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         insert_minimal_chunk(connection, config, filename="a.md", text="distributed")
         connection.commit()
 
@@ -790,9 +827,12 @@ def test_semantic_search_without_collections_returns_empty(tmp_path: Path) -> No
     assert semantic_search(config, "distributed") == []
 
 
-def test_semantic_search_excludes_non_current_chunks(tmp_path: Path) -> None:
+def test_semantic_search_excludes_non_current_chunks(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         stored = insert_minimal_chunk(
             connection, config, filename="stale.md", text="distributed computation"
         )
@@ -810,9 +850,12 @@ def test_semantic_search_excludes_non_current_chunks(tmp_path: Path) -> None:
     assert semantic_search(config, "distributed computation") == []
 
 
-def test_semantic_search_rejects_invalid_input(tmp_path: Path) -> None:
+def test_semantic_search_rejects_invalid_input(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config):
+    with initialized_connection(config):
         pass
 
     with pytest.raises(SemanticSearchError, match="top_k"):
@@ -823,9 +866,12 @@ def test_semantic_search_rejects_invalid_input(tmp_path: Path) -> None:
         semantic_search(config, "distributed", indexes=["slides"])
 
 
-def test_semantic_search_does_not_persist_search_tables(tmp_path: Path) -> None:
+def test_semantic_search_does_not_persist_search_tables(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         insert_minimal_chunk(connection, config, filename="a.md", text="distributed")
         connection.commit()
     sync_vector_index(config)
@@ -887,7 +933,7 @@ def test_vector_cli_indexes_and_searches(tmp_path: Path) -> None:
         "distributed computation with MapReduce and BM25",
         encoding="utf-8",
     )
-    env = _subprocess_env(
+    env = clean_subprocess_env(
         {
             "UNI_RAG_COURSES_ROOT": str(courses_root),
             "UNI_RAG_DATA_DIR": str(data_dir),
@@ -1008,16 +1054,6 @@ def _run_log_events(data_dir: Path, slug: str) -> list[dict[str, object]]:
         json.loads(line)
         for line in log_files[-1].read_text(encoding="utf-8").splitlines()
     ]
-
-
-def _subprocess_env(overrides: dict[str, str]) -> dict[str, str]:
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(UNI_RAG_ENV_PREFIX)
-    }
-    env.update(overrides)
-    return env
 
 
 def _subprocess_shim_pythonpath() -> str:

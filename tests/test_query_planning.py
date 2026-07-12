@@ -5,25 +5,19 @@ from pathlib import Path
 
 import pytest
 
-from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.retrieval import QueryPlanningError, plan_query
-from uni_rag_agent.storage import connect_sqlite, ensure_data_dirs, initialize_schema
+from uni_rag_agent.storage import connect_sqlite
 from tests.sqlite_helpers import insert_minimal_chunk
+from tests.support import make_initialized_config
 
 
-def _config(tmp_path: Path, *, llm: bool = True) -> Config:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "Courses").mkdir()
-    env_file = tmp_path / ".env"
-    if llm:
-        env_file.write_text(
-            "UNI_RAG_LLM_PROVIDER=ollama\nUNI_RAG_LLM_MODEL=test-planner\n",
-            encoding="utf-8",
-        )
-    config = load_config(repo_root=tmp_path, env_file=env_file)
-    ensure_data_dirs(config)
+def _planning_config(tmp_path: Path, *, llm: bool = True):
+    config = make_initialized_config(
+        tmp_path,
+        llm_provider="ollama" if llm else None,
+        llm_model="test-planner" if llm else None,
+    )
     with connect_sqlite(config) as connection:
-        initialize_schema(connection)
         insert_minimal_chunk(
             connection,
             config,
@@ -71,7 +65,7 @@ class FakeChat:
 
 
 def test_plan_query_validates_and_canonicalizes_supported_plan(tmp_path: Path) -> None:
-    config = _config(tmp_path)
+    config = _planning_config(tmp_path)
     chat = FakeChat(json.dumps(_supported_payload()))
 
     plan = plan_query(config, "Explain BM25", chat_model=chat)
@@ -92,7 +86,7 @@ def test_plan_query_validates_and_canonicalizes_supported_plan(tmp_path: Path) -
 def test_plan_query_truncates_context_and_rejects_unexpected_fields(
     tmp_path: Path,
 ) -> None:
-    config = _config(tmp_path)
+    config = _planning_config(tmp_path)
     chat = FakeChat(json.dumps(_supported_payload()))
     context = [{"role": "user", "content": f"message {index}"} for index in range(8)]
 
@@ -113,7 +107,7 @@ def test_plan_query_truncates_context_and_rejects_unexpected_fields(
 def test_plan_query_accepts_valid_unsupported_plan_without_search_scope(
     tmp_path: Path,
 ) -> None:
-    config = _config(tmp_path)
+    config = _planning_config(tmp_path)
     chat = FakeChat(
         json.dumps(
             _supported_payload(
@@ -164,7 +158,11 @@ def test_plan_query_rejects_invalid_structured_output(
     tmp_path: Path, payload: str, message: str
 ) -> None:
     with pytest.raises(QueryPlanningError, match=message):
-        plan_query(_config(tmp_path), "Explain BM25", chat_model=FakeChat(payload))
+        plan_query(
+            _planning_config(tmp_path),
+            "Explain BM25",
+            chat_model=FakeChat(payload),
+        )
 
 
 def test_plan_query_requires_configuration_and_propagates_provider_failure(
@@ -172,14 +170,14 @@ def test_plan_query_requires_configuration_and_propagates_provider_failure(
 ) -> None:
     with pytest.raises(QueryPlanningError, match="UNI_RAG_LLM_PROVIDER"):
         plan_query(
-            _config(tmp_path, llm=False),
+            _planning_config(tmp_path, llm=False),
             "Explain BM25",
             chat_model=FakeChat(json.dumps(_supported_payload())),
         )
 
     with pytest.raises(QueryPlanningError, match="invocation failed"):
         plan_query(
-            _config(tmp_path / "provider-failure"),
+            _planning_config(tmp_path / "provider-failure"),
             "Explain BM25",
             chat_model=FakeChat(RuntimeError("provider unavailable")),
         )

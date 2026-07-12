@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import subprocess
 import sys
@@ -10,7 +9,6 @@ from pathlib import Path
 
 import nbformat
 
-from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.extraction import (
     summarize_data_files,
     summarize_jsonl,
@@ -18,14 +16,9 @@ from uni_rag_agent.extraction import (
 )
 from uni_rag_agent.inventory import inventory_courses
 from uni_rag_agent.storage import connect_sqlite
+from tests.support import clean_subprocess_env, make_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-UNI_RAG_ENV_PREFIX = "UNI_RAG_"
-
-
-def make_config(tmp_path: Path) -> Config:
-    (tmp_path / "Courses").mkdir()
-    return load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
 
 
 def test_data_summary_run_processes_supported_formats_and_chunks(
@@ -242,7 +235,7 @@ def test_data_summary_cli_writes_run_log(tmp_path: Path) -> None:
     course_dir = courses_root / "Information Retrieval"
     course_dir.mkdir(parents=True)
     _write_csv(course_dir / "ranking.csv")
-    env = _subprocess_env(
+    env = clean_subprocess_env(
         {
             "UNI_RAG_COURSES_ROOT": str(courses_root),
             "UNI_RAG_DATA_DIR": str(data_dir),
@@ -410,13 +403,3 @@ def _run_log_events(data_dir: Path, slug: str) -> list[dict[str, object]]:
         json.loads(line)
         for line in log_files[-1].read_text(encoding="utf-8").splitlines()
     ]
-
-
-def _subprocess_env(overrides: dict[str, str]) -> dict[str, str]:
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(UNI_RAG_ENV_PREFIX)
-    }
-    env.update(overrides)
-    return env

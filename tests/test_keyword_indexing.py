@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import subprocess
 import sys
@@ -11,27 +10,21 @@ from pathlib import Path
 import nbformat
 import pytest
 
-from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.indexing import (
     KeywordSearchError,
     keyword_search,
     sync_keyword_index,
 )
-from uni_rag_agent.storage import connect_sqlite, ensure_data_dirs, initialize_schema
+from uni_rag_agent.storage import connect_sqlite
 from tests.sqlite_helpers import insert_minimal_chunk
+from tests.support import clean_subprocess_env, initialized_connection, make_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-UNI_RAG_ENV_PREFIX = "UNI_RAG_"
-
-
-def make_config(tmp_path: Path) -> Config:
-    (tmp_path / "Courses").mkdir()
-    return load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
 
 
 def test_keyword_rebuild_indexes_only_current_eligible_chunks(tmp_path: Path) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         indexed = insert_minimal_chunk(
             connection,
             config,
@@ -98,7 +91,7 @@ def test_keyword_search_matches_projection_fields(
     tmp_path: Path,
 ) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         inserted = insert_minimal_chunk(
             connection,
             config,
@@ -137,7 +130,7 @@ def test_keyword_search_applies_exact_course_filter_and_result_contract(
     tmp_path: Path,
 ) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         inserted = insert_minimal_chunk(
             connection,
             config,
@@ -171,7 +164,7 @@ def test_keyword_search_applies_exact_course_filter_and_result_contract(
 
 def test_keyword_search_plain_text_or_and_index_filters(tmp_path: Path) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         slides = insert_minimal_chunk(
             connection,
             config,
@@ -207,7 +200,7 @@ def test_keyword_search_ranking_score_and_deterministic_ties(
     tmp_path: Path,
 ) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         both_terms = insert_minimal_chunk(
             connection,
             config,
@@ -252,7 +245,7 @@ def test_keyword_search_excludes_stale_fts_rows_and_does_not_persist_results(
     tmp_path: Path,
 ) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config) as connection:
+    with initialized_connection(config) as connection:
         stored = insert_minimal_chunk(
             connection,
             config,
@@ -286,7 +279,7 @@ def test_keyword_search_rejects_empty_queries_and_invalid_limits(
     tmp_path: Path,
 ) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config):
+    with initialized_connection(config):
         pass
 
     with pytest.raises(KeywordSearchError, match="at least one word or number"):
@@ -299,7 +292,7 @@ def test_empty_keyword_index_returns_no_results_without_crashing(
     tmp_path: Path,
 ) -> None:
     config = make_config(tmp_path)
-    with _initialized_connection(config):
+    with initialized_connection(config):
         pass
 
     result = sync_keyword_index(config)
@@ -320,7 +313,7 @@ def test_keyword_cli_indexes_and_searches(
         "BM25 keyword search and MapReduce",
         encoding="utf-8",
     )
-    env = _subprocess_env(
+    env = clean_subprocess_env(
         {
             "UNI_RAG_COURSES_ROOT": str(courses_root),
             "UNI_RAG_DATA_DIR": str(data_dir),
@@ -418,13 +411,6 @@ def test_keyword_index_eda_notebook_is_valid_and_read_only() -> None:
     )
 
 
-def _initialized_connection(config: Config) -> sqlite3.Connection:
-    ensure_data_dirs(config)
-    connection = connect_sqlite(config)
-    initialize_schema(connection)
-    return connection
-
-
 def _table_count(connection: sqlite3.Connection, table: str) -> int:
     row = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
     return int(row[0])
@@ -457,13 +443,3 @@ def _run_log_events(data_dir: Path, slug: str) -> list[dict[str, object]]:
         json.loads(line)
         for line in log_files[-1].read_text(encoding="utf-8").splitlines()
     ]
-
-
-def _subprocess_env(overrides: dict[str, str]) -> dict[str, str]:
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(UNI_RAG_ENV_PREFIX)
-    }
-    env.update(overrides)
-    return env

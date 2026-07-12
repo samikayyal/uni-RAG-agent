@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from uni_rag_agent.config import Config, load_config
 from uni_rag_agent.inventory import (
     InventoryError,
     MISSING_REASON,
@@ -18,11 +17,7 @@ from uni_rag_agent.inventory import (
 from uni_rag_agent.inventory import core as inventory_core
 from uni_rag_agent.inventory import file_io as inventory_file_io
 from uni_rag_agent.storage import connect_sqlite
-
-
-def make_config(tmp_path: Path) -> Config:
-    (tmp_path / "Courses").mkdir()
-    return load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
+from tests.support import make_config
 
 
 @pytest.mark.parametrize(
