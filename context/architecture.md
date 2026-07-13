@@ -98,7 +98,7 @@ Stage notebooks are created when the producing stage is implemented. Do not add 
 | Data summaries / 05 | `notebooks/data_schema_eda.ipynb` | Implemented | `data_summaries`, `chunks`, `files` | Dataset summary coverage, row/column/table counts, sample availability, large/failed data files. |
 | Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Implemented | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
 | Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Implemented | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |
-| Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Planned when Features 08-09 land | `search_runs`, `search_results`, `evidence_packets` | Query-plan behavior, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
+| Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Implemented with Feature 09 | `search_runs`, `search_result_sets`, `search_results`, `evidence_packets` | Query-plan behavior, result-set completion, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
 | Answering / 10 | `notebooks/answering_eda.ipynb` | Planned when Feature 10 lands | `answers`, `evidence_packets` | Citation validity, limitations, model traces, injected-test behavior, insufficient-evidence handling. |
 | UI / 11 | None required for MVP | Not applicable | FastAPI responses and UI tests | UI correctness is covered by API/UI tests; use retrieval/answering notebooks for underlying traces. |
 | Evaluation / 12 | `notebooks/evaluation_eda.ipynb` | Planned when Feature 12 lands | `data/runs/eval/` reports, optional answer/search traces | Eval score trends, failures, citation quality, retrieval quality, runtime summaries. |
@@ -419,6 +419,7 @@ CREATE TABLE search_runs (
     query TEXT NOT NULL,
     query_type TEXT,
     query_plan_json TEXT NOT NULL,
+    retrieval_settings_json TEXT NOT NULL DEFAULT '{}',
     searched_courses_json TEXT NOT NULL,
     searched_indexes_json TEXT NOT NULL,
     keyword_terms_json TEXT NOT NULL,
@@ -429,6 +430,29 @@ CREATE TABLE search_runs (
     weaknesses_json TEXT,
     error TEXT
 );
+```
+
+### search_result_sets
+
+Stores one completion envelope for each raw backend call. The envelope is
+committed atomically with that result set's rows, including when the backend
+successfully returns zero rows. This lets partial-run diagnostics distinguish
+an attempted empty result set from a backend that was never reached.
+
+```sql
+CREATE TABLE search_result_sets (
+    id INTEGER PRIMARY KEY,
+    search_run_id INTEGER NOT NULL REFERENCES search_runs(id),
+    result_set_id TEXT NOT NULL,
+    retrieval_method TEXT NOT NULL,
+    query TEXT NOT NULL,
+    result_count INTEGER NOT NULL,
+    completed_at TEXT NOT NULL,
+    UNIQUE(search_run_id, result_set_id)
+);
+
+CREATE INDEX idx_search_result_sets_run_id
+    ON search_result_sets(search_run_id);
 ```
 
 ### search_results
@@ -450,6 +474,8 @@ CREATE TABLE search_results (
 
 CREATE INDEX idx_search_results_run_id ON search_results(search_run_id);
 CREATE INDEX idx_search_results_selected ON search_results(selected_for_evidence);
+CREATE INDEX idx_search_results_run_method_rank
+    ON search_results(search_run_id, retrieval_method, rank);
 ```
 
 `search_results.chunk_id` is nullable by design. Re-extraction may delete and replace
@@ -480,6 +506,9 @@ CREATE TABLE evidence_packets (
     evidence_count INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX idx_evidence_packets_search_run
+    ON evidence_packets(search_run_id);
 ```
 
 ### answers
@@ -676,19 +705,24 @@ Default retrieval parameters (configurable):
 - `query_plan_min_confidence`: 0.60
 - `filename_fuzzy_threshold`: 85
 - `path_fuzzy_threshold`: 90
+- `evidence_max_tokens`: 12,000 whitespace-estimated tokens
 
 Feature 08 treats a reviewed embedding-model selection as a strict precondition
 of `retrieve`, even when LLM planning produces an unsupported run. The optional
 `llm` dependency extra and a configured provider/model pair are mandatory only
 when `retrieve` executes. Supported plans run metadata, keyword, and semantic
 retrieval with planned courses and indexes as hard filters; all backend failures
-are fatal and zero-hit lists become weaknesses. Result-level RRF provenance remains
-in memory for Feature 09; this feature does not write `search_runs` or
-`search_results`.
+are fatal and zero-hit lists become weaknesses. `retrieve` remains read-only;
+Feature 09 uses a private recorder-enabled execution seam to persist the same
+validated plan, complete raw result sets, complete RRF ordering, and packet.
 
 ## Evidence Packet Schema
 
-The packet should be JSON-serializable and stored exactly as passed to the answer generator.
+The packet is JSON-serializable and stored exactly as passed to the answer
+generator. Feature 09 adds a typed settings snapshot, structured coverage, and
+immutable authoritative evidence items; the canonical serializer uses
+`ensure_ascii=False`, sorted keys, and compact separators. The top-level
+`weaknesses` value is identical to `coverage.weaknesses`.
 
 ```json
 {

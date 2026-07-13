@@ -102,6 +102,9 @@ exists.
 
 - The feature is read-only: do not write search runs/results, evidence packets,
   SQLite records, Chroma records, source files, or course files.
+- `retrieve` remains read-only after Feature 09: the persisted `evidence build`
+  workflow uses a private recorder-enabled execution seam around the same
+  planner/backend/RRF sequence and does not expose a caller-supplied plan bypass.
 - Keep all backend failures fatal; zero results remain coverage weaknesses.
 - Apply planned course and index scopes as hard filters before result limits.
 - Keep DEC-014's one-based unweighted RRF and no reranker.

@@ -65,7 +65,7 @@ EDA notebooks are planned only for stages that produce generated artifacts worth
 | 05 | `notebooks/data_schema_eda.ipynb` | Implemented | `data_summaries`, data-schema chunks, row/column/table/sheet counts, sample coverage. |
 | 06 | `notebooks/keyword_index_eda.ipynb` | Planned | `chunk_fts`, keyword coverage, source-type distribution, query smoke checks. |
 | 07 | `notebooks/vector_index_eda.ipynb` | Planned | `embeddings`, Chroma collection metadata, embedding model/dimension coverage. |
-| 08-09 | `notebooks/retrieval_eda.ipynb` | Planned | Query plans, `search_runs`, `search_results`, RRF mix, evidence packets, weaknesses. |
+| 08-09 | `notebooks/retrieval_eda.ipynb` | Implemented | Query plans, `search_runs`, result-set completion envelopes, `search_results`, RRF mix, evidence packets, coverage, token budgets, failures, and weaknesses. |
 | 10 | `notebooks/answering_eda.ipynb` | Planned | `answers`, citation validation, limitations, model traces, injected-test behavior. |
 | 11 | None required for MVP | Not applicable | UI behavior is covered by API/UI tests; inspect underlying traces through retrieval/answering notebooks. |
 | 12 | `notebooks/evaluation_eda.ipynb` | Planned | `data/runs/eval/` reports, retrieval/citation scores, failures, runtime summaries. |

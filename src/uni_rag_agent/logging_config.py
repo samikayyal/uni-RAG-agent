@@ -20,8 +20,11 @@ SAFE_EXTRA_FIELDS = {
     "courses",
     "duration_ms",
     "embedding_model",
+    "evidence_count",
+    "evidence_packet_id",
     "event",
     "final_count",
+    "fused_candidate_count",
     "indexes",
     "keyword_terms",
     "model",
@@ -30,6 +33,7 @@ SAFE_EXTRA_FIELDS = {
     "query_type",
     "result_count",
     "result_set_id",
+    "search_run_id",
     "llm_provider",
     "llm_model",
     "plan_confidence",
@@ -40,6 +44,7 @@ SAFE_EXTRA_FIELDS = {
     "status",
     "top_k",
     "weakness_count",
+    "omitted_count",
 }
 
 

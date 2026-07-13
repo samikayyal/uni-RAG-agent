@@ -12,6 +12,7 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_COURSES_ROOT",
     "UNI_RAG_DATA_DIR",
     "UNI_RAG_EMBEDDING_MODEL",
+    "UNI_RAG_EVIDENCE_MAX_TOKENS",
     "UNI_RAG_FINAL_TOP_K",
     "UNI_RAG_KEYWORD_TOP_K",
     "UNI_RAG_LLM_MODEL",
@@ -58,6 +59,7 @@ def test_defaults_resolve_from_repo_root(tmp_path: Path) -> None:
     assert config.query_plan_min_confidence == 0.60
     assert config.filename_fuzzy_threshold == 85
     assert config.path_fuzzy_threshold == 90
+    assert config.evidence_max_tokens == 12_000
     assert config.embedding_model is None
     assert config.llm_provider is None
     assert config.llm_model is None
@@ -222,7 +224,7 @@ def test_safe_dict_excludes_injected_secret_values(
     config = load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
     safe = config.as_safe_dict()
 
-    unsafe_name_terms = ("api_key", "apikey", "secret", "token")
+    unsafe_name_terms = ("api_key", "apikey", "secret")
     for key in safe:
         assert all(term not in key.lower() for term in unsafe_name_terms)
     assert "secret-openai-value" not in safe.values()

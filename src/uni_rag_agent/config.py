@@ -41,6 +41,7 @@ class Config:
     query_plan_min_confidence: float = 0.60
     filename_fuzzy_threshold: int = 85
     path_fuzzy_threshold: int = 90
+    evidence_max_tokens: int = 12_000
 
     def as_safe_dict(self) -> dict[str, str | int | float | bool | None]:
         return {
@@ -64,6 +65,7 @@ class Config:
             "query_plan_min_confidence": self.query_plan_min_confidence,
             "filename_fuzzy_threshold": self.filename_fuzzy_threshold,
             "path_fuzzy_threshold": self.path_fuzzy_threshold,
+            "evidence_max_tokens": self.evidence_max_tokens,
         }
 
     @property
@@ -133,6 +135,9 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
         path_fuzzy_threshold=_bounded_int_from_env(
             env, "UNI_RAG_PATH_FUZZY_THRESHOLD", 90
         ),
+        evidence_max_tokens=_evidence_max_tokens_from_env(
+            env, "UNI_RAG_EVIDENCE_MAX_TOKENS", 12_000
+        ),
     )
 
 
@@ -168,6 +173,8 @@ def validate_config(config: Config) -> None:
     }.items():
         if not 0 <= value <= 100:
             raise ConfigError(f"{name} must be between 0 and 100")
+    if config.evidence_max_tokens <= 0:
+        raise ConfigError("UNI_RAG_EVIDENCE_MAX_TOKENS must be greater than zero")
 
     provider = config.llm_provider
     model = config.llm_model
@@ -245,6 +252,23 @@ def _bounded_int_from_env(env: Mapping[str, str], name: str, default: int) -> in
     value = _int_from_env_allow_zero(env, name, default)
     if not 0 <= value <= 100:
         raise ConfigError(f"{name} must be between 0 and 100")
+    return value
+
+
+def _evidence_max_tokens_from_env(
+    env: Mapping[str, str], name: str, default: int
+) -> int:
+    raw_value = env.get(name)
+    if raw_value is None:
+        return default
+    if not raw_value.strip():
+        raise ConfigError(f"{name} must be an integer greater than zero")
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be an integer greater than zero") from exc
+    if value <= 0:
+        raise ConfigError(f"{name} must be greater than zero")
     return value
 
 

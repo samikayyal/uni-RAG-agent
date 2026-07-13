@@ -17,6 +17,15 @@ from .models import (
     RetrievalRun,
     QueryPlan,
 )
+from .evidence_models import (
+    EvidenceBuildResult,
+    EvidenceItem,
+    EvidenceLocation,
+    EvidencePacket,
+    EvidenceModelError,
+    RetrievalSettings,
+    SearchCoverage,
+)
 
 _LAZY_EXPORTS = {
     "MetadataSearchError": "metadata",
@@ -26,6 +35,10 @@ _LAZY_EXPORTS = {
     "metadata_search": "metadata",
     "retrieve": "core",
     "plan_query": "planner",
+    "EvidenceError": "evidence",
+    "build_evidence": "evidence",
+    "load_evidence_packet": "evidence",
+    "explain_search_coverage": "evidence",
 }
 
 __all__ = [
@@ -38,6 +51,17 @@ __all__ = [
     "RetrievalRun",
     "QueryPlan",
     "QueryPlanningError",
+    "EvidenceBuildResult",
+    "EvidenceError",
+    "EvidenceItem",
+    "EvidenceLocation",
+    "EvidenceModelError",
+    "EvidencePacket",
+    "RetrievalSettings",
+    "SearchCoverage",
+    "build_evidence",
+    "load_evidence_packet",
+    "explain_search_coverage",
     "merge_with_rrf",
     "metadata_search",
     "retrieve",

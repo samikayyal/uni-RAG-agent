@@ -4,12 +4,16 @@ import json
 import sqlite3
 import subprocess
 import sys
+from types import SimpleNamespace
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 import uni_rag_agent
+import uni_rag_agent.cli as cli
 from tests.support import clean_subprocess_env
+from tests.support import make_config
+from uni_rag_agent.retrieval import EvidenceError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,6 +42,147 @@ def test_help_exits_successfully() -> None:
     assert result.returncode == 0
     assert "uv run -m uni_rag_agent config check" in result.stdout
     assert "uv run -m uni_rag_agent inventory run" in result.stdout
+    assert "evidence" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    (
+        (("evidence", "build", "--help"), "--json"),
+        (("evidence", "show", "--help"), "--search-run-id"),
+    ),
+)
+def test_evidence_cli_help_exposes_contract_flags(
+    args: tuple[str, ...],
+    expected: str,
+) -> None:
+    result = run_cli(*args)
+
+    assert result.returncode == 0
+    assert expected in result.stdout
+
+
+def test_evidence_build_handler_emits_one_safe_json_object(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = make_config(
+        tmp_path,
+        embedding_model="BAAI/bge-m3",
+        llm_provider="ollama",
+        llm_model="test-planner",
+    )
+
+    class CaptureLogger:
+        def __init__(self) -> None:
+            self.events: list[dict[str, object]] = []
+
+        def info(self, message: str, *, extra: dict[str, object]) -> None:
+            del message
+            self.events.append(extra)
+
+        def exception(self, message: str, *, extra: dict[str, object]) -> None:
+            del message
+            self.events.append(extra)
+
+    logger = CaptureLogger()
+    result = SimpleNamespace(
+        search_run_id=11,
+        evidence_packet_id=22,
+        coverage=SimpleNamespace(
+            status="completed",
+            evidence_count=0,
+            fused_candidate_count=0,
+            token_budget_omission_count=0,
+            oversized_evidence_omission_count=0,
+        ),
+        retrieval_run=SimpleNamespace(result_sets=()),
+        as_safe_dict=lambda: {"search_run_id": 11, "evidence_packet_id": 22},
+    )
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "_command_logger", lambda *args, **kwargs: logger)
+    monkeypatch.setattr(cli, "build_evidence", lambda *args, **kwargs: result)
+
+    return_code = cli.main(
+        ["evidence", "build", "safe query", "--model", "BAAI/bge-m3", "--json"]
+    )
+
+    captured = capsys.readouterr()
+    assert return_code == 0
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "search_run_id": 11,
+        "evidence_packet_id": 22,
+    }
+    assert logger.events[-1]["event"] == "evidence_build_completed"
+
+
+def test_evidence_show_failure_uses_packet_load_error_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = make_config(
+        tmp_path,
+        embedding_model="BAAI/bge-m3",
+        llm_provider="ollama",
+        llm_model="test-planner",
+    )
+
+    class CaptureLogger:
+        def __init__(self) -> None:
+            self.events: list[dict[str, object]] = []
+
+        def info(self, message: str, *, extra: dict[str, object]) -> None:
+            del message
+            self.events.append(extra)
+
+        def exception(self, message: str, *, extra: dict[str, object]) -> None:
+            del message
+            self.events.append(extra)
+
+    logger = CaptureLogger()
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "_command_logger", lambda *args, **kwargs: logger)
+    monkeypatch.setattr(
+        cli,
+        "load_evidence_packet",
+        lambda *args, **kwargs: (_ for _ in ()).throw(EvidenceError("missing packet")),
+    )
+
+    return_code = cli.main(["evidence", "show", "--search-run-id", "11"])
+
+    captured = capsys.readouterr()
+    assert return_code == cli.EVIDENCE_ERROR
+    assert "Evidence error: missing packet" in captured.err
+    assert logger.events[-1]["event"] == "evidence_packet_load_failed"
+
+
+def test_retrieval_eda_notebook_contract_is_read_only_and_output_free() -> None:
+    notebook = json.loads(
+        (REPO_ROOT / "notebooks" / "retrieval_eda.ipynb").read_text(encoding="utf-8")
+    )
+    code_cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
+    source = "".join("".join(cell.get("source", [])) for cell in notebook["cells"])
+
+    assert notebook["nbformat"] == 4
+    assert all(
+        cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells
+    )
+    assert "mode=ro" in source
+    assert "PRAGMA query_only = ON" in source
+    assert "search_result_sets" in source
+    assert not any(
+        keyword in source.upper()
+        for keyword in (
+            "INSERT INTO",
+            "UPDATE ",
+            "DELETE FROM",
+            "CREATE TABLE",
+            "DROP TABLE",
+        )
+    )
 
 
 def test_unknown_command_returns_nonzero_with_message() -> None:

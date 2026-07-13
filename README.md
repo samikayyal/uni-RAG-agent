@@ -34,6 +34,8 @@ uv run -m uni_rag_agent search keyword "mapreduce" --json
 uv run -m uni_rag_agent retrieve "Explain MapReduce from Information Retrieval" --model BAAI/bge-m3
 uv run -m uni_rag_agent retrieve "Find the Information Retrieval syllabus" --model BAAI/bge-m3 --debug
 uv run -m uni_rag_agent retrieve "query text" --model BAAI/bge-m3 --json
+uv run -m uni_rag_agent evidence build "Explain MapReduce" --model BAAI/bge-m3
+uv run -m uni_rag_agent evidence show --search-run-id 1
 ```
 
 Runtime configuration is loaded from `.env` with non-secret defaults documented
@@ -177,10 +179,11 @@ license, gating, token, or authentication requirements before running it.
 `index vector` writes lifecycle JSONL logs under `data/runs/`. Direct semantic
 search does not write `search_runs` or `search_results`.
 
-Feature 08 retrieval is read-only: a configured LLM first produces a validated
-query plan, then it runs metadata/keyword/
-semantic search, and merges ranked results with RRF. It does not write
-`search_runs`, `search_results`, evidence packets, or files under `Courses`.
+The `retrieve` command is read-only: a configured LLM first produces a
+validated query plan, then it runs metadata/keyword/semantic search and merges
+ranked results with RRF. It does not write `search_runs`, `search_results`,
+evidence packets, or files under `Courses`; use Feature 09's `evidence build`
+workflow when a persisted search and packet are required.
 Retrieval requires an explicit reviewed embedding model and the optional `llm`
 extra with a configured LLM provider/model. Other commands do not require it:
 
@@ -200,6 +203,22 @@ uv run -m uni_rag_agent app serve
 
 `eval` and `app` are stubs until their feature specs are implemented. They
 should fail clearly and must not scan or mutate `Courses/`.
+
+Feature 09 adds the persisted evidence workflow. `retrieve` remains read-only;
+`evidence build` invokes the same mandatory planner/retriever, records raw and
+complete fused results, and stores one canonical evidence packet. Packet
+selection keeps whole authoritative chunks, defaults to a 12,000-token
+whitespace-estimated budget, skips individually oversized chunks, and reports
+coverage/weaknesses. Configure the budget with
+`UNI_RAG_EVIDENCE_MAX_TOKENS` or inspect it through `config check`.
+
+Representative commands:
+
+```powershell
+uv run -m uni_rag_agent evidence build "Explain MapReduce" --model BAAI/bge-m3 --json
+uv run -m uni_rag_agent evidence build "Explain MapReduce" --model BAAI/bge-m3 --debug
+uv run -m uni_rag_agent evidence show --search-run-id 1 --json
+```
 
 ## MVP Module Order
 

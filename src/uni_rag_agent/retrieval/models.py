@@ -25,7 +25,7 @@ class RetrievalResult:
     rank: int
     score: float
     snippet: str
-    retrieval_method: str = "keyword"
+    retrieval_method: str = "keyword"  # "semantic" or "metadata"
     vector_collection: str | None = None
     vector_id: str | None = None
     file_category: str | None = None

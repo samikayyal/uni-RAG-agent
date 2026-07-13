@@ -18,6 +18,7 @@ REQUIRED_TABLES = (
     "embeddings",
     "data_summaries",
     "search_runs",
+    "search_result_sets",
     "search_results",
     "evidence_packets",
     "answers",
@@ -101,10 +102,20 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     if not fts5_available:
         raise StorageError(f"SQLite FTS5 is not available: {diagnostic}")
 
-    connection.executescript(MVP_SCHEMA_SQL)
-    _ensure_search_results_chunk_delete_policy(connection)
-    _ensure_embeddings_lifecycle_schema(connection)
-    connection.commit()
+    try:
+        connection.executescript(MVP_SCHEMA_SQL)
+        _migrate_search_runs_schema(connection)
+        _ensure_search_results_chunk_delete_policy(connection)
+        _ensure_embeddings_lifecycle_schema(connection)
+        _ensure_search_result_indexes(connection)
+        _ensure_evidence_packet_uniqueness(connection)
+        connection.commit()
+    except StorageError:
+        connection.rollback()
+        raise
+    except sqlite3.Error as exc:
+        connection.rollback()
+        raise StorageError(f"SQLite schema initialization failed: {exc}") from exc
 
 
 def check_storage(config: Config) -> StorageCheckResult:
@@ -256,6 +267,80 @@ def _ensure_search_results_chunk_delete_policy(connection: sqlite3.Connection) -
         """
         CREATE INDEX IF NOT EXISTS idx_search_results_selected
         ON search_results(selected_for_evidence)
+        """
+    )
+
+
+def _migrate_search_runs_schema(connection: sqlite3.Connection) -> None:
+    """Migrate the pre-Feature-09 search-run columns without losing rows."""
+    columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(search_runs)").fetchall()
+    }
+    if "query_plan_json" not in columns:
+        if "router_output_json" not in columns:
+            raise StorageError(
+                "Incompatible SQLite schema: search_runs has neither "
+                "query_plan_json nor legacy router_output_json; manual review "
+                "is required."
+            )
+        connection.execute(
+            "ALTER TABLE search_runs RENAME COLUMN router_output_json TO query_plan_json"
+        )
+        columns.remove("router_output_json")
+        columns.add("query_plan_json")
+
+    if "retrieval_settings_json" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE search_runs
+            ADD COLUMN retrieval_settings_json TEXT NOT NULL DEFAULT '{}'
+            """
+        )
+
+
+def _ensure_search_result_indexes(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_search_results_run_id
+        ON search_results(search_run_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_search_results_selected
+        ON search_results(selected_for_evidence)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_search_results_run_method_rank
+        ON search_results(search_run_id, retrieval_method, rank)
+        """
+    )
+
+
+def _ensure_evidence_packet_uniqueness(connection: sqlite3.Connection) -> None:
+    duplicate = connection.execute(
+        """
+        SELECT search_run_id, COUNT(*) AS packet_count
+        FROM evidence_packets
+        GROUP BY search_run_id
+        HAVING COUNT(*) > 1
+        ORDER BY search_run_id
+        LIMIT 1
+        """
+    ).fetchone()
+    if duplicate is not None:
+        raise StorageError(
+            "Cannot create unique index on evidence_packets.search_run_id: "
+            f"duplicate packets exist for search_run_id={duplicate['search_run_id']} "
+            "in table evidence_packets; manual review is required."
+        )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_packets_search_run
+        ON evidence_packets(search_run_id)
         """
     )
 
@@ -470,6 +555,7 @@ CREATE TABLE IF NOT EXISTS search_runs (
     query TEXT NOT NULL,
     query_type TEXT,
     query_plan_json TEXT NOT NULL,
+    retrieval_settings_json TEXT NOT NULL DEFAULT '{}',
     searched_courses_json TEXT NOT NULL,
     searched_indexes_json TEXT NOT NULL,
     keyword_terms_json TEXT NOT NULL,
@@ -480,6 +566,20 @@ CREATE TABLE IF NOT EXISTS search_runs (
     weaknesses_json TEXT,
     error TEXT
 );
+
+CREATE TABLE IF NOT EXISTS search_result_sets (
+    id INTEGER PRIMARY KEY,
+    search_run_id INTEGER NOT NULL REFERENCES search_runs(id),
+    result_set_id TEXT NOT NULL,
+    retrieval_method TEXT NOT NULL,
+    query TEXT NOT NULL,
+    result_count INTEGER NOT NULL,
+    completed_at TEXT NOT NULL,
+    UNIQUE(search_run_id, result_set_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_result_sets_run_id
+ON search_result_sets(search_run_id);
 
 CREATE TABLE IF NOT EXISTS search_results (
     id INTEGER PRIMARY KEY,
@@ -497,6 +597,8 @@ CREATE INDEX IF NOT EXISTS idx_search_results_run_id
 ON search_results(search_run_id);
 CREATE INDEX IF NOT EXISTS idx_search_results_selected
 ON search_results(selected_for_evidence);
+CREATE INDEX IF NOT EXISTS idx_search_results_run_method_rank
+ON search_results(search_run_id, retrieval_method, rank);
 
 CREATE TABLE IF NOT EXISTS evidence_packets (
     id INTEGER PRIMARY KEY,

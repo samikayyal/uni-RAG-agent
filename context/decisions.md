@@ -37,6 +37,7 @@ This document records the key decisions made during the design and development o
 | **DEC-029** | Exclude non-current source files from retrieval indexes | `Accepted` | 2026-06-30 |
 | **DEC-030** | Fake-default embeddings with optional real models and model-namespaced vector collections | `Superseded by DEC-031` | 2026-07-01 |
 | **DEC-031** | Real-only production models with injected test doubles | `Accepted` | 2026-07-11 |
+| **DEC-034** | Persisted evidence builds with authoritative immutable packets | `Accepted` | 2026-07-13 |
 
 ---
 
@@ -820,4 +821,53 @@ LLM plan instead of two independently evolving mechanisms. Automated tests
 inject chat-model doubles at the planner boundary; no runtime fake provider or
 prebuilt-plan bypass exists. Non-retrieval commands remain usable without the
 LLM dependency.
+
+---
+
+## DEC-034: Persisted evidence builds with authoritative immutable packets
+
+* **Status**: Accepted
+* **Date**: 2026-07-13
+
+### Context
+
+Feature 08 deliberately provides a read-only planner and hybrid retriever, but
+Feature 10 needs a stable, auditable handoff containing the exact search
+coverage and source text used for answering. Reconstructing that handoff later
+from mutable chunks, bounded public top-K results, or snippets would lose RRF
+provenance and could promote stale corpus data.
+
+### Decision
+
+- Keep `retrieve` read-only. Add `evidence build` as the only persisted
+  retrieval workflow and require it to invoke the configured planner exactly
+  once with no public prebuilt-plan bypass.
+- Persist one validated plan/settings snapshot per run, every complete bounded
+  raw result set plus a completion envelope (including successful empty sets),
+  the complete deterministic fused RRF ordering, and exactly
+  one immutable packet per successful or valid unsupported run.
+- Select evidence only from authoritative current indexed chunks whose file,
+  course, path, source type, location, and nonblank text still match the fused
+  candidate. File-only metadata results remain coverage/audit rows and never
+  become synthetic evidence.
+- Enforce `final_top_k` and a positive 12,000-token default whole-chunk budget
+  without truncating stored text. Invalid stored token counts use the shared
+  whitespace estimator; oversized or budget-excluded candidates are reported.
+- Planning failures create no run. Backend failures after planning retain
+  committed partial raw results as failed audit rows. Packet assembly or corpus
+  drift failures create no packet and select no rows.
+- Coverage weaknesses are deterministic, exact-deduplicated, and embedded in
+  the canonical packet. Conversation contents, credentials, source files,
+  Chroma collections, and extracted caches are never persisted or read during
+  packet assembly.
+- Legacy `router_output_json` is migrated nondestructively to
+  `query_plan_json`; packet-per-run uniqueness is enforced after duplicate
+  detection.
+
+### Consequences
+
+Feature 09 adds a focused persistence/evidence service and a read-only retrieval
+EDA notebook without adding dependencies. Search history is inspectable even
+when a later backend fails, while Feature 10 can consume one exact packet
+without re-running retrieval or trusting mutable source state.
 

@@ -1,140 +1,277 @@
-# Feature Spec 09: Evidence Packets and Coverage
+# Feature Spec 09: Evidence Packets, Search Persistence, and Coverage
 
 ## Purpose
 
-Create the auditable boundary between retrieval and answering: a structured evidence packet that records query interpretation, searched courses/indexes, evidence, scores, citations, and weaknesses.
+Create the auditable persistence boundary between the mandatory Feature 08
+planner/retriever and Feature 10 answering. `retrieve` remains a read-only
+diagnostic command; `evidence build` records a validated plan, bounded backend
+result sets, the complete RRF ordering, authoritative selected chunks, and the
+exact immutable packet passed to the answer generator.
 
 ## Depends On
 
 - [08-query-routing-and-hybrid-retrieval.md](08-query-routing-and-hybrid-retrieval.md)
-- `context/architecture.md` tables: `search_runs`, `search_results`, `evidence_packets`
-- DEC-004, DEC-005, DEC-020, DEC-022
+- `context/architecture.md` tables: `search_runs`, `search_result_sets`, `search_results`, `evidence_packets`
+- DEC-004, DEC-005, DEC-014, DEC-020, DEC-028, DEC-029, DEC-031, DEC-033, DEC-034
 
 ## In Scope
 
-- Persist search runs and result rows.
-- Select final evidence from retrieval results.
-- Build JSON-serializable evidence packets.
-- Generate searched/found/missing coverage details.
-- Generate weaknesses for skipped source types, empty indexes, unsupported formats, and low confidence.
-- Store evidence packets exactly as passed to the answer generator.
-- Add or update the retrieval/evidence EDA notebook for persisted search and evidence traces.
+- Persist successful, unsupported, and post-planning failed search lifecycles.
+- Store effective non-secret retrieval settings and bounded raw result sets.
+- Store the complete deterministic fused RRF candidate ordering.
+- Select only authoritative current chunk-backed evidence up to `final_top_k`.
+- Enforce the configurable whole-chunk evidence token budget, defaulting to
+  `12,000` whitespace-estimated tokens.
+- Build canonical, JSON-safe, reloadable evidence packets with structured
+  coverage and deterministic weaknesses.
+- Add `evidence build` and `evidence show` CLI commands.
+- Add the read-only `notebooks/retrieval_eda.ipynb` notebook.
 
 ## Out of Scope
 
-- Writing final natural-language answers.
-- Building the UI display.
-- Reranking.
-- Executing file/code inspection beyond reading already extracted chunks.
+- Natural-language answer generation and citation rendering.
+- Reranking beyond Feature 08 RRF.
+- Source-file inspection, notebook execution, Python execution, Chroma
+  mutation, or any mutation under `Courses` during packet assembly.
+
+## Configuration
+
+Add `evidence_max_tokens: int` to `Config` and `Config.as_safe_dict()` with:
+
+```text
+UNI_RAG_EVIDENCE_MAX_TOKENS=12000
+```
+
+The value must be a positive integer. Blank, non-integer, zero, and negative
+values fail configuration validation. Evidence selection uses a persisted
+positive `chunks.token_count` when available and otherwise estimates
+`len(chunks.text.split())`; it never truncates a selected chunk.
 
 ## Public Interfaces
 
-Command:
+```python
+class EvidenceError(RuntimeError): ...
 
-```powershell
-uv run -m uni_rag_agent evidence build "Explain MapReduce from my courses"
-uv run -m uni_rag_agent evidence show --search-run-id 1
+def build_evidence(
+    config: Config,
+    query: str,
+    conversation_context: Sequence[dict[str, str]] | None = None,
+    model: str | None = None,
+    *,
+    chat_model: object | None = None,
+) -> EvidenceBuildResult: ...
+
+def load_evidence_packet(
+    config: Config,
+    evidence_packet_id: int | None = None,
+    *,
+    search_run_id: int | None = None,
+) -> EvidencePacket: ...
+
+def explain_search_coverage(config: Config, search_run_id: int) -> SearchCoverage: ...
 ```
 
-Notebook:
+`load_evidence_packet` requires exactly one positive identifier. A missing
+packet reports whether the run is missing, still running, failed, or completed
+without a packet. Packet lookup by `search_run_id` is unambiguous because the
+schema enforces one packet per run.
+
+Low-level persistence helpers and caller-supplied `QueryPlan` bypasses are
+private. Every real build invokes Feature 08 planning exactly once.
+
+## Persisted Models
+
+Evidence-specific immutable models live in a focused retrieval module and
+expose recursive `as_safe_dict()` methods. Tuple fields become JSON arrays and
+no dataclass, path, secret, or conversation object leaks into persisted JSON.
+
+`RetrievalSettings` contains effective provider/model names, all retrieval
+limits, RRF settings, the evidence budget, and the bounded context-message
+count. It contains no API keys or conversation contents.
+
+`EvidenceLocation` contains `type`, `value`, and a deterministic `label`:
+`page 12`, `slide 8`, `notebook cell 23`, `function train_model`, or
+`location unavailable` when both location fields are null.
+
+`EvidenceItem` contains course, authoritative file/chunk IDs and path, logical
+source type, location, complete authoritative chunk text, token count, fused
+rank/score, `retrieval_method="hybrid"`, and every RRF contribution.
+
+`SearchCoverage` contains:
 
 ```text
-notebooks/retrieval_eda.ipynb
+search_run_id, status
+searched_courses, searched_indexes, keyword_terms, semantic_queries
+raw_result_count, raw_result_counts_by_method
+fused_candidate_count, selectable_candidate_count, evidence_count
+evidence_token_count
+courses_with_chunk_hits, indexes_with_chunk_hits, source_types_with_chunk_hits
+courses_without_chunk_hits, indexes_without_chunk_hits
+semantic_queries_without_hits, missing_capabilities
+file_only_candidate_count, token_budget_omission_count
+oversized_evidence_omission_count, unselected_selectable_candidate_count
+weaknesses
 ```
 
-This notebook is shared with spec 08. Once evidence packets are implemented, it should also inspect `evidence_packets`, selected evidence, packet weaknesses, searched/found/missing coverage, and result-selection behavior.
+Chunk hits are raw keyword/semantic hits, or metadata contributions attached to
+such a chunk candidate, that still identify an authoritative chunk. File-only
+metadata hits are never chunk hits and never synthetic evidence. Planned lists
+preserve validated plan order; derived source types use logical-index order.
 
-Internal interfaces:
+`EvidencePacket` contains exactly the query, interpreted intent, complete typed
+query plan, settings snapshot, `searched` arrays, coverage, selected evidence,
+top-level weaknesses, and these answer constraints in this order:
+
+```text
+Answer only from evidence.
+Cite course and file.
+If evidence is insufficient, say so.
+```
+
+Top-level packet weaknesses equal `coverage.weaknesses` exactly.
+
+## Storage and Migration Impact
+
+`search_runs` adds `retrieval_settings_json TEXT NOT NULL DEFAULT '{}'`.
+Initialization must migrate a legacy `router_output_json` column to
+`query_plan_json` without changing IDs or JSON, add the settings column when
+missing, and fail clearly if neither plan column exists. It must be idempotent,
+parameterized, and nondestructive.
+
+`search_result_sets` stores one completion envelope for each successful raw
+metadata, keyword, or semantic backend call:
+
+```text
+search_run_id, result_set_id, retrieval_method, query, result_count, completed_at
+```
+
+The envelope is committed atomically with that result set's raw rows, including
+when `result_count=0`. It is the authoritative record for partial-run coverage:
+an absent envelope means that backend call was not completed, while a zero count
+means it completed successfully with no hits.
+
+Add these indexes:
+
+```sql
+CREATE INDEX idx_search_results_run_method_rank
+ON search_results(search_run_id, retrieval_method, rank);
+
+CREATE UNIQUE INDEX idx_evidence_packets_search_run
+ON evidence_packets(search_run_id);
+```
+
+Before creating the unique packet index, detect duplicate
+`evidence_packets.search_run_id` values and raise `StorageError` without
+deleting or merging rows. Preserve `search_results.chunk_id ON DELETE SET NULL`.
+
+Use one canonical serializer everywhere:
 
 ```python
-record_search_run(query: str, query_plan: QueryPlan) -> int
-record_search_results(search_run_id: int, results: list[RetrievalResult]) -> None
-build_evidence_packet(search_run_id: int, results: list[RetrievalResult]) -> EvidencePacket
-load_evidence_packet(evidence_packet_id: int) -> EvidencePacket
-explain_search_coverage(search_run_id: int) -> SearchCoverage
+json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 ```
 
-Evidence packet fields:
+Construct a packet once, serialize it once, store those exact bytes, and load
+with strict required/extra/type validation. Do not reconstruct a stored packet
+from current search tables.
 
-```text
-query
-interpreted_intent
-searched.courses
-searched.indexes
-searched.keyword_terms
-searched.semantic_queries
-evidence[]
-weaknesses[]
-answer_constraints[]
+## Retrieval and Run Lifecycle
+
+Refactor retrieval behind a private recorder-enabled execution seam while
+preserving `retrieve(...) -> RetrievalRun` and its no-write behavior. The seam
+must return the public final-top-K view plus the complete fused ordering.
+
+After a plan validates, `evidence build` inserts and commits one `running`
+`search_runs` row containing the plan, settings snapshot, searched scopes, and
+context count. Planning failures create no run.
+
+For each successful backend call, commit one complete raw result set. Raw rows
+use `metadata`, `keyword`, or `semantic`, retain native rank/score, and store a
+canonical result-set/query envelope. Duplicate chunks across result sets remain
+separate rows. After all backends succeed, persist the full fused ordering as
+`hybrid` rows with complete contribution provenance. Raw and fused rows start
+with `selected_for_evidence=0`.
+
+Valid `unknown_or_unsupported` plans create no backend rows, a zero-evidence
+packet, and finish with status `unsupported`. Supported zero-hit runs finish
+with status `completed` and a zero-evidence packet.
+
+Backend failures after planning finish the run as `failed`, retain all complete
+result sets committed before the failure, store only a bounded sanitized domain
+error, create no fused rows unless fusion already completed, and create no
+packet. Packet-assembly or authoritative-drift failures roll back selection and
+packet insertion, then mark the run failed in a separate transaction while
+retaining raw/fused audit rows.
+
+## Evidence Selection and Authoritative Safety
+
+Selection walks the complete fused order. File-only candidates count toward
+coverage but never consume the evidence count. For each chunk candidate, a
+write transaction hydrates the exact `chunks.id` + `chunks.file_id` join and
+requires the current authoritative file to be indexed, present in the latest
+inventory, non-metadata-only, and paired with nonblank supported-source text.
+Candidate course/path/source/location identity must still match. Any required
+drift fails the entire build; snippets are never promoted to evidence.
+
+Positive authoritative token counts are used as-is; invalid counts use the
+whitespace estimator. Oversized whole chunks are skipped and counted. A chunk
+that would overflow the remaining budget is omitted, but lower-ranked smaller
+chunks may still backfill. Evidence never exceeds `final_top_k` or the token
+budget.
+
+## Coverage and Weaknesses
+
+Weaknesses are deterministic, exact-deduplicated, and ordered as follows:
+
+1. Existing Feature 08 retrieval weaknesses.
+2. The planner reason for `unknown_or_unsupported`.
+3. Missing `file_inspection` and/or `python_execution` capabilities.
+4. Planned courses without chunk hits.
+5. Planned indexes without chunk hits.
+6. Empty semantic result sets using their exact planned query strings.
+7. Query-relevant matched ineligible-file limitations grouped by category/reason.
+8. Token-budget and oversized-item omission summaries.
+9. A final insufficient-evidence warning when no evidence is selected.
+
+Source-type limitations are query-relevant only; unrelated packets do not get
+global archive boilerplate. `explain_search_coverage` reports partial counts
+for failed runs without pretending a packet exists.
+
+## CLI and Notebook
+
+Add:
+
+```powershell
+uv run -m uni_rag_agent evidence build "Explain MapReduce" --model BAAI/bge-m3
+uv run -m uni_rag_agent evidence build "Explain MapReduce" --model BAAI/bge-m3 --debug
+uv run -m uni_rag_agent evidence build "Explain MapReduce" --model BAAI/bge-m3 --json
+uv run -m uni_rag_agent evidence show --search-run-id 1
+uv run -m uni_rag_agent evidence show --search-run-id 1 --json
 ```
 
-Evidence item fields:
+`--json` build prints exactly one complete build-result object. Text/debug
+output includes both IDs, scopes, raw/fused/selectable/evidence counts, token
+total, selected rows, and weaknesses. Use `EVIDENCE_ERROR = 8` for packet
+assembly/loading/validation errors; retain `SEARCH_ERROR = 7` for planner and
+retrieval failures and `STORAGE_ERROR = 3` for schema/readiness failures.
 
-```text
-course
-file_id
-chunk_id
-file
-source_type
-location
-text
-score
-retrieval_method
-```
+Create `notebooks/retrieval_eda.ipynb` with pandas and matplotlib only. It must
+resolve the repository root from either the repo root or `notebooks/`, open
+SQLite with `mode=ro` and `PRAGMA query_only = ON`, document the read-only
+boundary, guard empty/malformed historical JSON, and inspect runs, planning
+confidence, settings, raw/fused results, contributions, selected evidence,
+coverage, weaknesses, token budgets, unsupported/zero-evidence runs, and
+partial failed runs. Clear outputs and execution counts.
 
-`source_type` in each evidence item must be the logical chunk category (`document`, `slides`, `notebook`, `code`, `data_schema`, or `transcript`). If the UI or answer needs the original file format, derive it from the evidence file path or joined `files.extension` metadata.
+## Tests and Acceptance Criteria
 
-## Storage and Schema Impact
+Add focused tests for configuration, schema migrations/uniqueness, strict model
+serialization, success/unsupported/zero-hit/partial-failure lifecycles,
+authoritative drift, token selection, coverage/weakness ordering, CLI output and
+exit codes, read-only `retrieve`, and notebook safety. Run the focused suite and
+the full suite with `uv`, then verify help output, schema state, and `git diff
+--check`.
 
-Populate:
-
-- `search_runs`
-- `search_results`
-- `evidence_packets`
-
-Update:
-
-- `search_results.selected_for_evidence`
-
-Evidence packet JSON must be stored exactly as given to the answer generator. Do not store only a summary.
-
-## Workflow
-
-1. Start a `search_runs` row before retrieval or immediately after the query plan is available.
-2. Persist raw retrieval results with method, rank, score, and result JSON.
-3. Deduplicate and select final evidence up to `final_top_k`.
-4. Load full chunk text and source metadata from SQLite.
-5. Build citation-ready evidence items.
-6. Generate weaknesses from query-plan/retrieval/index metadata.
-7. Store the packet JSON and evidence count.
-8. Return the packet to the answer generator.
-9. Keep `notebooks/retrieval_eda.ipynb` aligned with `search_runs`, `search_results`, `evidence_packets`, packet JSON shape, weakness semantics, and selected-evidence rules.
-
-## Failure and Safety Rules
-
-- If retrieval returns no evidence, still create a packet with searched fields and weaknesses.
-- Do not include evidence text that is not present in stored chunks or safe summaries.
-- Do not cite files absent from the packet.
-- If total evidence text is too large, select highest-scoring evidence and record that lower-scoring evidence was omitted.
-- Do not read or mutate source files under `Courses` during packet assembly.
-- The EDA notebook must read generated app data only and must not mutate SQLite, evidence packet JSON, or `Courses`.
-- Notebook outputs and execution counts should be cleared before commit.
-
-## Tests
-
-- Automated fixture tests build packets from synthetic fixture retrieval results.
-- Verify empty retrieval produces a valid insufficient-evidence packet.
-- Verify selected results are marked in `search_results`.
-- Verify evidence items include course, file, source type, location, text, score, and retrieval method.
-- Verify weaknesses include metadata-only images/media when relevant.
-- Verify packet JSON round-trips exactly.
-- Verify `notebooks/retrieval_eda.ipynb`, once evidence persistence lands, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
-- Optional smoke: build an evidence packet from a tiny fixture retrieval run.
-
-## Acceptance Criteria
-
-- Evidence packets are self-contained enough for answering.
-- Search coverage can explain courses, indexes, keywords, semantic queries, found evidence, and missing coverage.
-- Packets are persisted exactly and can be reloaded by ID.
-- Answer generation never needs to inspect retrieval internals directly.
-- `notebooks/retrieval_eda.ipynb` can inspect persisted evidence and coverage traces without mutating generated or source data.
+Acceptance requires that every successful or unsupported build has exactly one
+immutable packet; raw and complete fused rows are auditable; only selected
+authoritative current chunks become evidence; conversation contents and source
+files never enter persistence; and `retrieve` remains fully read-only.

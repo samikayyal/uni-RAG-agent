@@ -47,6 +47,7 @@ semantic_query_limit
 query_plan_min_confidence
 filename_fuzzy_threshold
 path_fuzzy_threshold
+evidence_max_tokens
 llm_provider: str | None
 llm_model: str | None
 embedding_model: str | None
@@ -71,6 +72,7 @@ UNI_RAG_SEMANTIC_QUERY_LIMIT
 UNI_RAG_QUERY_PLAN_MIN_CONFIDENCE
 UNI_RAG_FILENAME_FUZZY_THRESHOLD
 UNI_RAG_PATH_FUZZY_THRESHOLD
+UNI_RAG_EVIDENCE_MAX_TOKENS
 UNI_RAG_LLM_PROVIDER
 UNI_RAG_LLM_MODEL
 UNI_RAG_EMBEDDING_MODEL
@@ -119,11 +121,21 @@ Initialize the schema tables from `context/architecture.md`:
 - `embeddings`
 - `data_summaries`
 - `search_runs`
+- `search_result_sets`
 - `search_results`
 - `evidence_packets`
 - `answers`
 
 The implementation may add a lightweight schema version table if needed, but it must not remove or rename the contracted tables without updating `context/architecture.md`.
+
+Feature 09 initialization also performs targeted, data-preserving migrations:
+legacy `search_runs.router_output_json` becomes `query_plan_json`,
+`retrieval_settings_json` is added with a safe empty-object default when absent,
+the composite result lookup index is created, and a unique packet-per-run index
+is created only after duplicate packet rows have been rejected explicitly.
+Each completed raw backend call also receives a `search_result_sets` completion
+envelope, including successful zero-row calls; the envelope is committed in the
+same transaction as its non-empty `search_results` rows.
 
 ## Workflow
 
@@ -143,6 +155,9 @@ The implementation may add a lightweight schema version table if needed, but it 
   nonblank. Providers are exactly `openai`, `anthropic`, `gemini`, or `ollama`.
 - Retrieval tuning values use Feature 08 defaults: metadata top-K 20, semantic
   query limit 3, query-plan confidence 0.60, and metadata fuzzy thresholds 85/90.
+- Evidence token budget defaults to 12,000 whitespace-estimated tokens and must
+  be a positive integer; blank, non-integer, zero, and negative values fail
+  clearly.
 - Storage initialization must be idempotent.
 - The implementation must never create files under `Courses`.
 - `.env` values must not be logged verbatim if they look like secrets.

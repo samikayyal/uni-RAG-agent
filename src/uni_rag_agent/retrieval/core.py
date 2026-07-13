@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
 from uni_rag_agent.config import Config, validate_config
 from uni_rag_agent.indexing import (
@@ -16,13 +18,45 @@ from uni_rag_agent.indexing.profiles import resolve_embedding_profile
 from uni_rag_agent.storage import StorageError, check_storage
 
 from .metadata import MetadataSearchError, metadata_search
-from .models import RetrievalResultSet, RetrievalRun
-from .planner import QueryPlanningError, normalize_query, plan_query
+from .models import FusedRetrievalResult, RetrievalResultSet, RetrievalRun
+from .planner import (
+    MAX_QUERY_PLAN_CONTEXT_MESSAGES,
+    QueryPlanningError,
+    normalize_query,
+    plan_query,
+)
 from .rrf import merge_with_rrf
 
 
 class RetrievalError(RuntimeError):
     """Raised when a configured retrieval backend fails."""
+
+
+@dataclass(frozen=True)
+class _RetrievalExecution:
+    """Public retrieval output plus the complete in-memory RRF ordering."""
+
+    run: RetrievalRun
+    all_fused_candidates: tuple[FusedRetrievalResult, ...]
+
+
+class _SearchRunRecorder(Protocol):
+    search_run_id: int
+
+    def start(
+        self,
+        *,
+        query: str,
+        query_plan: object,
+        embedding_model: str,
+        conversation_message_count: int,
+    ) -> None: ...
+
+    def record_result_set(self, result_set: RetrievalResultSet) -> None: ...
+
+    def record_fused_results(self, results: Sequence[FusedRetrievalResult]) -> None: ...
+
+    def mark_failed(self, error: Exception) -> None: ...
 
 
 def retrieve(
@@ -34,6 +68,25 @@ def retrieve(
     chat_model: object | None = None,
 ) -> RetrievalRun:
     """Run metadata, keyword, and semantic retrieval without persistence."""
+    return _execute_retrieval(
+        config,
+        query,
+        conversation_context=conversation_context,
+        model=model,
+        chat_model=chat_model,
+    ).run
+
+
+def _execute_retrieval(
+    config: Config,
+    query: str,
+    conversation_context: Sequence[dict[str, str]] | None = None,
+    model: str | None = None,
+    *,
+    chat_model: object | None = None,
+    recorder: _SearchRunRecorder | None = None,
+) -> _RetrievalExecution:
+    """Execute planner, backends, and RRF with an optional persistence seam."""
     normalized_query = normalize_query(query)
     validate_config(config)
     profile = resolve_embedding_profile(config, model, error=RetrievalError)
@@ -48,8 +101,17 @@ def retrieve(
         conversation_context=conversation_context,
         chat_model=chat_model,
     )
+    if recorder is not None:
+        recorder.start(
+            query=query,
+            query_plan=query_plan,
+            embedding_model=profile.model_name,
+            conversation_message_count=min(
+                len(conversation_context or ()), MAX_QUERY_PLAN_CONTEXT_MESSAGES
+            ),
+        )
     if query_plan.query_type == "unknown_or_unsupported":
-        return RetrievalRun(
+        run = RetrievalRun(
             query=query,
             embedding_model=profile.model_name,
             query_plan=query_plan,
@@ -62,6 +124,7 @@ def retrieve(
             weaknesses=(query_plan.plan_reason,),
             status="unsupported",
         )
+        return _RetrievalExecution(run=run, all_fused_candidates=())
 
     result_sets: list[RetrievalResultSet] = []
     try:
@@ -80,6 +143,8 @@ def retrieve(
                 results=tuple(metadata_results),
             )
         )
+        if recorder is not None:
+            recorder.record_result_set(result_sets[-1])
 
         keyword_results = keyword_search_terms(
             config,
@@ -95,6 +160,8 @@ def retrieve(
                 results=tuple(keyword_results),
             )
         )
+        if recorder is not None:
+            recorder.record_result_set(result_sets[-1])
 
         for semantic_index, semantic_query in enumerate(
             query_plan.semantic_queries, start=1
@@ -114,24 +181,40 @@ def retrieve(
                     results=tuple(semantic_results),
                 )
             )
+            if recorder is not None:
+                recorder.record_result_set(result_sets[-1])
     except (MetadataSearchError, KeywordSearchError, SemanticSearchError) as exc:
+        _mark_recorder_failed(recorder, exc)
         raise RetrievalError(f"Retrieval backend failed: {exc}") from exc
-    except (StorageError, QueryPlanningError):
+    except (StorageError, QueryPlanningError) as exc:
+        _mark_recorder_failed(recorder, exc)
         raise
     except Exception as exc:  # noqa: BLE001 - backend failures are fatal
+        _mark_recorder_failed(recorder, exc)
         raise RetrievalError(f"Retrieval backend failed: {exc}") from exc
 
-    results = merge_with_rrf(
-        result_sets,
-        k=config.rrf_k,
-        final_top_k=config.final_top_k,
-    )
+    try:
+        all_results = merge_with_rrf(
+            result_sets,
+            k=config.rrf_k,
+            final_top_k=None,
+        )
+    except Exception as exc:  # noqa: BLE001 - fusion failures are fatal
+        _mark_recorder_failed(recorder, exc)
+        raise RetrievalError(f"Retrieval fusion failed: {exc}") from exc
+    if recorder is not None:
+        try:
+            recorder.record_fused_results(all_results)
+        except Exception as exc:  # noqa: BLE001 - persistence failures are fatal
+            _mark_recorder_failed(recorder, exc)
+            raise
+    results = all_results[: config.final_top_k]
     weaknesses = _weaknesses(
         result_sets,
         final_count=len(results),
         final_top_k=config.final_top_k,
     )
-    return RetrievalRun(
+    run = RetrievalRun(
         query=query,
         embedding_model=profile.model_name,
         query_plan=query_plan,
@@ -144,6 +227,24 @@ def retrieve(
         weaknesses=tuple(weaknesses),
         status="completed",
     )
+    return _RetrievalExecution(
+        run=run,
+        all_fused_candidates=tuple(all_results),
+    )
+
+
+def _mark_recorder_failed(
+    recorder: _SearchRunRecorder | None,
+    error: Exception,
+) -> None:
+    if recorder is None:
+        return
+    try:
+        recorder.mark_failed(error)
+    except Exception:
+        # Preserve the original retrieval/storage failure. The recorder owns
+        # its own best-effort diagnostics and must not mask it.
+        return
 
 
 def _query_extensions(query: str) -> tuple[str, ...]:

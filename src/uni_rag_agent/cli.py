@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from collections.abc import Mapping, Sequence
+from contextlib import closing
 from logging import Logger
 from typing import Callable, Protocol
 
@@ -38,13 +39,24 @@ from .indexing import (
     keyword_search,
     sync_keyword_index,
 )
-from .retrieval import QueryPlanningError, RetrievalError, RetrievalResult, retrieve
+from .retrieval import (
+    EvidenceError,
+    EvidenceBuildResult,
+    QueryPlanningError,
+    RetrievalError,
+    RetrievalResult,
+    build_evidence,
+    load_evidence_packet,
+    retrieve,
+)
+from .retrieval.evidence_models import EvidencePacket
 from .retrieval.models import RetrievalRun
 from .storage import (
     StorageCheckResult,
     StorageError,
     check_storage,
     connect_sqlite,
+    connect_sqlite_read_only,
     ensure_data_dirs,
     initialize_schema,
 )
@@ -58,6 +70,7 @@ INVENTORY_ERROR = 4
 EXTRACTION_ERROR = 5
 INDEX_ERROR = 6
 SEARCH_ERROR = 7
+EVIDENCE_ERROR = 8
 
 CommandHandler = Callable[[argparse.Namespace], int]
 
@@ -74,6 +87,8 @@ Available command shapes:
   uv run -m uni_rag_agent search keyword "query text"
   uv run -m uni_rag_agent search semantic "query text"
   uv run -m uni_rag_agent retrieve "query text"
+  uv run -m uni_rag_agent evidence build "query text"
+  uv run -m uni_rag_agent evidence show --search-run-id 1
   uv run -m uni_rag_agent eval run
   uv run -m uni_rag_agent app serve
 """
@@ -112,6 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_index_commands(subparsers)
     _add_search_commands(subparsers)
     _add_retrieve_command(subparsers)
+    _add_evidence_commands(subparsers)
     _add_stub_group(
         subparsers,
         "eval",
@@ -390,6 +406,56 @@ def _add_retrieve_command(subparsers: argparse._SubParsersAction) -> None:
         help="Print one complete safe RetrievalRun JSON object.",
     )
     retrieve_parser.set_defaults(handler=_handle_retrieve)
+
+
+def _add_evidence_commands(subparsers: argparse._SubParsersAction) -> None:
+    evidence_parser = subparsers.add_parser(
+        "evidence",
+        help="Persisted evidence-packet and search-coverage commands.",
+    )
+    evidence_subparsers = evidence_parser.add_subparsers(
+        dest="evidence_command",
+        metavar="subcommand",
+    )
+    evidence_subparsers.required = True
+
+    build_parser = evidence_subparsers.add_parser(
+        "build",
+        help="Run retrieval and persist one immutable evidence packet.",
+    )
+    build_parser.add_argument("query", nargs="+", help="Query text.")
+    build_parser.add_argument(
+        "--model",
+        help="Supported Hugging Face profile; overrides UNI_RAG_EMBEDDING_MODEL.",
+    )
+    build_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print persisted raw result sets and full fused contribution diagnostics.",
+    )
+    build_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print one complete safe EvidenceBuildResult JSON object.",
+    )
+    build_parser.set_defaults(handler=_handle_evidence_build)
+
+    show_parser = evidence_subparsers.add_parser(
+        "show",
+        help="Load an existing evidence packet without rebuilding it.",
+    )
+    show_parser.add_argument(
+        "--search-run-id",
+        type=int,
+        required=True,
+        help="Unique persisted search-run identifier.",
+    )
+    show_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the exact parsed stored packet as JSON.",
+    )
+    show_parser.set_defaults(handler=_handle_evidence_show)
 
 
 def _handle_config_check(_: argparse.Namespace) -> int:
@@ -903,6 +969,122 @@ def _handle_retrieve(args: argparse.Namespace) -> int:
     return SUCCESS
 
 
+def _handle_evidence_build(args: argparse.Namespace) -> int:
+    command_name = "evidence build"
+    query_text = " ".join(args.query)
+    logger: Logger | None = None
+    model_label = "(unset)"
+    try:
+        config = load_config()
+        validate_config(config)
+        model_label = _embedding_model_log_label(config, args.model)
+        logger = _command_logger(config, command_name)
+        logger.info(
+            "evidence build started",
+            extra={
+                "event": "evidence_build_started",
+                "command": command_name,
+                "status": "started",
+                "model": model_label,
+            },
+        )
+        result = build_evidence(config, query_text, model=args.model)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except StorageError as exc:
+        if logger is not None:
+            logger.exception(
+                "evidence build failed",
+                extra={
+                    "event": "evidence_build_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "model": model_label,
+                },
+            )
+        print(f"Storage error: {exc}", file=sys.stderr)
+        return STORAGE_ERROR
+    except (RetrievalError, QueryPlanningError) as exc:
+        if logger is not None:
+            logger.exception(
+                "evidence build failed",
+                extra={
+                    "event": "evidence_build_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "model": model_label,
+                },
+            )
+        print(f"Retrieval error: {exc}", file=sys.stderr)
+        return SEARCH_ERROR
+    except EvidenceError as exc:
+        if logger is not None:
+            logger.exception(
+                "evidence build failed",
+                extra={
+                    "event": "evidence_build_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "model": model_label,
+                },
+            )
+        print(f"Evidence error: {exc}", file=sys.stderr)
+        return EVIDENCE_ERROR
+
+    _log_evidence_events(logger, result, model_label)
+    if args.json:
+        print(json.dumps(result.as_safe_dict(), indent=2, sort_keys=True))
+    else:
+        _print_evidence_build_result(result, debug=args.debug, config=config)
+    return SUCCESS
+
+
+def _handle_evidence_show(args: argparse.Namespace) -> int:
+    command_name = "evidence show"
+    logger: Logger | None = None
+    try:
+        config = load_config()
+        validate_config(config)
+        logger = _command_logger(config, command_name)
+        packet = load_evidence_packet(config, search_run_id=args.search_run_id)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except StorageError as exc:
+        print(f"Storage error: {exc}", file=sys.stderr)
+        return STORAGE_ERROR
+    except EvidenceError as exc:
+        if logger is not None:
+            logger.exception(
+                "evidence packet load failed",
+                extra={
+                    "event": "evidence_packet_load_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "search_run_id": args.search_run_id,
+                },
+            )
+        print(f"Evidence error: {exc}", file=sys.stderr)
+        return EVIDENCE_ERROR
+
+    if logger is not None:
+        logger.info(
+            "evidence packet loaded",
+            extra={
+                "event": "evidence_packet_loaded",
+                "command": command_name,
+                "status": "completed",
+                "search_run_id": packet.search_run_id,
+            },
+        )
+    if args.json:
+        print(json.dumps(packet.as_safe_dict(), indent=2, sort_keys=True))
+    else:
+        _print_evidence_packet(packet)
+    return SUCCESS
+
+
 def _log_retrieval_events(
     logger: Logger | None,
     run: RetrievalRun,
@@ -954,6 +1136,174 @@ def _log_retrieval_events(
             **common,
         },
     )
+
+
+def _log_evidence_events(
+    logger: Logger | None,
+    result: EvidenceBuildResult,
+    model: str,
+) -> None:
+    if logger is None:
+        return
+    common = {
+        "command": "evidence build",
+        "model": model,
+        "search_run_id": result.search_run_id,
+        "evidence_packet_id": result.evidence_packet_id,
+    }
+    logger.info(
+        "search run created",
+        extra={
+            "event": "search_run_created",
+            "status": "running",
+            **common,
+        },
+    )
+    for result_set in result.retrieval_run.result_sets:
+        logger.info(
+            "search result set recorded",
+            extra={
+                "event": "search_result_set_recorded",
+                "status": "completed",
+                "result_set_id": result_set.result_set_id,
+                "result_count": len(result_set.results),
+                **common,
+            },
+        )
+    logger.info(
+        "search results fused",
+        extra={
+            "event": "search_results_fused",
+            "status": "completed",
+            "fused_candidate_count": result.coverage.fused_candidate_count,
+            **common,
+        },
+    )
+    logger.info(
+        "evidence packet created",
+        extra={
+            "event": "evidence_packet_created",
+            "status": result.coverage.status,
+            "evidence_count": result.coverage.evidence_count,
+            "omitted_count": (
+                result.coverage.token_budget_omission_count
+                + result.coverage.oversized_evidence_omission_count
+            ),
+            **common,
+        },
+    )
+    logger.info(
+        "evidence build completed",
+        extra={
+            "event": "evidence_build_completed",
+            "status": result.coverage.status,
+            "evidence_count": result.coverage.evidence_count,
+            "fused_candidate_count": result.coverage.fused_candidate_count,
+            "omitted_count": (
+                result.coverage.token_budget_omission_count
+                + result.coverage.oversized_evidence_omission_count
+            ),
+            **common,
+        },
+    )
+
+
+def _print_evidence_build_result(
+    result: EvidenceBuildResult,
+    *,
+    debug: bool,
+    config: Config,
+) -> None:
+    packet = result.packet
+    coverage = result.coverage
+    print(f"status: {coverage.status}")
+    print(f"search_run_id: {result.search_run_id}")
+    print(f"evidence_packet_id: {result.evidence_packet_id}")
+    print(f"query_type: {packet.interpreted_intent}")
+    print(f"searched_courses: {', '.join(packet.searched['courses']) or 'none'}")
+    print(f"searched_indexes: {', '.join(packet.searched['indexes']) or 'none'}")
+    print(f"keyword_terms: {', '.join(packet.searched['keyword_terms']) or 'none'}")
+    print(
+        f"semantic_queries: {', '.join(packet.searched['semantic_queries']) or 'none'}"
+    )
+    print(f"raw_result_count: {coverage.raw_result_count}")
+    print(f"fused_candidate_count: {coverage.fused_candidate_count}")
+    print(f"selectable_candidate_count: {coverage.selectable_candidate_count}")
+    print(f"evidence_count: {coverage.evidence_count}")
+    print(f"evidence_token_count: {coverage.evidence_token_count}")
+    if packet.evidence:
+        print("selected_evidence:")
+        for item in packet.evidence:
+            print(
+                f"- rank={item.rank} score={item.score:.6g} course={item.course} "
+                f"file={item.file} location={item.location.label} "
+                f"tokens={item.token_count} text={_table_value(item.text, 160)}"
+            )
+    else:
+        print("selected_evidence: none")
+    _print_evidence_weaknesses(packet.weaknesses)
+    if debug:
+        _print_persisted_evidence_debug(config, result.search_run_id)
+
+
+def _print_evidence_packet(packet: EvidencePacket) -> None:
+    print(f"search_run_id: {packet.search_run_id}")
+    print(f"query: {packet.query}")
+    print(f"query_type: {packet.interpreted_intent}")
+    print(f"status: {packet.coverage.status}")
+    print(f"evidence_count: {packet.coverage.evidence_count}")
+    print(f"evidence_token_count: {packet.coverage.evidence_token_count}")
+    print("searched:")
+    for key in ("courses", "indexes", "keyword_terms", "semantic_queries"):
+        print(f"- {key}: {', '.join(packet.searched[key]) or 'none'}")
+    if packet.evidence:
+        print("evidence:")
+        for item in packet.evidence:
+            print(
+                f"- rank={item.rank} score={item.score:.6g} course={item.course} "
+                f"file={item.file} location={item.location.label} "
+                f"tokens={item.token_count} text={_table_value(item.text, 160)}"
+            )
+    else:
+        print("evidence: none")
+    _print_evidence_weaknesses(packet.weaknesses)
+
+
+def _print_evidence_weaknesses(weaknesses: Sequence[str]) -> None:
+    if not weaknesses:
+        print("weaknesses: none")
+        return
+    print("weaknesses:")
+    for weakness in weaknesses:
+        print(f"- {weakness}")
+
+
+def _print_persisted_evidence_debug(config: Config, search_run_id: int) -> None:
+    print("debug_persisted_result_rows:")
+    with closing(connect_sqlite_read_only(config)) as connection:
+        rows = connection.execute(
+            """
+            SELECT retrieval_method, rank, score, selected_for_evidence, result_json
+            FROM search_results
+            WHERE search_run_id = ?
+            ORDER BY CASE retrieval_method
+                         WHEN 'metadata' THEN 1
+                         WHEN 'keyword' THEN 2
+                         WHEN 'semantic' THEN 3
+                         WHEN 'hybrid' THEN 4
+                         ELSE 5
+                     END,
+                     rank,
+                     id
+            """,
+            (search_run_id,),
+        ).fetchall()
+    for row in rows:
+        print(
+            f"- method={row['retrieval_method']} rank={row['rank']} "
+            f"score={row['score']} selected={row['selected_for_evidence']} "
+            f"json={row['result_json']}"
+        )
 
 
 def _print_retrieval_run(run: RetrievalRun, *, debug: bool) -> None:

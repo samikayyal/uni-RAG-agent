@@ -27,12 +27,17 @@ class _FusedBuilder:
 def merge_with_rrf(
     result_sets: Sequence[RetrievalResultSet | Sequence[RetrievalResult]],
     k: int = 60,
-    final_top_k: int = 10,
+    final_top_k: int | None = 10,
 ) -> list[FusedRetrievalResult]:
-    """Fuse raw ranked lists while preserving every contributing source."""
+    """Fuse raw ranked lists while preserving every contributing source.
+
+    ``final_top_k=None`` returns the complete deterministic ordering. Existing
+    callers retain the bounded default, while Feature 09 can persist every
+    fused candidate before applying evidence eligibility and token limits.
+    """
     if k < 0:
         raise ValueError("rrf k must not be negative")
-    if final_top_k <= 0:
+    if final_top_k is not None and final_top_k <= 0:
         raise ValueError("final_top_k must be greater than zero")
     normalized = _normalize_result_sets(result_sets)
     builders: dict[tuple[str, int], _FusedBuilder] = {}
@@ -99,10 +104,8 @@ def merge_with_rrf(
             builder.result.chunk_id if builder.result.chunk_id is not None else 10**18,
         ),
     )
-    return [
-        _to_fused(builder, rank)
-        for rank, builder in enumerate(ordered[:final_top_k], start=1)
-    ]
+    selected = ordered if final_top_k is None else ordered[:final_top_k]
+    return [_to_fused(builder, rank) for rank, builder in enumerate(selected, start=1)]
 
 
 def _normalize_result_sets(
