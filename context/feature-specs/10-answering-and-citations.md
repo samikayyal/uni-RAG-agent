@@ -64,8 +64,10 @@ The model must return exactly one JSON object with exactly these fields:
 ```
 
 Stable ids `E1`, `E2`, ... are assigned by packet evidence position (1-based).
-Validation accepts the corresponding chunk-id alias for compatibility, but the
-application always renders canonical positional markers. Every non-empty
+Validation accepts only the unambiguous `chunk:<chunk_id>` compatibility alias
+in addition to canonical ids; bare chunk ids and `E<chunk_id>` are invalid.
+The application always canonicalizes aliases and renders/stores positional
+markers. Every non-empty
 packet paragraph must be nonblank and cite at least one known evidence item.
 Structured stored citations contain `citation_id`, `evidence_index`, `course`,
 `file_id`, `chunk_id`, `file_path`, `source_type`, and
@@ -90,16 +92,25 @@ pair during general validation and use the same provider allow-list as the
 planner. They are mandatory only when non-empty evidence reaches answer
 generation; planner settings are never a fallback. `UNI_RAG_ANSWER_MAX_RETRIES`
 defaults to `1` and is nonnegative (`0` means no retry). The session message
-limit defaults to `20` and is positive. Stored `answers.model_name` is the
-safe `provider:model` value.
+limit defaults to `20` and is positive.
+`UNI_RAG_ANSWER_PROMPT_MAX_TOKENS` defaults to `16,000`, is positive, and
+bounds the complete whitespace-estimated answer-model input including query,
+schema, metadata, weaknesses, constraints, rules, retry diagnostics, and
+evidence. Stored `answers.model_name` is the safe `provider:model` value.
 
 ## Workflow
 
 1. Load an evidence packet by id or receive one from `ask`.
 2. For empty evidence, produce a deterministic useful insufficient-evidence
    answer from searched/found/missing coverage without invoking an answer model.
-3. For non-empty evidence, prompt with packet evidence, allowed ids, and
-   constraints only; packet weaknesses are deduplicated into limitations.
+3. For non-empty evidence, select complete evidence items in packet/fused-rank
+   order while the complete prompt fits the answer prompt budget. Omitted items
+   do not renumber retained ids and produce a deterministic limitation. If no
+   complete item fits, return and store a
+   deterministic insufficient-budget answer without invoking the model.
+   Otherwise prompt with selected evidence, allowed canonical ids plus
+   `chunk:<id>` aliases, and constraints only; packet weaknesses are
+   deduplicated into limitations.
 4. Invoke the configured answer provider and validate strict JSON, paragraph
    rules, citation ids, and absence of markers in model prose.
 5. Retry with the same evidence and validation errors only, up to the configured
@@ -117,7 +128,10 @@ safe `provider:model` value.
 
 ## Failure and Safety Rules
 
-- Never cite files absent from the packet or answer from model memory.
+- Never cite files absent from the packet, evidence omitted from the answer
+  prompt, or answer from model memory.
+- Model prose rejects Markdown-decorated `References:`/`Limitations:` sections,
+  bracketed numeric or malformed `E...` citation lookalikes, and Markdown links.
 - `ANSWER_ERROR=9` is reserved for answer provider/validation boundaries;
   existing configuration, storage, retrieval, and evidence domains remain.
 - Telemetry contains counts, ids, provider/model labels, and statuses only; it
@@ -130,9 +144,13 @@ safe `provider:model` value.
 - Inject deterministic chat doubles for cited answers, empty evidence, weak
   packet limitations, retries (including zero), unknown ids, safe refusal, and
   provider failure/no-row behavior.
-- Verify citation maps by evidence index and chunk id, per-paragraph citation,
-  stable references, append-only rows, separate `provider:model`, and packet
-  persistence when `ask` answer generation fails.
+- Verify canonical ids and `chunk:<id>` alias normalization, per-paragraph
+  citation, Markdown-decorated section/marker/link rejection, stable references,
+  append-only rows, separate `provider:model`, and packet persistence when
+  `ask` answer generation fails.
+- Cover a packet near the 12,000-token evidence limit, complete prompt overhead,
+  a lower answer budget, stable original ids after whole-item omission, retry
+  prompt bounds, and the deterministic no-evidence-fits outcome.
 - Verify persistence rejects packet/citation/weakness/rendering/model mismatches
   and forged refusals without inserting an answer row.
 - Cover CLI answer/ask JSON/text/error codes, config validation, bounded
@@ -146,4 +164,5 @@ safe `provider:model` value.
   models in one shot while preserving the packet on answer failure.
 - Answers cite course, file, and location where available; insufficient
   evidence and safe refusals never invent facts or citations.
-- Stored answer traces are auditable back to their exact packet.
+- Stored answer traces are auditable back to their exact packet and the
+  deterministic prompt-budget selection applied to that packet.

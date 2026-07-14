@@ -891,6 +891,14 @@ unstored, unbounded answer input.
   citation ids, and answer constraints. It returns exactly one JSON object with
   `answer_paragraphs` and `limitations`; the application validates and renders
   markers/references deterministically.
+- The model may use only `chunk:<chunk_id>` as a compatibility citation alias;
+  aliases are canonicalized to stable packet-position ids before rendering or
+  storage. Markdown-decorated rendered sections, bracketed citation lookalikes,
+  and Markdown links are rejected from model prose.
+- A positive answer-specific prompt budget (16,000 whitespace-estimated tokens
+  by default) covers the complete input prompt. Whole evidence items are kept in
+  packet rank order without renumbering retained ids; a budget that fits no
+  item produces a deterministic persisted answer without provider invocation.
 - `UNI_RAG_ANSWER_LLM_PROVIDER` and `UNI_RAG_ANSWER_LLM_MODEL` are a separate
   nullable configuration pair using the existing provider allow-list. They are
   required only for non-empty evidence. Persisted `answers.model_name` uses the
@@ -916,5 +924,7 @@ weaknesses are visible as limitations, and one-shot `ask` can safely preserve
 the evidence packet when the independent answer provider fails. Tests inject
 deterministic chat doubles without requiring credentials. Packet-relative
 validation at the final write boundary keeps append-only traces authoritative
-for CLI and programmatic callers alike.
+for CLI and programmatic callers alike. Explicit whole-prompt budgeting absorbs
+provider context-window differences at the answer boundary instead of sending
+every valid Feature 09 packet blindly.
 

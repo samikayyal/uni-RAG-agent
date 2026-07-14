@@ -233,18 +233,25 @@ $env:UNI_RAG_ANSWER_LLM_PROVIDER = "ollama"
 $env:UNI_RAG_ANSWER_LLM_MODEL = "llama3.2"
 $env:UNI_RAG_ANSWER_MAX_RETRIES = "1"
 $env:UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT = "20"
+$env:UNI_RAG_ANSWER_PROMPT_MAX_TOKENS = "16000"
 uv sync --extra llm
 uv run -m uni_rag_agent answer --evidence-packet-id 1
 ```
 
 The answer model returns strict JSON paragraphs with positional ids (`E1`,
-`E2`, ...). The application adds inline markers and a deterministic References
-section, stores structured citations and limitations in the append-only
-`answers` table, and never stores prompts or conversation context. Empty
-evidence produces a deterministic insufficient-evidence answer without calling
-the answer model. `ask` runs planner/retrieval and answer generation in one
-shot; the evidence packet remains persisted if answer-provider construction or
-invocation fails. Answer failures use exit code `9`.
+`E2`, ...) or the unambiguous `chunk:<id>` compatibility alias; aliases are
+canonicalized to positional ids before rendering or storage. The application
+adds inline markers and a deterministic References section, stores structured
+citations and limitations in the append-only `answers` table, and never stores
+prompts or conversation context. The complete prompt is bounded by
+`UNI_RAG_ANSWER_PROMPT_MAX_TOKENS`; complete evidence items are selected in
+packet rank order, retain their original positional ids, and any omissions are
+reported as a deterministic limitation. Empty evidence, or
+a budget too small for any complete item, produces a deterministic
+insufficient-evidence answer without calling the answer model. `ask` runs
+planner/retrieval and answer generation in one shot; the evidence packet remains
+persisted if answer-provider construction or invocation fails. Answer failures
+use exit code `9`.
 
 ## MVP Module Order
 

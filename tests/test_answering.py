@@ -20,6 +20,7 @@ from uni_rag_agent.answering import (
     store_answer,
     validate_answer_citations,
 )
+from uni_rag_agent.answering.audit import audit_stored_answer
 from uni_rag_agent.retrieval.evidence_models import (
     ANSWER_CONSTRAINTS,
     EvidenceItem,
@@ -206,9 +207,22 @@ def test_generate_answer_renders_stable_citation_and_structured_reference(
     assert validate_answer_citations(result, packet)
 
 
-def test_only_stable_positional_citation_ids_are_validated(tmp_path: Path) -> None:
+def test_chunk_alias_is_accepted_and_canonicalized(tmp_path: Path) -> None:
     packet = _packet(tmp_path)
-    for unknown_id in ("E101", "1", "101", "E999"):
+    result = generate_answer(
+        packet,
+        chat_model=_Chat(_valid_payload(citation_ids=("chunk:101",))),
+    )
+
+    assert result.paragraphs[0].citation_ids == ("E1",)
+    assert result.citations[0].citation_id == "E1"
+    assert "Grounded answer [E1]" in result.answer_text
+    assert "chunk:101" not in result.answer_text
+
+
+def test_ambiguous_or_unknown_citation_ids_are_rejected(tmp_path: Path) -> None:
+    packet = _packet(tmp_path)
+    for unknown_id in ("E101", "1", "101", "E999", "chunk:999"):
         invalid = generate_answer(
             packet,
             chat_model=_Chat(_valid_payload(citation_ids=(unknown_id,))),
@@ -225,8 +239,14 @@ def test_only_stable_positional_citation_ids_are_validated(tmp_path: Path) -> No
         "Claim [E01]",
         "Claim [e1]",
         "Claim [ E 1 ]",
+        "Claim [1]",
+        "Claim [Eabc]",
+        "Claim [source](https://example.test)",
         "References: invented source",
         "Limitations: invented limitation",
+        "## References:\n- invented source",
+        "**References:**\n- invented source",
+        "> References:\n> invented source",
     ),
 )
 def test_model_authored_markers_and_sections_are_rejected(
@@ -263,9 +283,18 @@ def test_retry_count_and_zero_retry(tmp_path: Path) -> None:
     result = generate_answer(
         packet,
         chat_model=chat,
-        config=replace(make_config(tmp_path), answer_max_retries=1),
+        config=replace(
+            make_config(tmp_path),
+            answer_max_retries=1,
+            answer_prompt_max_tokens=180,
+        ),
     )
     assert len(chat.prompts) == 2
+    assert all(len(prompt.split()) <= 180 for prompt in chat.prompts)
+    assert [
+        [item["citation_id"] for item in json.loads(prompt)["evidence"]]
+        for prompt in chat.prompts
+    ] == [["E1"], ["E1"]]
     assert result.citations
     zero_chat = _Chat(invalid, _valid_payload())
     result = generate_answer(
@@ -275,6 +304,84 @@ def test_retry_count_and_zero_retry(tmp_path: Path) -> None:
     )
     assert len(zero_chat.prompts) == 1
     assert not result.citations
+
+
+def test_prompt_budget_omits_complete_items_and_preserves_packet_ids(
+    tmp_path: Path,
+) -> None:
+    packet = _packet(tmp_path)
+    first = replace(packet.evidence[0], text="large " * 400, token_count=400)
+    second = replace(
+        packet.evidence[0],
+        chunk_id=202,
+        text="Small supporting evidence.",
+        token_count=3,
+        rank=2,
+    )
+    packet = replace(
+        packet,
+        evidence=(first, second),
+        coverage=replace(
+            packet.coverage,
+            fused_candidate_count=2,
+            selectable_candidate_count=2,
+            evidence_count=2,
+            evidence_token_count=403,
+        ),
+    )
+    config = replace(
+        make_config(tmp_path),
+        answer_prompt_max_tokens=180,
+        answer_max_retries=0,
+    )
+    chat = _Chat(_valid_payload(citation_ids=("E2",)))
+
+    result = generate_answer(packet, chat_model=chat, config=config)
+
+    prompt = json.loads(chat.prompts[0])
+    assert [item["citation_id"] for item in prompt["evidence"]] == ["E2"]
+    assert len(chat.prompts[0].split()) <= config.answer_prompt_max_tokens
+    assert result.citations[0].citation_id == "E2"
+    assert "[E2]" in result.answer_text
+    assert "1 evidence item(s) were omitted" in result.limitations[-1]
+
+
+def test_prompt_budget_accounts_for_overhead_and_can_skip_model(
+    tmp_path: Path,
+) -> None:
+    packet = _packet(tmp_path)
+    chat = _Chat(_valid_payload(), error=RuntimeError("must not call"))
+    config = replace(make_config(tmp_path), answer_prompt_max_tokens=80)
+
+    result = generate_answer(packet, chat_model=chat, config=config)
+
+    assert not chat.prompts
+    assert not result.citations
+    assert "prompt budget" in result.answer_text
+    assert "No answer model was invoked" in result.limitations[-1]
+
+
+def test_packet_near_evidence_budget_fits_default_answer_prompt_budget(
+    tmp_path: Path,
+) -> None:
+    packet = _packet(tmp_path)
+    item = replace(
+        packet.evidence[0],
+        text="word " * 12_000,
+        token_count=12_000,
+    )
+    packet = replace(
+        packet,
+        evidence=(item,),
+        coverage=replace(packet.coverage, evidence_token_count=12_000),
+    )
+    config = replace(make_config(tmp_path), answer_max_retries=0)
+    chat = _Chat(_valid_payload())
+
+    result = generate_answer(packet, chat_model=chat, config=config)
+
+    assert result.citations
+    assert len(chat.prompts[0].split()) <= config.answer_prompt_max_tokens
 
 
 def test_empty_evidence_never_invokes_model(tmp_path: Path) -> None:
@@ -351,6 +458,13 @@ def test_store_answer_rejects_packet_mismatches_and_forged_refusal(
     with pytest.raises(ValueError, match="deterministic packet-derived"):
         store_answer(packet_id, forged_refusal, config=config)
 
+    forged_section = replace(
+        answer,
+        paragraphs=(AnswerParagraph("## References:\n- invented source", ("E1",)),),
+    )
+    with pytest.raises(ValueError, match="rendered section"):
+        store_answer(packet_id, forged_section, config=config)
+
     with sqlite3.connect(config.sqlite_path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM answers").fetchone()[0] == 0
 
@@ -369,6 +483,27 @@ def test_empty_evidence_answer_persists_without_answer_provider(
     assert loaded.model_name is None
     assert not loaded.citations
     assert "No answer model was invoked" in loaded.limitations[-1]
+
+
+def test_prompt_budget_insufficient_answer_persists_without_provider(
+    tmp_path: Path,
+) -> None:
+    config = replace(
+        make_initialized_config(tmp_path),
+        answer_prompt_max_tokens=80,
+    )
+    packet = _packet(tmp_path)
+    packet_id = _persist_packet(config, packet)
+    answer = generate_answer(
+        packet, config=config, chat_model=_Chat(error=RuntimeError())
+    )
+
+    answer_id = store_answer(packet_id, answer, config=config)
+
+    loaded = load_answer(config, answer_id)
+    assert loaded.model_name is None
+    assert not loaded.citations
+    assert "prompt budget" in loaded.answer_text
 
 
 def test_answer_session_bounds_complete_turns_and_planner_only_context(
@@ -440,6 +575,7 @@ def test_answering_notebook_is_valid_and_read_only() -> None:
     assert "import pandas as pd" in source
     assert "mode=ro" in source
     assert "PRAGMA query_only" in source
+    assert "audit_stored_answer" in source
     assert all(
         cell.get("execution_count") is None
         for cell in notebook["cells"]
@@ -450,3 +586,52 @@ def test_answering_notebook_is_valid_and_read_only() -> None:
         for cell in notebook["cells"]
         if cell["cell_type"] == "code"
     )
+
+
+def test_answering_audit_rejects_malformed_or_altered_citations(
+    tmp_path: Path,
+) -> None:
+    packet = _packet(tmp_path)
+    answer = generate_answer(packet, chat_model=_Chat(_valid_payload()))
+    packet_json = json.dumps(packet.as_safe_dict())
+    citations = [answer.citations[0].as_safe_dict()]
+
+    malformed = audit_stored_answer("{", packet_json, answer.answer_text)
+    assert not malformed["valid"]
+    assert not malformed["citations_parsed"]
+
+    for field, value in (
+        ("chunk_id", 999),
+        ("file_path", "forged.md"),
+        ("location_label", "page 999"),
+    ):
+        altered = [dict(citations[0], **{field: value})]
+        audit = audit_stored_answer(
+            json.dumps(altered),
+            packet_json,
+            answer.answer_text,
+        )
+        assert not audit["valid"]
+        assert "does not match packet evidence" in audit["diagnostic"]
+
+
+def test_answering_audit_accepts_canonical_and_legitimate_empty_rows(
+    tmp_path: Path,
+) -> None:
+    packet = _packet(tmp_path)
+    cited = generate_answer(packet, chat_model=_Chat(_valid_payload()))
+    cited_audit = audit_stored_answer(
+        json.dumps([citation.as_safe_dict() for citation in cited.citations]),
+        json.dumps(packet.as_safe_dict()),
+        cited.answer_text,
+    )
+    assert cited_audit["valid"]
+
+    empty_packet = _packet(tmp_path, evidence=False, weaknesses=("no chunks",))
+    insufficient = generate_answer(empty_packet)
+    empty_audit = audit_stored_answer(
+        "[]",
+        json.dumps(empty_packet.as_safe_dict()),
+        insufficient.answer_text,
+    )
+    assert empty_audit["valid"]

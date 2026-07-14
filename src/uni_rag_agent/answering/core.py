@@ -7,7 +7,12 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from ..config import ALLOWED_LLM_PROVIDERS, Config, load_config
+from ..config import (
+    ALLOWED_LLM_PROVIDERS,
+    DEFAULT_ANSWER_PROMPT_MAX_TOKENS,
+    Config,
+    load_config,
+)
 from ..retrieval.evidence_models import EvidenceItem, EvidencePacket
 from .models import (
     AnswerCitation,
@@ -29,9 +34,20 @@ from .providers import build_answer_chat_model
 build_chat_model = build_answer_chat_model
 
 _MARKER_RE = re.compile(r"\[E[1-9][0-9]*\]")
-_RENDERED_SECTION_RE = re.compile(
-    r"(?im)^\s*(?:references|limitations)\s*:",
+_MARKDOWN_PREFIX_RE = re.compile(
+    r"^(?:>\s*|#{1,6}\s*|[-+*]\s+|\d+[.)]\s+)", re.IGNORECASE
 )
+_RENDERED_SECTION_RE = re.compile(r"^(?:references|limitations)\s*:", re.IGNORECASE)
+_MARKDOWN_WRAPPERS = (
+    ("**", "**"),
+    ("__", "__"),
+    ("~~", "~~"),
+    ("`", "`"),
+    ("*", "*"),
+    ("_", "_"),
+)
+_RETRY_ERROR_TOKEN_RESERVE = 64
+_MAX_RETRY_ERROR_CHARS = 256
 
 
 def generate_answer(
@@ -56,20 +72,36 @@ def generate_answer(
         return _insufficient_evidence_answer(packet)
 
     effective_config = config
-    retries = effective_config.answer_max_retries if effective_config else 1
     model = chat_model
+    if effective_config is None and model is None:
+        effective_config = load_config()
+    prompt_budget = (
+        effective_config.answer_prompt_max_tokens
+        if effective_config is not None
+        else DEFAULT_ANSWER_PROMPT_MAX_TOKENS
+    )
+    prompt_evidence_indexes = _select_prompt_evidence(packet, prompt_budget)
+    if not prompt_evidence_indexes:
+        return _prompt_budget_insufficient_answer(packet, prompt_budget)
+    prompt_limitations = _prompt_budget_limitations(
+        packet,
+        prompt_evidence_indexes,
+        prompt_budget,
+    )
+
+    retries = effective_config.answer_max_retries if effective_config else 1
     if model is None:
-        if effective_config is None:
-            effective_config = load_config()
+        if effective_config is None:  # defensive: the branch above loads it
+            raise AnswerGenerationError("Answer configuration is unavailable")
         model = build_chat_model(effective_config)
     model_name = _answer_model_name(effective_config, model)
-    prompt = _answer_prompt(packet)
+    prompt = _answer_prompt(packet, prompt_evidence_indexes)
     validation_errors: tuple[str, ...] = ()
     for attempt in range(retries + 1):
         attempt_prompt = (
             prompt
             if not validation_errors
-            else _retry_prompt(packet, validation_errors)
+            else _retry_prompt(packet, prompt_evidence_indexes, validation_errors)
         )
         try:
             response = model.invoke(attempt_prompt)  # type: ignore[attr-defined]
@@ -81,11 +113,18 @@ def generate_answer(
             payload = _decode_response(response)
             paragraphs = parse_model_answer(payload)
             model_limitations = parse_model_limitations(payload)
-            validation = _validate_paragraphs(paragraphs, packet)
+            validation = _validate_paragraphs(
+                paragraphs,
+                packet,
+                evidence_indexes=prompt_evidence_indexes,
+            )
             if not validation.valid:
                 raise AnswerModelError("; ".join(validation.errors))
+            paragraphs = validation.paragraphs
             citations = validation.citations
-            limitations = _dedupe((*model_limitations, *packet.weaknesses))
+            limitations = _dedupe(
+                (*model_limitations, *packet.weaknesses, *prompt_limitations)
+            )
             answer_text = _render_answer(paragraphs, citations, limitations)
             return AnswerResult(
                 answer_text=answer_text,
@@ -103,6 +142,7 @@ def generate_answer(
                 model_name=model_name,
                 attempts=retries + 1,
                 errors=validation_errors,
+                prompt_limitations=prompt_limitations,
             )
     # The loop always returns or raises; keep a defensive branch for type
     # checkers and unusual custom iterables.
@@ -112,11 +152,13 @@ def generate_answer(
 def validate_answer_citations(
     answer: AnswerResult | Mapping[str, object],
     packet: EvidencePacket,
+    *,
+    allowed_evidence_indexes: Sequence[int] | None = None,
 ) -> CitationValidationResult:
     """Validate that all paragraph citations resolve to packet evidence.
 
-    Validation accepts only stable ``E<evidence_index>`` ids. Structured
-    citations retain both the evidence position and authoritative chunk id.
+    Validation accepts stable ``E<evidence_index>`` ids and unambiguous
+    ``chunk:<chunk_id>`` aliases. Structured output is always canonical.
     """
     if not isinstance(packet, EvidencePacket):
         return CitationValidationResult(False, ("packet must be an EvidencePacket",))
@@ -131,7 +173,11 @@ def validate_answer_citations(
             paragraphs = _paragraphs_from_rendered(answer.answer_text)
     else:
         return CitationValidationResult(False, ("answer must be an AnswerResult",))
-    return _validate_paragraphs(paragraphs, packet)
+    return _validate_paragraphs(
+        paragraphs,
+        packet,
+        evidence_indexes=allowed_evidence_indexes,
+    )
 
 
 def format_citation(value: EvidenceItem | AnswerCitation) -> str:
@@ -141,6 +187,35 @@ def format_citation(value: EvidenceItem | AnswerCitation) -> str:
     if isinstance(value, EvidenceItem):
         return f"{value.course} - {value.file} - {value.location.label}"
     raise TypeError("format_citation requires EvidenceItem or AnswerCitation")
+
+
+def _contains_rendered_section(text: str) -> bool:
+    return any(
+        _RENDERED_SECTION_RE.match(_strip_markdown_decoration(line))
+        for line in text.splitlines()
+    )
+
+
+def _strip_markdown_decoration(line: str) -> str:
+    value = line.strip()
+    while value:
+        undecorated = _MARKDOWN_PREFIX_RE.sub("", value, count=1).strip()
+        if undecorated != value:
+            value = undecorated
+            continue
+        unwrapped = value
+        for opening, closing in _MARKDOWN_WRAPPERS:
+            if (
+                value.startswith(opening)
+                and value.endswith(closing)
+                and len(value) > len(opening) + len(closing)
+            ):
+                unwrapped = value[len(opening) : -len(closing)].strip()
+                break
+        if unwrapped == value:
+            break
+        value = unwrapped
+    return value
 
 
 def _decode_response(response: object) -> Mapping[str, object]:
@@ -162,46 +237,111 @@ def _decode_response(response: object) -> Mapping[str, object]:
 
 
 def _validate_paragraphs(
-    paragraphs: Sequence[AnswerParagraph], packet: EvidencePacket
+    paragraphs: Sequence[AnswerParagraph],
+    packet: EvidencePacket,
+    *,
+    evidence_indexes: Sequence[int] | None = None,
 ) -> CitationValidationResult:
     if not paragraphs:
         return CitationValidationResult(
             False, ("answer_paragraphs must contain at least one paragraph",)
         )
-    aliases = evidence_citation_map(packet)
+    aliases = evidence_citation_map(packet, evidence_indexes)
     errors: list[str] = []
     resolved: list[AnswerCitation] = []
+    canonical_paragraphs: list[AnswerParagraph] = []
     for index, paragraph in enumerate(paragraphs, start=1):
         if not paragraph.text.strip():
             errors.append(f"paragraph {index} is blank")
         if contains_citation_like_marker(paragraph.text):
             errors.append(f"paragraph {index} contains citation markers")
-        if _RENDERED_SECTION_RE.search(paragraph.text):
+        if _contains_rendered_section(paragraph.text):
             errors.append(f"paragraph {index} contains a rendered section")
         if not paragraph.citation_ids and packet.evidence:
             errors.append(f"paragraph {index} must cite at least one evidence item")
+        canonical_ids: list[str] = []
         for citation_id in paragraph.citation_ids:
             citation = aliases.get(citation_id)
             if citation is None:
                 errors.append(
                     f"paragraph {index} contains unknown citation id: {citation_id}"
                 )
-            elif citation not in resolved:
-                resolved.append(citation)
+            else:
+                if citation.citation_id not in canonical_ids:
+                    canonical_ids.append(citation.citation_id)
+                if citation not in resolved:
+                    resolved.append(citation)
+        canonical_paragraphs.append(
+            AnswerParagraph(paragraph.text, tuple(canonical_ids))
+        )
     return CitationValidationResult(
         valid=not errors,
         errors=tuple(_dedupe(errors)),
         citations=tuple(resolved),
-        paragraphs=tuple(paragraphs),
+        paragraphs=tuple(canonical_paragraphs),
     )
 
 
-def _answer_prompt(packet: EvidencePacket) -> str:
+def _select_prompt_evidence(
+    packet: EvidencePacket,
+    prompt_budget: int,
+) -> tuple[int, ...]:
+    """Select complete evidence in packet rank order within the full prompt budget."""
+    selected: list[int] = []
+    ranked_indexes = sorted(
+        range(1, len(packet.evidence) + 1),
+        key=lambda index: (packet.evidence[index - 1].rank, index),
+    )
+    for index in ranked_indexes:
+        candidate = (*selected, index)
+        prompt = _answer_prompt(packet, candidate)
+        if (
+            _estimate_prompt_tokens(prompt) + _RETRY_ERROR_TOKEN_RESERVE
+            <= prompt_budget
+        ):
+            selected.append(index)
+    return tuple(selected)
+
+
+def _estimate_prompt_tokens(prompt: str) -> int:
+    """Use the same deterministic whitespace estimate as evidence selection."""
+    return len(prompt.split())
+
+
+def _prompt_budget_limitations(
+    packet: EvidencePacket,
+    evidence_indexes: Sequence[int],
+    prompt_budget: int,
+) -> tuple[str, ...]:
+    omitted = len(packet.evidence) - len(evidence_indexes)
+    if omitted <= 0:
+        return ()
+    return (
+        f"{omitted} evidence item(s) were omitted from the answer prompt to fit "
+        f"the {prompt_budget}-token budget.",
+    )
+
+
+def _bounded_validation_errors(errors: Sequence[str]) -> tuple[str, ...]:
+    if not errors:
+        return ()
+    normalized = " ".join(str(errors[0]).split())[:_MAX_RETRY_ERROR_CHARS]
+    return (" ".join(normalized.split()[:48]) or "invalid answer model output",)
+
+
+def _answer_prompt(
+    packet: EvidencePacket,
+    evidence_indexes: Sequence[int],
+    *,
+    validation_errors: Sequence[str] = (),
+) -> str:
     evidence = []
-    for index, item in enumerate(packet.evidence, start=1):
+    for index in evidence_indexes:
+        item = packet.evidence[index - 1]
         evidence.append(
             {
                 "citation_id": f"E{index}",
+                "chunk_alias": f"chunk:{item.chunk_id}",
                 "evidence_index": index,
                 "course": item.course,
                 "file_id": item.file_id,
@@ -214,7 +354,11 @@ def _answer_prompt(packet: EvidencePacket) -> str:
         )
     return json.dumps(
         {
-            "task": "Return only one strict JSON object; answer only from the supplied evidence.",
+            "task": (
+                "Retry and return only one corrected strict JSON object."
+                if validation_errors
+                else "Return only one strict JSON object; answer only from the supplied evidence."
+            ),
             "schema": {
                 "answer_paragraphs": [
                     {
@@ -226,28 +370,36 @@ def _answer_prompt(packet: EvidencePacket) -> str:
             },
             "query": packet.query,
             "evidence": evidence,
+            "validation_errors": list(_bounded_validation_errors(validation_errors)),
             "packet_weaknesses": list(packet.weaknesses),
             "answer_constraints": list(packet.answer_constraints),
             "rules": [
                 "Use only supplied evidence; do not use memory.",
                 "Every paragraph must cite one or more allowed citation ids.",
-                "Do not render References, paths, or citation markers.",
+                "Citation ids may use canonical E<n> or the supplied chunk:<id> alias.",
+                "Do not render References, Limitations, paths, Markdown links, or citation markers.",
                 "Return exactly the schema fields and no markdown fences.",
             ],
         },
         ensure_ascii=False,
+        separators=(",", ":"),
         sort_keys=True,
     )
 
 
-def _retry_prompt(packet: EvidencePacket, errors: Sequence[str]) -> str:
+def _retry_prompt(
+    packet: EvidencePacket,
+    evidence_indexes: Sequence[int],
+    errors: Sequence[str],
+) -> str:
     # Include the same evidence and constraints on every retry. The only new
     # content is bounded validation diagnostics; no conversation context or
     # prior invalid model output is echoed.
-    payload = json.loads(_answer_prompt(packet))
-    payload["validation_errors"] = list(_dedupe(errors))
-    payload["task"] = "Retry and return only one corrected strict JSON object."
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return _answer_prompt(
+        packet,
+        evidence_indexes,
+        validation_errors=errors,
+    )
 
 
 def _render_answer(
@@ -330,12 +482,37 @@ def _insufficient_evidence_answer(packet: EvidencePacket) -> AnswerResult:
     )
 
 
+def _prompt_budget_insufficient_answer(
+    packet: EvidencePacket,
+    prompt_budget: int,
+) -> AnswerResult:
+    paragraph = (
+        "Insufficient evidence to answer safely because no complete evidence item "
+        "fit within the configured answer prompt budget."
+    )
+    limitations = _dedupe(
+        (
+            *packet.weaknesses,
+            "No answer model was invoked because no complete evidence item fit "
+            f"within the {prompt_budget}-token answer prompt budget.",
+        )
+    )
+    return AnswerResult(
+        answer_text=_render_plain_answer(paragraph, limitations),
+        citations=(),
+        limitations=limitations,
+        model_name=None,
+        paragraphs=(AnswerParagraph(text=paragraph, citation_ids=()),),
+    )
+
+
 def _safe_validation_refusal(
     packet: EvidencePacket,
     *,
     model_name: str | None,
     attempts: int,
     errors: Sequence[str],
+    prompt_limitations: Sequence[str] = (),
 ) -> AnswerResult:
     paragraph = (
         "I cannot provide a source-grounded answer because the answer model "
@@ -344,6 +521,7 @@ def _safe_validation_refusal(
     limitations = _dedupe(
         (
             *packet.weaknesses,
+            *prompt_limitations,
             f"Answer validation failed after {attempts} attempt(s); no model answer was accepted.",
         )
     )
@@ -394,6 +572,23 @@ def validate_answer_for_storage(
         _require_same_stored_answer(answer, expected, "insufficient-evidence")
         return
 
+    prompt_evidence_indexes = _select_prompt_evidence(
+        packet,
+        config.answer_prompt_max_tokens,
+    )
+    if not prompt_evidence_indexes:
+        expected = _prompt_budget_insufficient_answer(
+            packet,
+            config.answer_prompt_max_tokens,
+        )
+        _require_same_stored_answer(answer, expected, "prompt-budget-insufficient")
+        return
+    prompt_limitations = _prompt_budget_limitations(
+        packet,
+        prompt_evidence_indexes,
+        config.answer_prompt_max_tokens,
+    )
+
     provider = config.answer_llm_provider
     model = config.answer_llm_model
     if provider not in ALLOWED_LLM_PROVIDERS or not model:
@@ -410,11 +605,16 @@ def validate_answer_for_storage(
             model_name=expected_model_name,
             attempts=config.answer_max_retries + 1,
             errors=(),
+            prompt_limitations=prompt_limitations,
         )
         _require_same_stored_answer(answer, expected, "validation-refusal")
         return
 
-    validation = validate_answer_citations(answer, packet)
+    validation = validate_answer_citations(
+        answer,
+        packet,
+        allowed_evidence_indexes=prompt_evidence_indexes,
+    )
     if not validation.valid:
         raise AnswerModelError(
             "answer citations do not validate against the evidence packet: "
@@ -425,7 +625,9 @@ def validate_answer_for_storage(
             "structured citations do not match packet-authoritative evidence"
         )
     missing_weaknesses = [
-        weakness for weakness in packet.weaknesses if weakness not in answer.limitations
+        weakness
+        for weakness in (*packet.weaknesses, *prompt_limitations)
+        if weakness not in answer.limitations
     ]
     if missing_weaknesses:
         raise AnswerModelError("answer limitations omit packet weaknesses")

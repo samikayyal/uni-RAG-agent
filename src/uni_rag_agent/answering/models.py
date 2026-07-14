@@ -14,7 +14,9 @@ from dataclasses import dataclass, field
 from ..retrieval.evidence_models import EvidenceItem, EvidencePacket, EvidenceModelError
 
 _CITATION_ID_RE = re.compile(r"^E([1-9][0-9]*)$")
-_CITATION_MARKER_RE = re.compile(r"\[\s*e\s*\d+\s*\]", re.IGNORECASE)
+_CITATION_LIKE_RE = re.compile(
+    r"\[[^\]\r\n]+\]\([^\)\r\n]*\)|\[\s*(?:\^?\d+|[eE][^\]\r\n]*)\s*\]"
+)
 
 
 class AnswerModelError(ValueError):
@@ -231,14 +233,32 @@ def parse_model_limitations(value: object) -> tuple[str, ...]:
     return tuple(item.strip() for item in raw)
 
 
-def evidence_citation_map(packet: EvidencePacket) -> dict[str, AnswerCitation]:
-    """Map only stable packet-position ids to authoritative citations."""
-    return {
-        f"E{index}": AnswerCitation.from_evidence(index, item)
-        for index, item in enumerate(packet.evidence, start=1)
-    }
+def evidence_citation_map(
+    packet: EvidencePacket,
+    evidence_indexes: Sequence[int] | None = None,
+) -> dict[str, AnswerCitation]:
+    """Map canonical ids and unambiguous ``chunk:<id>`` compatibility aliases."""
+    allowed = (
+        set(evidence_indexes)
+        if evidence_indexes is not None
+        else set(range(1, len(packet.evidence) + 1))
+    )
+    aliases: dict[str, AnswerCitation] = {}
+    for index, item in enumerate(packet.evidence, start=1):
+        if index not in allowed:
+            continue
+        citation = AnswerCitation.from_evidence(index, item)
+        aliases[citation.citation_id] = citation
+        chunk_alias = f"chunk:{item.chunk_id}"
+        existing = aliases.get(chunk_alias)
+        if existing is not None and existing != citation:
+            raise AnswerModelError(
+                f"ambiguous chunk citation alias in evidence packet: {chunk_alias}"
+            )
+        aliases[chunk_alias] = citation
+    return aliases
 
 
 def contains_citation_like_marker(text: str) -> bool:
-    """Reject model-authored markers, including malformed lookalikes."""
-    return bool(_CITATION_MARKER_RE.search(text))
+    """Reject bracketed citation lookalikes and Markdown links in model prose."""
+    return bool(_CITATION_LIKE_RE.search(text))

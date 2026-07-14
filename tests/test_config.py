@@ -16,6 +16,7 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_ANSWER_LLM_PROVIDER",
     "UNI_RAG_ANSWER_LLM_MODEL",
     "UNI_RAG_ANSWER_MAX_RETRIES",
+    "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS",
     "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT",
     "UNI_RAG_FINAL_TOP_K",
     "UNI_RAG_KEYWORD_TOP_K",
@@ -67,6 +68,7 @@ def test_defaults_resolve_from_repo_root(tmp_path: Path) -> None:
     assert config.answer_llm_provider is None
     assert config.answer_llm_model is None
     assert config.answer_max_retries == 1
+    assert config.answer_prompt_max_tokens == 16_000
     assert config.answer_session_message_limit == 20
     assert config.embedding_model is None
     assert config.llm_provider is None
@@ -105,6 +107,7 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
                 "UNI_RAG_ANSWER_LLM_PROVIDER=ollama",
                 "UNI_RAG_ANSWER_LLM_MODEL=answer-model",
                 "UNI_RAG_ANSWER_MAX_RETRIES=0",
+                "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS=4096",
                 "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT=4",
             ]
         ),
@@ -135,6 +138,7 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
     assert config.answer_llm_provider == "ollama"
     assert config.answer_llm_model == "answer-model"
     assert config.answer_max_retries == 0
+    assert config.answer_prompt_max_tokens == 4096
     assert config.answer_session_message_limit == 4
 
 
@@ -278,6 +282,14 @@ def test_safe_dict_excludes_injected_secret_values(
         (
             "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT=0",
             "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT must be greater than zero",
+        ),
+        (
+            "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS=0",
+            "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS must be greater than zero",
+        ),
+        (
+            "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS=",
+            "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS must be an integer greater than zero",
         ),
     ],
 )

@@ -773,15 +773,27 @@ The answer generator must:
 - report weak retrieval when weaknesses are present;
 - never cite files not present in the packet;
 - use structured inline citations with a references section;
-- truncate lowest-scoring evidence if total tokens exceed the LLM context window.
+- fit complete evidence items within the configured whole-prompt budget,
+  omitting lower-priority items without renumbering retained citation ids.
 
 Feature 10 makes this boundary strict and auditable:
 
 - Stable citation ids are assigned by evidence position (`E1`, `E2`, ...). The
   answer model returns exactly `answer_paragraphs` and `limitations`; model
   paragraphs contain prose without markers and each cites one or more allowed
-  ids. The application appends markers and deterministically renders a unique,
-  first-appearance-ordered References section.
+  ids. It may use the explicit `chunk:<chunk_id>` compatibility alias, which the
+  application canonicalizes to the original positional id before appending
+  markers and deterministically rendering a unique,
+  first-appearance-ordered References section. Markdown-decorated rendered
+  sections, citation lookalikes, and Markdown links are invalid model prose.
+- The complete answer-model input uses a configurable positive 16,000-token
+  default whitespace-estimated prompt budget. Evidence is considered in
+  packet/fused-rank order and only complete items are retained; omitted items do
+  not renumber positional citation ids and are disclosed in a deterministic
+  limitation. Query, schema, citation metadata,
+  weaknesses, constraints, rules, and bounded retry diagnostics all consume the
+  same budget. If no complete evidence item fits, the application stores a
+  deterministic insufficient-budget answer without invoking the provider.
 - Stored `answers.citations_json` is a canonical structured list containing
   `citation_id`, `evidence_index`, `course`, `file_id`, `chunk_id`, `file_path`,
   `source_type`, and location type/value/label. It includes only cited packet

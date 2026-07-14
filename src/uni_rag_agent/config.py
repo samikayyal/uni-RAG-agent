@@ -13,6 +13,7 @@ TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
 ALLOWED_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 ALLOWED_LLM_PROVIDERS = {"openai", "anthropic", "gemini", "ollama"}
+DEFAULT_ANSWER_PROMPT_MAX_TOKENS = 16_000
 
 
 class ConfigError(ValueError):
@@ -46,6 +47,7 @@ class Config:
     answer_llm_model: str | None = None
     answer_max_retries: int = 1
     answer_session_message_limit: int = 20
+    answer_prompt_max_tokens: int = DEFAULT_ANSWER_PROMPT_MAX_TOKENS
 
     def as_safe_dict(self) -> dict[str, str | int | float | bool | None]:
         return {
@@ -74,6 +76,7 @@ class Config:
             "answer_llm_model": self.answer_llm_model,
             "answer_max_retries": self.answer_max_retries,
             "answer_session_message_limit": self.answer_session_message_limit,
+            "answer_prompt_max_tokens": self.answer_prompt_max_tokens,
         }
 
     @property
@@ -164,6 +167,11 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
         answer_session_message_limit=_positive_int_from_env(
             env, "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT", 20
         ),
+        answer_prompt_max_tokens=_strict_positive_int_from_env(
+            env,
+            "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS",
+            DEFAULT_ANSWER_PROMPT_MAX_TOKENS,
+        ),
     )
 
 
@@ -233,6 +241,8 @@ def validate_config(config: Config) -> None:
         raise ConfigError(
             "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT must be greater than zero"
         )
+    if config.answer_prompt_max_tokens <= 0:
+        raise ConfigError("UNI_RAG_ANSWER_PROMPT_MAX_TOKENS must be greater than zero")
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -301,6 +311,12 @@ def _bounded_int_from_env(env: Mapping[str, str], name: str, default: int) -> in
 
 
 def _evidence_max_tokens_from_env(
+    env: Mapping[str, str], name: str, default: int
+) -> int:
+    return _strict_positive_int_from_env(env, name, default)
+
+
+def _strict_positive_int_from_env(
     env: Mapping[str, str], name: str, default: int
 ) -> int:
     raw_value = env.get(name)
