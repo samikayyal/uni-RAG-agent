@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any
 
 SAFE_EXTRA_FIELDS = {
+    "answer_error",
+    "answer_id",
+    "answer_model",
     "chunks_seen",
+    "citation_count",
     "collection",
     "command",
     "count",
@@ -36,6 +40,7 @@ SAFE_EXTRA_FIELDS = {
     "search_run_id",
     "llm_provider",
     "llm_model",
+    "limitation_count",
     "plan_confidence",
     "run_id",
     "rows_indexed",

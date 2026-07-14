@@ -871,3 +871,50 @@ EDA notebook without adding dependencies. Search history is inspectable even
 when a later backend fails, while Feature 10 can consume one exact packet
 without re-running retrieval or trusting mutable source state.
 
+---
+
+## DEC-035: Strict evidence-only answering with separate provider and bounded planner memory
+
+* **Status**: Accepted
+* **Date**: 2026-07-14
+
+### Context
+
+Answer generation must remain auditable and safe when a model emits malformed
+JSON, cites unknown chunks, or is unavailable. Planner configuration cannot be
+silently reused for answers, and follow-up context must not become an
+unstored, unbounded answer input.
+
+### Decision
+
+- The answer model receives only the immutable packet, allowed positional
+  citation ids, and answer constraints. It returns exactly one JSON object with
+  `answer_paragraphs` and `limitations`; the application validates and renders
+  markers/references deterministically.
+- `UNI_RAG_ANSWER_LLM_PROVIDER` and `UNI_RAG_ANSWER_LLM_MODEL` are a separate
+  nullable configuration pair using the existing provider allow-list. They are
+  required only for non-empty evidence. Persisted `answers.model_name` uses the
+  safe `provider:model` form; `answers` remains append-only.
+- The append-only persistence boundary reloads the immutable packet before each
+  insert and accepts only packet-authoritative citations, matching rendered
+  text, complete packet weaknesses, and exact deterministic insufficient or
+  refusal outcomes. Caller-constructed audit fields are not trusted.
+- Empty evidence bypasses the answer model and produces a useful deterministic
+  insufficient-evidence result. Invalid model output retries according to the
+  nonnegative `UNI_RAG_ANSWER_MAX_RETRIES`; exhausted retries become a stored
+  no-citation safe refusal. Provider construction/invocation failures create no
+  answer row. Prompts, keys, and invalid raw output are never persisted or
+  emitted in telemetry.
+- `AnswerSession` retains only complete user/assistant turns up to its positive
+  message bound and passes them to the planner only. `generate_answer` keeps a
+  compatibility context parameter but ignores it.
+
+### Consequences
+
+Answers can be replayed and audited from packet plus structured citations,
+weaknesses are visible as limitations, and one-shot `ask` can safely preserve
+the evidence packet when the independent answer provider fails. Tests inject
+deterministic chat doubles without requiring credentials. Packet-relative
+validation at the final write boundary keeps append-only traces authoritative
+for CLI and programmatic callers alike.
+

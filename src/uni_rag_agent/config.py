@@ -42,6 +42,10 @@ class Config:
     filename_fuzzy_threshold: int = 85
     path_fuzzy_threshold: int = 90
     evidence_max_tokens: int = 12_000
+    answer_llm_provider: str | None = None
+    answer_llm_model: str | None = None
+    answer_max_retries: int = 1
+    answer_session_message_limit: int = 20
 
     def as_safe_dict(self) -> dict[str, str | int | float | bool | None]:
         return {
@@ -66,6 +70,10 @@ class Config:
             "filename_fuzzy_threshold": self.filename_fuzzy_threshold,
             "path_fuzzy_threshold": self.path_fuzzy_threshold,
             "evidence_max_tokens": self.evidence_max_tokens,
+            "answer_llm_provider": self.answer_llm_provider,
+            "answer_llm_model": self.answer_llm_model,
+            "answer_max_retries": self.answer_max_retries,
+            "answer_session_message_limit": self.answer_session_message_limit,
         }
 
     @property
@@ -76,6 +84,16 @@ class Config:
     @property
     def extracted_dir(self) -> Path:
         return self.data_dir / "extracted"
+
+    @property
+    def answer_provider(self) -> str | None:
+        """Short alias used by answer integrations."""
+        return self.answer_llm_provider
+
+    @property
+    def answer_model(self) -> str | None:
+        """Short alias used by answer integrations."""
+        return self.answer_llm_model
 
 
 Settings = Config
@@ -138,6 +156,14 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
         evidence_max_tokens=_evidence_max_tokens_from_env(
             env, "UNI_RAG_EVIDENCE_MAX_TOKENS", 12_000
         ),
+        answer_llm_provider=_optional_str_from_env(env, "UNI_RAG_ANSWER_LLM_PROVIDER"),
+        answer_llm_model=_optional_str_from_env(env, "UNI_RAG_ANSWER_LLM_MODEL"),
+        answer_max_retries=_nonnegative_int_from_env(
+            env, "UNI_RAG_ANSWER_MAX_RETRIES", 1
+        ),
+        answer_session_message_limit=_positive_int_from_env(
+            env, "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT", 20
+        ),
     )
 
 
@@ -188,6 +214,25 @@ def validate_config(config: Config) -> None:
             raise ConfigError(f"UNI_RAG_LLM_PROVIDER must be one of: {allowed}")
         if not model or not model.strip():
             raise ConfigError("UNI_RAG_LLM_MODEL cannot be empty")
+
+    answer_provider = config.answer_llm_provider
+    answer_model = config.answer_llm_model
+    if (answer_provider is None) != (answer_model is None):
+        raise ConfigError(
+            "UNI_RAG_ANSWER_LLM_PROVIDER and UNI_RAG_ANSWER_LLM_MODEL must be set together"
+        )
+    if answer_provider is not None:
+        if answer_provider not in ALLOWED_LLM_PROVIDERS:
+            allowed = ", ".join(sorted(ALLOWED_LLM_PROVIDERS))
+            raise ConfigError(f"UNI_RAG_ANSWER_LLM_PROVIDER must be one of: {allowed}")
+        if not answer_model or not answer_model.strip():
+            raise ConfigError("UNI_RAG_ANSWER_LLM_MODEL cannot be empty")
+    if config.answer_max_retries < 0:
+        raise ConfigError("UNI_RAG_ANSWER_MAX_RETRIES must be nonnegative")
+    if config.answer_session_message_limit <= 0:
+        raise ConfigError(
+            "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT must be greater than zero"
+        )
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -267,6 +312,34 @@ def _evidence_max_tokens_from_env(
         value = int(raw_value)
     except ValueError as exc:
         raise ConfigError(f"{name} must be an integer greater than zero") from exc
+    if value <= 0:
+        raise ConfigError(f"{name} must be greater than zero")
+    return value
+
+
+def _nonnegative_int_from_env(env: Mapping[str, str], name: str, default: int) -> int:
+    raw_value = env.get(name)
+    if raw_value is None:
+        return default
+    if raw_value.strip() == "":
+        raise ConfigError(f"{name} must be a nonnegative integer")
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be an integer") from exc
+    if value < 0:
+        raise ConfigError(f"{name} must be nonnegative")
+    return value
+
+
+def _positive_int_from_env(env: Mapping[str, str], name: str, default: int) -> int:
+    raw_value = env.get(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be an integer") from exc
     if value <= 0:
         raise ConfigError(f"{name} must be greater than zero")
     return value

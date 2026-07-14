@@ -13,6 +13,10 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_DATA_DIR",
     "UNI_RAG_EMBEDDING_MODEL",
     "UNI_RAG_EVIDENCE_MAX_TOKENS",
+    "UNI_RAG_ANSWER_LLM_PROVIDER",
+    "UNI_RAG_ANSWER_LLM_MODEL",
+    "UNI_RAG_ANSWER_MAX_RETRIES",
+    "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT",
     "UNI_RAG_FINAL_TOP_K",
     "UNI_RAG_KEYWORD_TOP_K",
     "UNI_RAG_LLM_MODEL",
@@ -60,6 +64,10 @@ def test_defaults_resolve_from_repo_root(tmp_path: Path) -> None:
     assert config.filename_fuzzy_threshold == 85
     assert config.path_fuzzy_threshold == 90
     assert config.evidence_max_tokens == 12_000
+    assert config.answer_llm_provider is None
+    assert config.answer_llm_model is None
+    assert config.answer_max_retries == 1
+    assert config.answer_session_message_limit == 20
     assert config.embedding_model is None
     assert config.llm_provider is None
     assert config.llm_model is None
@@ -94,6 +102,10 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
                 "UNI_RAG_LLM_MODEL=llama3.2",
                 "UNI_RAG_EMBEDDING_MODEL=BAAI/bge-m3",
                 "UNI_RAG_OCR_ENABLED=true",
+                "UNI_RAG_ANSWER_LLM_PROVIDER=ollama",
+                "UNI_RAG_ANSWER_LLM_MODEL=answer-model",
+                "UNI_RAG_ANSWER_MAX_RETRIES=0",
+                "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT=4",
             ]
         ),
         encoding="utf-8",
@@ -120,6 +132,10 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
     assert config.llm_provider == "ollama"
     assert config.llm_model == "llama3.2"
     assert config.ocr_enabled is True
+    assert config.answer_llm_provider == "ollama"
+    assert config.answer_llm_model == "answer-model"
+    assert config.answer_max_retries == 0
+    assert config.answer_session_message_limit == 4
 
 
 def test_blank_optional_model_and_provider_values_are_unset(tmp_path: Path) -> None:
@@ -247,6 +263,22 @@ def test_safe_dict_excludes_injected_secret_values(
         ("UNI_RAG_QUERY_PLAN_MIN_CONFIDENCE=1.1", "must be between 0 and 1"),
         ("UNI_RAG_LLM_PROVIDER=openai", "must be set together"),
         ("UNI_RAG_LLM_PROVIDER=unknown\nUNI_RAG_LLM_MODEL=model", "must be one of"),
+        (
+            "UNI_RAG_ANSWER_LLM_PROVIDER=openai",
+            "UNI_RAG_ANSWER_LLM_PROVIDER and UNI_RAG_ANSWER_LLM_MODEL must be set together",
+        ),
+        (
+            "UNI_RAG_ANSWER_MAX_RETRIES=-1",
+            "UNI_RAG_ANSWER_MAX_RETRIES must be nonnegative",
+        ),
+        (
+            "UNI_RAG_ANSWER_MAX_RETRIES=",
+            "UNI_RAG_ANSWER_MAX_RETRIES must be a nonnegative integer",
+        ),
+        (
+            "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT=0",
+            "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT must be greater than zero",
+        ),
     ],
 )
 def test_feature_08_config_validation(

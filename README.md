@@ -36,6 +36,8 @@ uv run -m uni_rag_agent retrieve "Find the Information Retrieval syllabus" --mod
 uv run -m uni_rag_agent retrieve "query text" --model BAAI/bge-m3 --json
 uv run -m uni_rag_agent evidence build "Explain MapReduce" --model BAAI/bge-m3
 uv run -m uni_rag_agent evidence show --search-run-id 1
+uv run -m uni_rag_agent answer --evidence-packet-id 1
+uv run -m uni_rag_agent ask "Explain MapReduce from my courses" --model BAAI/bge-m3
 ```
 
 Runtime configuration is loaded from `.env` with non-secret defaults documented
@@ -64,6 +66,8 @@ uv run -m uni_rag_agent search keyword "mapreduce"
 uv run -m uni_rag_agent search keyword "mapreduce" --course "Information Retrieval"
 uv run -m uni_rag_agent search keyword "mapreduce" --index slides_index --top-k 10
 uv run -m uni_rag_agent search keyword "mapreduce" --json
+uv run -m uni_rag_agent answer --evidence-packet-id 1 --json
+uv run -m uni_rag_agent ask "Explain MapReduce from my courses" --model BAAI/bge-m3 --json
 uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3
 uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3 --index slides_index --course "Information Retrieval" --top-k 10 --json
 uv run -m pytest tests/test_cli.py tests/test_config.py tests/test_storage.py tests/test_logging_config.py tests/test_inventory.py tests/test_extraction.py tests/test_data_summaries.py tests/test_keyword_indexing.py tests/test_vector_indexing.py
@@ -219,6 +223,28 @@ uv run -m uni_rag_agent evidence build "Explain MapReduce" --model BAAI/bge-m3 -
 uv run -m uni_rag_agent evidence build "Explain MapReduce" --model BAAI/bge-m3 --debug
 uv run -m uni_rag_agent evidence show --search-run-id 1 --json
 ```
+
+Feature 10 answers a stored packet without rerunning retrieval. Configure a
+separate answer provider/model pair in `.env` (the pair is optional for general
+commands and required only when a non-empty packet reaches answer generation):
+
+```powershell
+$env:UNI_RAG_ANSWER_LLM_PROVIDER = "ollama"
+$env:UNI_RAG_ANSWER_LLM_MODEL = "llama3.2"
+$env:UNI_RAG_ANSWER_MAX_RETRIES = "1"
+$env:UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT = "20"
+uv sync --extra llm
+uv run -m uni_rag_agent answer --evidence-packet-id 1
+```
+
+The answer model returns strict JSON paragraphs with positional ids (`E1`,
+`E2`, ...). The application adds inline markers and a deterministic References
+section, stores structured citations and limitations in the append-only
+`answers` table, and never stores prompts or conversation context. Empty
+evidence produces a deterministic insufficient-evidence answer without calling
+the answer model. `ask` runs planner/retrieval and answer generation in one
+shot; the evidence packet remains persisted if answer-provider construction or
+invocation fails. Answer failures use exit code `9`.
 
 ## MVP Module Order
 

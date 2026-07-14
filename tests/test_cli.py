@@ -13,9 +13,27 @@ import uni_rag_agent
 import uni_rag_agent.cli as cli
 from tests.support import clean_subprocess_env
 from tests.support import make_config
+from uni_rag_agent.answering import AnswerGenerationError, AnswerResult
 from uni_rag_agent.retrieval import EvidenceError
+from uni_rag_agent.storage import StorageError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+class _CaptureLogger:
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+
+    def info(self, message: str, *, extra: dict[str, object]) -> None:
+        del message
+        self.events.append(extra)
+
+    def error(self, message: str, *, extra: dict[str, object]) -> None:
+        del message
+        self.events.append(extra)
+
+    def exception(self, message: str, *, extra: dict[str, object]) -> None:
+        raise AssertionError(f"unsafe exception telemetry used for {message}: {extra}")
 
 
 def run_cli(
@@ -157,6 +175,110 @@ def test_evidence_show_failure_uses_packet_load_error_event(
     assert return_code == cli.EVIDENCE_ERROR
     assert "Evidence error: missing packet" in captured.err
     assert logger.events[-1]["event"] == "evidence_packet_load_failed"
+
+
+def test_answer_handler_emits_one_json_result_with_audit_ids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = make_config(tmp_path)
+    logger = _CaptureLogger()
+    packet = SimpleNamespace(search_run_id=11)
+    answer = AnswerResult(
+        answer_text="Insufficient evidence.",
+        limitations=("No evidence.",),
+    )
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "_command_logger", lambda *args, **kwargs: logger)
+    monkeypatch.setattr(cli, "load_evidence_packet", lambda *args, **kwargs: packet)
+    monkeypatch.setattr(cli, "generate_answer", lambda *args, **kwargs: answer)
+    monkeypatch.setattr(cli, "store_answer", lambda *args, **kwargs: 33)
+
+    return_code = cli.main(["answer", "--evidence-packet-id", "22", "--json"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert return_code == cli.SUCCESS
+    assert captured.err == ""
+    assert payload["answer_id"] == 33
+    assert payload["evidence_packet_id"] == 22
+    assert payload["search_run_id"] == 11
+    assert logger.events[-1]["event"] == "answer_completed"
+
+
+def test_ask_answer_failure_returns_answer_error_and_keeps_packet_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = make_config(
+        tmp_path,
+        embedding_model="BAAI/bge-m3",
+        llm_provider="ollama",
+        llm_model="planner",
+        answer_llm_provider="ollama",
+        answer_llm_model="answerer",
+    )
+    logger = _CaptureLogger()
+    evidence_result = SimpleNamespace(
+        packet=object(),
+        evidence_packet_id=22,
+        search_run_id=11,
+    )
+    store_called = False
+
+    def fail_store(*args, **kwargs):
+        nonlocal store_called
+        store_called = True
+
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "_command_logger", lambda *args, **kwargs: logger)
+    monkeypatch.setattr(cli, "build_evidence", lambda *args, **kwargs: evidence_result)
+    monkeypatch.setattr(
+        cli,
+        "generate_answer",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AnswerGenerationError("provider down")
+        ),
+    )
+    monkeypatch.setattr(cli, "store_answer", fail_store)
+
+    return_code = cli.main(["ask", "grounded query", "--model", "BAAI/bge-m3"])
+
+    captured = capsys.readouterr()
+    assert return_code == cli.ANSWER_ERROR
+    assert "Answer error: provider down" in captured.err
+    assert not store_called
+    assert logger.events[-1]["event"] == "ask_answer_failed"
+    assert logger.events[-1]["evidence_packet_id"] == 22
+
+
+def test_ask_storage_failure_uses_sanitized_error_telemetry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
+    logger = _CaptureLogger()
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "_command_logger", lambda *args, **kwargs: logger)
+    monkeypatch.setattr(
+        cli,
+        "build_evidence",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            StorageError("D:\\private\\database.sqlite failed")
+        ),
+    )
+
+    return_code = cli.main(["ask", "query", "--model", "BAAI/bge-m3"])
+
+    captured = capsys.readouterr()
+    assert return_code == cli.STORAGE_ERROR
+    assert "Storage error:" in captured.err
+    assert logger.events[-1]["event"] == "ask_failed"
+    assert logger.events[-1]["answer_error"] == "StorageError"
+    assert "exception" not in logger.events[-1]
 
 
 def test_retrieval_eda_notebook_contract_is_read_only_and_output_free() -> None:

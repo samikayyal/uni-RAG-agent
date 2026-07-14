@@ -99,7 +99,7 @@ Stage notebooks are created when the producing stage is implemented. Do not add 
 | Keyword indexing / 06 | `notebooks/keyword_index_eda.ipynb` | Implemented | `chunk_fts`, `chunks`, joined `files`/`courses` rows | FTS coverage, source-type distribution, query smoke results, empty or mismatched rows. |
 | Vector indexing / 07 | `notebooks/vector_index_eda.ipynb` | Implemented | `embeddings`, Chroma collection metadata, `chunks` | Embedding coverage, collection sizes, model/dimension consistency, missing embeddings. |
 | Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Implemented with Feature 09 | `search_runs`, `search_result_sets`, `search_results`, `evidence_packets` | Query-plan behavior, result-set completion, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
-| Answering / 10 | `notebooks/answering_eda.ipynb` | Planned when Feature 10 lands | `answers`, `evidence_packets` | Citation validity, limitations, model traces, injected-test behavior, insufficient-evidence handling. |
+| Answering / 10 | `notebooks/answering_eda.ipynb` | Implemented with Feature 10 | `answers`, `evidence_packets` | Citation validity, limitations, model traces, injected-test behavior, insufficient-evidence handling. |
 | UI / 11 | None required for MVP | Not applicable | FastAPI responses and UI tests | UI correctness is covered by API/UI tests; use retrieval/answering notebooks for underlying traces. |
 | Evaluation / 12 | `notebooks/evaluation_eda.ipynb` | Planned when Feature 12 lands | `data/runs/eval/` reports, optional answer/search traces | Eval score trends, failures, citation quality, retrieval quality, runtime summaries. |
 
@@ -774,6 +774,33 @@ The answer generator must:
 - never cite files not present in the packet;
 - use structured inline citations with a references section;
 - truncate lowest-scoring evidence if total tokens exceed the LLM context window.
+
+Feature 10 makes this boundary strict and auditable:
+
+- Stable citation ids are assigned by evidence position (`E1`, `E2`, ...). The
+  answer model returns exactly `answer_paragraphs` and `limitations`; model
+  paragraphs contain prose without markers and each cites one or more allowed
+  ids. The application appends markers and deterministically renders a unique,
+  first-appearance-ordered References section.
+- Stored `answers.citations_json` is a canonical structured list containing
+  `citation_id`, `evidence_index`, `course`, `file_id`, `chunk_id`, `file_path`,
+  `source_type`, and location type/value/label. It includes only cited packet
+  evidence. Before every append, the persistence boundary reloads the immutable
+  packet, reconstructs authoritative citations, and requires structured fields,
+  rendered markers/references, packet weaknesses, the deterministic outcome,
+  and configured `provider:model` identity to match. `answers` is append-only.
+- Empty packets produce a useful deterministic insufficient-evidence answer
+  from coverage without invoking the answer model. Non-empty packets invoke the
+  separately configured answer provider even when weaknesses exist; packet
+  weaknesses are deduplicated into limitations.
+- Invalid JSON, schema, paragraph, marker, or citation output retries up to
+  `UNI_RAG_ANSWER_MAX_RETRIES` (default 1). Exhaustion returns and stores a
+  deterministic no-citation safe refusal. Provider construction/invocation
+  failures create no answer row. Retry prompts include validation errors only,
+  never new evidence or conversation context.
+- Planner and answer provider/model settings are separate nullable pairs.
+  `AnswerSession` retains bounded complete user/assistant turns in memory for
+  planner context only; answer prompts and storage never receive raw context.
 
 ## Tool Interfaces
 

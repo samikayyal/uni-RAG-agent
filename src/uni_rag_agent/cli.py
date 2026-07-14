@@ -11,6 +11,14 @@ from logging import Logger
 from typing import Callable, Protocol
 
 from . import __version__
+from .answering import (
+    AnswerGenerationError,
+    AnswerModelError,
+    AnswerResult,
+    AnswerSession,
+    generate_answer,
+    store_answer,
+)
 from .config import Config, ConfigError, load_config, validate_config
 from .extraction import (
     DataSummaryRunResult,
@@ -71,6 +79,7 @@ EXTRACTION_ERROR = 5
 INDEX_ERROR = 6
 SEARCH_ERROR = 7
 EVIDENCE_ERROR = 8
+ANSWER_ERROR = 9
 
 CommandHandler = Callable[[argparse.Namespace], int]
 
@@ -89,6 +98,8 @@ Available command shapes:
   uv run -m uni_rag_agent retrieve "query text"
   uv run -m uni_rag_agent evidence build "query text"
   uv run -m uni_rag_agent evidence show --search-run-id 1
+  uv run -m uni_rag_agent answer --evidence-packet-id 1
+  uv run -m uni_rag_agent ask "Explain MapReduce from my courses"
   uv run -m uni_rag_agent eval run
   uv run -m uni_rag_agent app serve
 """
@@ -128,6 +139,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_search_commands(subparsers)
     _add_retrieve_command(subparsers)
     _add_evidence_commands(subparsers)
+    _add_answer_commands(subparsers)
+    _add_ask_command(subparsers)
     _add_stub_group(
         subparsers,
         "eval",
@@ -456,6 +469,43 @@ def _add_evidence_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Print the exact parsed stored packet as JSON.",
     )
     show_parser.set_defaults(handler=_handle_evidence_show)
+
+
+def _add_answer_commands(subparsers: argparse._SubParsersAction) -> None:
+    answer_parser = subparsers.add_parser(
+        "answer",
+        help="Generate and persist an answer from an existing evidence packet.",
+    )
+    answer_parser.add_argument(
+        "--evidence-packet-id",
+        type=int,
+        required=True,
+        help="Evidence packet identifier to answer.",
+    )
+    answer_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print one complete answer result JSON object.",
+    )
+    answer_parser.set_defaults(handler=_handle_answer)
+
+
+def _add_ask_command(subparsers: argparse._SubParsersAction) -> None:
+    ask_parser = subparsers.add_parser(
+        "ask",
+        help="Build an evidence packet and answer it in one shot.",
+    )
+    ask_parser.add_argument("query", nargs="+", help="Query text.")
+    ask_parser.add_argument(
+        "--model",
+        help="Supported Hugging Face embedding profile; overrides UNI_RAG_EMBEDDING_MODEL.",
+    )
+    ask_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print one complete answer result JSON object.",
+    )
+    ask_parser.set_defaults(handler=_handle_ask)
 
 
 def _handle_config_check(_: argparse.Namespace) -> int:
@@ -1083,6 +1133,177 @@ def _handle_evidence_show(args: argparse.Namespace) -> int:
     else:
         _print_evidence_packet(packet)
     return SUCCESS
+
+
+def _handle_answer(args: argparse.Namespace) -> int:
+    command_name = "answer"
+    logger: Logger | None = None
+    try:
+        config = load_config()
+        validate_config(config)
+        logger = _command_logger(config, command_name)
+        packet = load_evidence_packet(
+            config, evidence_packet_id=args.evidence_packet_id
+        )
+        logger.info(
+            "answer generation started",
+            extra={
+                "event": "answer_generation_started",
+                "command": command_name,
+                "status": "started",
+                "evidence_packet_id": args.evidence_packet_id,
+            },
+        )
+        answer = generate_answer(packet, config=config)
+        answer_id = store_answer(
+            args.evidence_packet_id,
+            answer,
+            config=config,
+        )
+        result = _answer_with_ids(
+            answer,
+            answer_id=answer_id,
+            evidence_packet_id=args.evidence_packet_id,
+            search_run_id=packet.search_run_id,
+        )
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except StorageError as exc:
+        print(f"Storage error: {exc}", file=sys.stderr)
+        return STORAGE_ERROR
+    except EvidenceError as exc:
+        print(f"Evidence error: {exc}", file=sys.stderr)
+        return EVIDENCE_ERROR
+    except (AnswerGenerationError, AnswerModelError) as exc:
+        if logger is not None:
+            logger.error(
+                "answer generation failed",
+                extra={
+                    "event": "answer_generation_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "answer_error": type(exc).__name__,
+                },
+            )
+        print(f"Answer error: {exc}", file=sys.stderr)
+        return ANSWER_ERROR
+
+    _log_answer_event(logger, result, command_name)
+    _print_answer_result(result, json_output=args.json)
+    return SUCCESS
+
+
+def _handle_ask(args: argparse.Namespace) -> int:
+    command_name = "ask"
+    query_text = " ".join(args.query)
+    logger: Logger | None = None
+    model_label = "(unset)"
+    packet_id: int | None = None
+    try:
+        config = load_config()
+        validate_config(config)
+        model_label = _embedding_model_log_label(config, args.model)
+        logger = _command_logger(config, command_name)
+        result = build_evidence(config, query_text, model=args.model)
+        packet_id = result.evidence_packet_id
+        answer = generate_answer(result.packet, config=config)
+        answer_id = store_answer(packet_id, answer, config=config)
+        answer_result = _answer_with_ids(
+            answer,
+            answer_id=answer_id,
+            evidence_packet_id=packet_id,
+            search_run_id=result.search_run_id,
+        )
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except StorageError as exc:
+        if logger is not None:
+            logger.error(
+                "ask failed",
+                extra={
+                    "event": "ask_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "model": model_label,
+                    "answer_error": "StorageError",
+                },
+            )
+        print(f"Storage error: {exc}", file=sys.stderr)
+        return STORAGE_ERROR
+    except (RetrievalError, QueryPlanningError) as exc:
+        print(f"Retrieval error: {exc}", file=sys.stderr)
+        return SEARCH_ERROR
+    except EvidenceError as exc:
+        print(f"Evidence error: {exc}", file=sys.stderr)
+        return EVIDENCE_ERROR
+    except (AnswerGenerationError, AnswerModelError) as exc:
+        # Evidence was built before answer generation; leave its packet and
+        # search trace intact, but report the independent answer failure.
+        if logger is not None:
+            logger.error(
+                "ask answer generation failed",
+                extra={
+                    "event": "ask_answer_failed",
+                    "command": command_name,
+                    "status": "failed",
+                    "model": model_label,
+                    "evidence_packet_id": packet_id,
+                },
+            )
+        print(f"Answer error: {exc}", file=sys.stderr)
+        return ANSWER_ERROR
+
+    _log_answer_event(logger, answer_result, command_name)
+    _print_answer_result(answer_result, json_output=args.json)
+    return SUCCESS
+
+
+def _answer_with_ids(
+    answer: AnswerResult,
+    *,
+    answer_id: int,
+    evidence_packet_id: int,
+    search_run_id: int,
+) -> AnswerResult:
+    from dataclasses import replace
+
+    return replace(
+        answer,
+        answer_id=answer_id,
+        evidence_packet_id=evidence_packet_id,
+        search_run_id=search_run_id,
+    )
+
+
+def _print_answer_result(answer: AnswerResult, *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(answer.as_safe_dict(), indent=2, sort_keys=True))
+    else:
+        print(answer.answer_text)
+
+
+def _log_answer_event(
+    logger: Logger | None,
+    answer: AnswerResult,
+    command_name: str,
+) -> None:
+    if logger is None:
+        return
+    logger.info(
+        "answer completed",
+        extra={
+            "event": "answer_completed",
+            "command": command_name,
+            "status": "completed",
+            "answer_id": answer.answer_id,
+            "evidence_packet_id": answer.evidence_packet_id,
+            "citation_count": len(answer.citations),
+            "limitation_count": len(answer.limitations),
+            "answer_model": answer.model_name,
+        },
+    )
 
 
 def _log_retrieval_events(

@@ -2,41 +2,38 @@
 
 ## Purpose
 
-Generate final user-facing answers strictly from evidence packets, with inline citations, a references section, and clear insufficient-evidence behavior.
+Generate final user-facing answers strictly from immutable evidence packets,
+with stable inline citation markers, a deterministic references section, and
+clear insufficient-evidence behavior.
 
 ## Depends On
 
 - [09-evidence-packets-and-coverage.md](09-evidence-packets-and-coverage.md)
 - `context/architecture.md` tables: `answers`, `evidence_packets`
-- DEC-004, DEC-010, DEC-018, DEC-020, DEC-021
+- DEC-004, DEC-010, DEC-018, DEC-020, DEC-021, DEC-035
 
 ## In Scope
 
-- Load an evidence packet and generate an answer using only packet evidence.
-- Use LangChain chat model abstraction with configurable provider/model.
-- Use an injected test-only chat model for deterministic answer-generation tests.
-- Enforce inline citation format.
-- Include a references section listing cited files and locations.
-- Refuse or qualify answers when evidence is insufficient.
-- Store final answer traces.
-- Support per-session conversation context for follow-up query planning while keeping each packet self-contained.
-- Add or update the answering EDA notebook for persisted answer and citation traces.
+- Load an evidence packet and answer only from packet evidence.
+- Use a separately configured LangChain chat model and injected deterministic
+  test doubles.
+- Enforce strict JSON, inline citation, references, and limitation contracts.
+- Persist append-only answer traces and expose `answer` and one-shot `ask`.
+- Bound in-process planner-only conversation context.
+- Add the read-only `notebooks/answering_eda.ipynb` notebook.
 
 ## Out of Scope
 
-- Retrieval.
-- UI rendering.
-- Direct source-file inspection.
-- Claims based on model memory or unstored conversation context.
-- Cross-session persistent memory.
+- Retrieval, UI rendering, direct source-file inspection, claims from model
+  memory, and cross-session persistent memory.
 
 ## Public Interfaces
 
-Command:
+Commands:
 
 ```powershell
 uv run -m uni_rag_agent answer --evidence-packet-id 1
-uv run -m uni_rag_agent ask "Explain MapReduce from my courses"
+uv run -m uni_rag_agent ask "Explain MapReduce from my courses" --model BAAI/bge-m3
 ```
 
 Notebook:
@@ -44,8 +41,6 @@ Notebook:
 ```text
 notebooks/answering_eda.ipynb
 ```
-
-Create this notebook when answering is implemented. It should inspect `answers`, joined `evidence_packets`, citation JSON, limitations, model traces, injected-test behavior, and insufficient-evidence handling.
 
 Internal interfaces:
 
@@ -56,74 +51,99 @@ format_citation(evidence_item: EvidenceItem) -> str
 validate_answer_citations(answer: AnswerResult, packet: EvidencePacket) -> CitationValidationResult
 ```
 
-Answer result fields:
+`conversation_context` remains in `generate_answer` for signature
+compatibility, is validated/ignored, and never reaches the answer prompt or
+storage. `AnswerSession` passes prior complete user/assistant turns only to the
+planner and evicts the oldest complete turns when the positive
+`UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT` bound is reached.
 
-```text
-answer_text
-citations
-limitations
-model_name
+The model must return exactly one JSON object with exactly these fields:
+
+```json
+{"answer_paragraphs":[{"text":"nonblank prose without citation markers","citation_ids":["E1"]}],"limitations":[]}
 ```
 
-Required answer format:
+Stable ids `E1`, `E2`, ... are assigned by packet evidence position (1-based).
+Validation accepts the corresponding chunk-id alias for compatibility, but the
+application always renders canonical positional markers. Every non-empty
+packet paragraph must be nonblank and cite at least one known evidence item.
+Structured stored citations contain `citation_id`, `evidence_index`, `course`,
+`file_id`, `chunk_id`, `file_path`, `source_type`, and
+`location_type`/`location_value`/`location_label`; only cited evidence appears.
+
+Required rendered answer format:
 
 ```text
-<answer with inline citations>
+<answer paragraph with [E1] markers>
 
 References:
 - <course> - <file path> - <location>
 
 Limitations:
-- <weakness or insufficient evidence note, when relevant>
+- <weakness or insufficient-evidence note, when relevant>
 ```
 
-## Storage and Schema Impact
+## Configuration
 
-Read:
-
-- `evidence_packets`
-
-Populate:
-
-- `answers`
-
-`answers.citations_json` must contain structured citations mapped to evidence items, not only rendered strings.
+`UNI_RAG_ANSWER_LLM_PROVIDER` and `UNI_RAG_ANSWER_LLM_MODEL` are nullable as a
+pair during general validation and use the same provider allow-list as the
+planner. They are mandatory only when non-empty evidence reaches answer
+generation; planner settings are never a fallback. `UNI_RAG_ANSWER_MAX_RETRIES`
+defaults to `1` and is nonnegative (`0` means no retry). The session message
+limit defaults to `20` and is positive. Stored `answers.model_name` is the
+safe `provider:model` value.
 
 ## Workflow
 
-1. Load evidence packet by ID or receive packet from the ask pipeline.
-2. If evidence is empty or weak, produce an insufficient-evidence answer using searched/found/missing coverage.
-3. Build a prompt that includes only packet evidence and answer constraints.
-4. Generate answer via the configured LangChain chat model.
-5. Validate that every citation maps to packet evidence.
-6. Add or repair references section when possible.
-7. Store answer text, citations, limitations, and model name.
-8. Keep `notebooks/answering_eda.ipynb` aligned with answer fields, citation JSON shape, limitation semantics, model trace fields, and injected-test behavior.
+1. Load an evidence packet by id or receive one from `ask`.
+2. For empty evidence, produce a deterministic useful insufficient-evidence
+   answer from searched/found/missing coverage without invoking an answer model.
+3. For non-empty evidence, prompt with packet evidence, allowed ids, and
+   constraints only; packet weaknesses are deduplicated into limitations.
+4. Invoke the configured answer provider and validate strict JSON, paragraph
+   rules, citation ids, and absence of markers in model prose.
+5. Retry with the same evidence and validation errors only, up to the configured
+   retry count. After exhaustion, return a deterministic safe refusal with no
+   citations and a validation-failure limitation. Do not persist invalid model
+   responses or prompts.
+6. Provider construction/invocation failure creates no answer row. Validated,
+   deterministic insufficient, and safe-refusal outcomes are append-only rows.
+7. Before insertion, `store_answer` reloads the immutable packet and rejects
+   mismatched evidence indexes/chunk ids, altered authoritative citation fields,
+   inconsistent rendered markers/references, missing packet weaknesses,
+   unqualified model identities, and forged deterministic refusals.
+8. `ask` persists the Feature 09 packet before answer generation, so an answer
+   failure leaves the search/evidence trace available.
 
 ## Failure and Safety Rules
 
-- The answer generator must not cite files absent from the packet.
-- The answer generator must not answer from model memory when evidence is missing.
-- If citation validation fails, return a safe insufficient-evidence response or retry with stricter instructions.
-- Do not include API keys or internal prompts in stored answers.
-- Conversation memory may help interpret follow-up queries, but evidence packets remain self-contained.
-- The EDA notebook must read generated app data only and must not mutate SQLite, evidence packets, answers, or `Courses`.
-- Notebook outputs and execution counts should be cleared before commit.
+- Never cite files absent from the packet or answer from model memory.
+- `ANSWER_ERROR=9` is reserved for answer provider/validation boundaries;
+  existing configuration, storage, retrieval, and evidence domains remain.
+- Telemetry contains counts, ids, provider/model labels, and statuses only; it
+  never includes prompts, keys, or raw invalid output.
+- The EDA notebook opens SQLite with `mode=ro` and `PRAGMA query_only=ON`,
+  handles invalid JSON safely, and has cleared outputs/execution counts.
 
 ## Tests
 
-- Automated tests inject a deterministic test-only chat model for cited answer, insufficient evidence, weak retrieval, and invalid citation repair/refusal.
-- Verify every inline citation maps to a packet evidence item.
-- Verify references section includes full file paths and locations.
-- Verify answers with empty evidence do not invent facts.
-- Verify answer-generation tests do not require production model credentials.
-- Verify `notebooks/answering_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
-- Optional smoke: run `uv run -m uni_rag_agent ask "query"` against a tiny fixture index with explicitly configured production models.
+- Inject deterministic chat doubles for cited answers, empty evidence, weak
+  packet limitations, retries (including zero), unknown ids, safe refusal, and
+  provider failure/no-row behavior.
+- Verify citation maps by evidence index and chunk id, per-paragraph citation,
+  stable references, append-only rows, separate `provider:model`, and packet
+  persistence when `ask` answer generation fails.
+- Verify persistence rejects packet/citation/weakness/rendering/model mismatches
+  and forged refusals without inserting an answer row.
+- Cover CLI answer/ask JSON/text/error codes, config validation, bounded
+  planner-only `AnswerSession`, sanitized failure telemetry, and read-only
+  notebook validity.
 
 ## Acceptance Criteria
 
-- `uv run -m uni_rag_agent answer --evidence-packet-id ...` writes an evidence-grounded answer.
-- Answers cite course, file, and location where available.
-- Insufficient evidence is explicit and useful.
-- Stored answer traces are auditable back to the exact packet.
-- `notebooks/answering_eda.ipynb` exists once this feature lands and can inspect answer/citation traces without mutating generated or source data.
+- `answer --evidence-packet-id ...` writes an evidence-grounded answer.
+- `ask QUERY --model EMBEDDING_MODEL` runs planner/retrieval and separate answer
+  models in one shot while preserving the packet on answer failure.
+- Answers cite course, file, and location where available; insufficient
+  evidence and safe refusals never invent facts or citations.
+- Stored answer traces are auditable back to their exact packet.
