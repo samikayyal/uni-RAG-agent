@@ -814,6 +814,34 @@ Feature 10 makes this boundary strict and auditable:
   `AnswerSession` retains bounded complete user/assistant turns in memory for
   planner context only; answer prompts and storage never receive raw context.
 
+## FastAPI Application Boundary
+
+Feature 11 exposes the existing retrieval, evidence, and answering services
+through a provider-lazy FastAPI application. Route handlers use those public
+services rather than querying SQLite directly. `/health` is liveness-only;
+`/config` exposes operational non-secret values and path-existence booleans
+without absolute paths. Persisted packet, coverage, and answer endpoints return
+safe application projections.
+
+An omitted HTTP `session_id` is stateless. A validated supplied id selects one
+custom planner-only `AnswerSession` from an in-process, LRU registry capped at
+20 entries with a two-hour inactivity TTL. Calls for the same session are
+serialized while different sessions may run concurrently. Session contents
+are never persisted or supplied to the answer model.
+
+Ask requests have a positive `UNI_RAG_ASK_TIMEOUT_SECONDS` setting (120 seconds
+by default). Evidence persistence remains inspectable when later answer work
+fails or times out. Timed-out synchronous provider work may finish in its
+worker thread, but a cancellation-aware persistence boundary prevents it from
+appending an answer after the timeout response. API failures use sanitized,
+stable JSON envelopes and domain-specific HTTP status codes.
+
+The package-owned static HTML, JavaScript, and CSS form a question-answering
+screen over the API. They display structured citations/references,
+limitations, searched/found/missing coverage, and expandable evidence details;
+they expose no ingestion, indexing, evaluation, upload, or source-file
+mutation controls.
+
 ## Tool Interfaces
 
 Initial internal tools:

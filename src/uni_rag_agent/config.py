@@ -14,6 +14,7 @@ FALSE_VALUES = {"0", "false", "no", "off"}
 ALLOWED_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 ALLOWED_LLM_PROVIDERS = {"openai", "anthropic", "gemini", "ollama"}
 DEFAULT_ANSWER_PROMPT_MAX_TOKENS = 16_000
+DEFAULT_ASK_TIMEOUT_SECONDS = 120
 
 
 class ConfigError(ValueError):
@@ -48,6 +49,7 @@ class Config:
     answer_max_retries: int = 1
     answer_session_message_limit: int = 20
     answer_prompt_max_tokens: int = DEFAULT_ANSWER_PROMPT_MAX_TOKENS
+    ask_timeout_seconds: int = DEFAULT_ASK_TIMEOUT_SECONDS
 
     def as_safe_dict(self) -> dict[str, str | int | float | bool | None]:
         return {
@@ -77,6 +79,7 @@ class Config:
             "answer_max_retries": self.answer_max_retries,
             "answer_session_message_limit": self.answer_session_message_limit,
             "answer_prompt_max_tokens": self.answer_prompt_max_tokens,
+            "ask_timeout_seconds": self.ask_timeout_seconds,
         }
 
     @property
@@ -172,6 +175,11 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
             "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS",
             DEFAULT_ANSWER_PROMPT_MAX_TOKENS,
         ),
+        ask_timeout_seconds=_strict_positive_int_from_env(
+            env,
+            "UNI_RAG_ASK_TIMEOUT_SECONDS",
+            DEFAULT_ASK_TIMEOUT_SECONDS,
+        ),
     )
 
 
@@ -243,6 +251,8 @@ def validate_config(config: Config) -> None:
         )
     if config.answer_prompt_max_tokens <= 0:
         raise ConfigError("UNI_RAG_ANSWER_PROMPT_MAX_TOKENS must be greater than zero")
+    if config.ask_timeout_seconds <= 0:
+        raise ConfigError("UNI_RAG_ASK_TIMEOUT_SECONDS must be greater than zero")
 
 
 def find_project_root(start: Path | None = None) -> Path:

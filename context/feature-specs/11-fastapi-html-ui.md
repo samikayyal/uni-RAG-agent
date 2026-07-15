@@ -79,6 +79,42 @@ No UI-specific EDA notebook is required for the MVP. Inspect the underlying pers
 }
 ```
 
+`references` is a deduplicated first-appearance-ordered projection of the
+authoritative structured citations. Each item contains exactly
+`citation_id`, `course`, `file_path`, `source_type`, and `location_label`.
+Coverage and evidence-packet lookup endpoints return the existing safe model
+dictionary directly, without a generic `data` wrapper. Answer lookup returns
+the same public answer shape as `POST /api/ask`, including ids, references, and
+coverage.
+
+## HTTP, Session, and Timeout Contract
+
+- `app serve` defaults to `127.0.0.1:8000`; callers may explicitly choose a
+  different host or valid port. Reload and multi-worker controls are not part
+  of Feature 11.
+- A missing `session_id` performs one stateless ask. A supplied id must match
+  `[A-Za-z0-9_-]{1,128}` and reuses the existing custom planner-only
+  `AnswerSession` in process. The registry keeps at most 20 sessions, expires
+  sessions after two hours of inactivity, evicts least-recently-used entries,
+  serializes requests within one session, and permits different sessions to
+  execute concurrently.
+- `UNI_RAG_ASK_TIMEOUT_SECONDS` is a positive integer and defaults to `120`.
+  Timeout returns HTTP 504. Synchronous provider work may finish after the HTTP
+  timeout, but the timed-out request must not append an answer afterward; an
+  evidence packet persisted before answer timeout remains inspectable.
+- Request queries are trimmed, must be nonblank, and may contain at most 10,000
+  characters. Unknown request fields and invalid session ids are rejected.
+  Provider/model overrides are not accepted through HTTP.
+- Error responses have the exact envelope
+  `{"error":{"code":"...","message":"..."}}`. Validation uses 422,
+  missing ids use 404, invalid or missing production configuration uses 503,
+  planner/retrieval/embedding/answer-provider failures use 502, timeout uses
+  504, and storage corruption or unexpected failures use 500. Responses never
+  include traces, prompts, credentials, or sensitive filesystem details.
+- `/health` is liveness-only and returns `{"status":"ok"}` without loading
+  providers or requiring initialized storage. `/config` returns operational
+  non-secret settings and path-existence booleans, but not absolute paths.
+
 ## Storage and Schema Impact
 
 No new tables. The API reads and writes through retrieval, evidence, and answering services:
@@ -99,6 +135,15 @@ Session memory may be in-process for MVP and should not require cross-session pe
 5. Backend generates and stores an answer.
 6. Frontend renders answer, inline citations, references, limitations, and coverage.
 7. User can inspect evidence packet or coverage details by ID.
+
+The first screen is the question-answering interface. It renders structured
+citation/reference cards, limitations, searched/found/missing coverage, and an
+expandable evidence view with persisted-resource inspection links. It exposes
+no ingestion, indexing, evaluation, upload, or source-mutation controls.
+
+Static assets are package-owned files under
+`src/uni_rag_agent/app/static/` (`index.html`, `app.js`, and `styles.css`) and
+do not require a template engine.
 
 ## Failure and Safety Rules
 

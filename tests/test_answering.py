@@ -422,6 +422,32 @@ def test_store_answer_is_append_only_and_round_trips(tmp_path: Path) -> None:
         assert connection.execute("SELECT COUNT(*) FROM answers").fetchone()[0] == 2
 
 
+def test_store_answer_rolls_back_when_commit_guard_cancels(tmp_path: Path) -> None:
+    config = replace(
+        make_initialized_config(tmp_path),
+        answer_llm_provider="ollama",
+        answer_llm_model="test-answer",
+    )
+    packet = _packet(tmp_path)
+    packet_id = _persist_packet(config, packet)
+    answer = generate_answer(packet, chat_model=_Chat(_valid_payload()), config=config)
+
+    def cancel_commit(commit) -> None:
+        del commit
+        raise RuntimeError("cancelled before commit")
+
+    with pytest.raises(RuntimeError, match="cancelled before commit"):
+        store_answer(
+            packet_id,
+            answer,
+            config=config,
+            commit_guard=cancel_commit,
+        )
+
+    with sqlite3.connect(config.sqlite_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM answers").fetchone()[0] == 0
+
+
 def test_store_answer_rejects_packet_mismatches_and_forged_refusal(
     tmp_path: Path,
 ) -> None:
@@ -564,6 +590,21 @@ def test_answer_session_provider_failure_does_not_append_partial_turn(
         session.ask("failed turn")
 
     assert session.conversation_context == ()
+
+
+def test_answer_session_can_record_an_already_persisted_complete_turn(
+    tmp_path: Path,
+) -> None:
+    config = replace(make_config(tmp_path), answer_session_message_limit=2)
+    session = AnswerSession(config)
+
+    session.record_complete_turn("first query", "first answer")
+    session.record_complete_turn("second query", "second answer")
+
+    assert session.conversation_context == (
+        {"role": "user", "content": "second query"},
+        {"role": "assistant", "content": "second answer"},
+    )
 
 
 def test_answering_notebook_is_valid_and_read_only() -> None:

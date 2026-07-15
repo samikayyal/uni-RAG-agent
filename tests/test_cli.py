@@ -80,6 +80,32 @@ def test_evidence_cli_help_exposes_contract_flags(
     assert expected in result.stdout
 
 
+def test_app_serve_help_exposes_host_and_port() -> None:
+    result = run_cli("app", "serve", "--help")
+
+    assert result.returncode == 0
+    assert "--host" in result.stdout
+    assert "--port" in result.stdout
+
+
+def test_app_serve_handler_starts_uvicorn_with_local_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        "uvicorn.run",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    assert cli.main(["app", "serve"]) == cli.SUCCESS
+    assert calls == [
+        (
+            ("uni_rag_agent.app:create_app",),
+            {"factory": True, "host": "127.0.0.1", "port": 8000},
+        )
+    ]
+
+
 def test_evidence_build_handler_emits_one_safe_json_object(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

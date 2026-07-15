@@ -197,16 +197,14 @@ uv sync --extra llm
 uv sync --extra embeddings --extra llm
 ```
 
-Remaining MVP command shapes are registered for later specs:
+The remaining MVP command shape registered for a later spec is:
 
 ```powershell
-uv run -m uni_rag_agent retrieve "query text"
 uv run -m uni_rag_agent eval run
-uv run -m uni_rag_agent app serve
 ```
 
-`eval` and `app` are stubs until their feature specs are implemented. They
-should fail clearly and must not scan or mutate `Courses/`.
+`eval` remains a stub until Feature 12. It should fail clearly and must not
+scan or mutate `Courses/`.
 
 Feature 09 adds the persisted evidence workflow. `retrieve` remains read-only;
 `evidence build` invokes the same mandatory planner/retriever, records raw and
@@ -252,6 +250,41 @@ insufficient-evidence answer without calling the answer model. `ask` runs
 planner/retrieval and answer generation in one shot; the evidence packet remains
 persisted if answer-provider construction or invocation fails. Answer failures
 use exit code `9`.
+
+Feature 11 exposes the same persisted ask workflow through a local FastAPI
+application and package-owned HTML/JavaScript interface:
+
+```powershell
+$env:UNI_RAG_ASK_TIMEOUT_SECONDS = "120"
+uv run -m uni_rag_agent app serve
+uv run -m uni_rag_agent app serve --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000/` to ask questions and inspect the answer,
+structured citations/references, limitations, searched/found/missing coverage,
+and persisted evidence details. The web surface does not expose ingestion,
+indexing, evaluation, uploads, or source-file mutation; those workflows remain
+CLI-first.
+
+An omitted API `session_id` is stateless. A valid supplied id keeps bounded
+planner-only context in process: at most 20 least-recently-used sessions, each
+expiring after two hours of inactivity. Sessions disappear when the server
+restarts. Ask requests time out after `UNI_RAG_ASK_TIMEOUT_SECONDS` (120 by
+default); an evidence packet created before a later timeout or answer failure
+remains inspectable, while the timed-out request cannot append a late answer.
+
+The local API includes:
+
+- `GET /health`
+- `GET /config`
+- `POST /api/ask`
+- `GET /api/search-runs/{search_run_id}/coverage`
+- `GET /api/evidence-packets/{evidence_packet_id}`
+- `GET /api/answers/{answer_id}`
+
+`/health` is provider- and storage-independent liveness. `/config` reports only
+operational non-secret settings and path-existence flags, never credentials or
+absolute local paths.
 
 ## MVP Module Order
 

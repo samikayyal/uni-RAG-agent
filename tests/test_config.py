@@ -18,6 +18,7 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_ANSWER_MAX_RETRIES",
     "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS",
     "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT",
+    "UNI_RAG_ASK_TIMEOUT_SECONDS",
     "UNI_RAG_FINAL_TOP_K",
     "UNI_RAG_KEYWORD_TOP_K",
     "UNI_RAG_LLM_MODEL",
@@ -70,6 +71,7 @@ def test_defaults_resolve_from_repo_root(tmp_path: Path) -> None:
     assert config.answer_max_retries == 1
     assert config.answer_prompt_max_tokens == 16_000
     assert config.answer_session_message_limit == 20
+    assert config.ask_timeout_seconds == 120
     assert config.embedding_model is None
     assert config.llm_provider is None
     assert config.llm_model is None
@@ -109,6 +111,7 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
                 "UNI_RAG_ANSWER_MAX_RETRIES=0",
                 "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS=4096",
                 "UNI_RAG_ANSWER_SESSION_MESSAGE_LIMIT=4",
+                "UNI_RAG_ASK_TIMEOUT_SECONDS=45",
             ]
         ),
         encoding="utf-8",
@@ -140,6 +143,7 @@ def test_env_file_overrides_paths_and_retrieval_settings(tmp_path: Path) -> None
     assert config.answer_max_retries == 0
     assert config.answer_prompt_max_tokens == 4096
     assert config.answer_session_message_limit == 4
+    assert config.ask_timeout_seconds == 45
 
 
 def test_blank_optional_model_and_provider_values_are_unset(tmp_path: Path) -> None:
@@ -290,6 +294,10 @@ def test_safe_dict_excludes_injected_secret_values(
         (
             "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS=",
             "UNI_RAG_ANSWER_PROMPT_MAX_TOKENS must be an integer greater than zero",
+        ),
+        (
+            "UNI_RAG_ASK_TIMEOUT_SECONDS=0",
+            "UNI_RAG_ASK_TIMEOUT_SECONDS must be greater than zero",
         ),
     ],
 )

@@ -928,3 +928,41 @@ for CLI and programmatic callers alike. Explicit whole-prompt budgeting absorbs
 provider context-window differences at the answer boundary instead of sending
 every valid Feature 09 packet blindly.
 
+---
+
+## DEC-036: Provider-lazy FastAPI UI with bounded in-process sessions
+
+* **Status**: Accepted
+* **Date**: 2026-07-15
+
+### Context
+
+The web interface must expose the existing evidence-grounded ask workflow
+without turning ingestion or indexing into browser operations. Optional
+multi-turn session ids and long-running provider calls also need explicit
+memory, concurrency, timeout, and failure contracts.
+
+### Decision
+
+- Serve a package-owned HTML/JavaScript/CSS question-answering screen from a
+  provider-lazy FastAPI application, defaulting to `127.0.0.1:8000`.
+- Keep omitted session ids stateless. Valid supplied ids reuse the custom
+  planner-only `AnswerSession` in a 20-entry LRU registry with a two-hour
+  inactivity TTL and per-session serialization.
+- Bound asks with positive `UNI_RAG_ASK_TIMEOUT_SECONDS` (120 by default).
+  Preserve already-created evidence packets, but prevent timed-out background
+  work from appending an answer after the timeout response.
+- Return stable sanitized JSON errors, safe public answer/reference/coverage
+  projections, liveness-only health, and config metadata without absolute
+  paths or credentials.
+- Keep ingestion, indexing, evaluation, uploads, and source-file mutation out
+  of the web surface.
+
+### Consequences
+
+The UI remains a thin presentation/API layer over existing services. Sessions
+are useful for local follow-ups but intentionally disappear on process restart
+and remain bounded in memory. Timeout cancellation requires an explicit guard
+at the answer persistence boundary because synchronous provider work may
+outlive the HTTP request.
+

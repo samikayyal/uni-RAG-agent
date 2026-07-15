@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing
 from datetime import datetime, timezone
 
@@ -21,6 +22,7 @@ def store_answer(
     maybe_answer: AnswerResult | None = None,
     *,
     config: Config | None = None,
+    commit_guard: Callable[[Callable[[], None]], None] | None = None,
 ) -> int:
     """Insert one completed answer trace and return its generated id.
 
@@ -95,7 +97,10 @@ def store_answer(
             answer_id = int(cursor.lastrowid or 0)
             if answer_id <= 0:
                 raise StorageError("Could not create answer: missing identifier")
-            connection.commit()
+            if commit_guard is None:
+                connection.commit()
+            else:
+                commit_guard(connection.commit)
             return answer_id
     except StorageError:
         raise

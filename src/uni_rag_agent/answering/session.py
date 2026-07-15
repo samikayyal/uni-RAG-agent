@@ -107,7 +107,7 @@ class AnswerSession:
             evidence_packet_id=evidence_result.evidence_packet_id,
             search_run_id=evidence_result.search_run_id,
         )
-        self._append_complete_turn(query, completed.answer_text)
+        self.record_complete_turn(query, completed.answer_text)
         return completed
 
     answer = ask
@@ -115,7 +115,12 @@ class AnswerSession:
     def get_context(self) -> tuple[dict[str, str], ...]:
         return self.conversation_context
 
-    def _append_complete_turn(self, query: str, answer_text: str) -> None:
+    def record_complete_turn(self, query: str, answer_text: str) -> None:
+        """Append one already-persisted complete turn to planner-only memory."""
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be nonblank text")
+        if not isinstance(answer_text, str) or not answer_text.strip():
+            raise ValueError("answer_text must be nonblank text")
         self._messages.extend(
             (
                 {"role": "user", "content": query},

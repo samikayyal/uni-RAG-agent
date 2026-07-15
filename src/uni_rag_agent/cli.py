@@ -147,12 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Evaluation commands.",
         {"run": ("eval run", "Feature Spec 12: Evaluation and Hardening")},
     )
-    _add_stub_group(
-        subparsers,
-        "app",
-        "Application server commands.",
-        {"serve": ("app serve", "Feature Spec 11: FastAPI HTML UI")},
-    )
+    _add_app_commands(subparsers)
 
     return parser
 
@@ -506,6 +501,54 @@ def _add_ask_command(subparsers: argparse._SubParsersAction) -> None:
         help="Print one complete answer result JSON object.",
     )
     ask_parser.set_defaults(handler=_handle_ask)
+
+
+def _add_app_commands(subparsers: argparse._SubParsersAction) -> None:
+    app_parser = subparsers.add_parser(
+        "app",
+        help="Application server commands.",
+    )
+    app_subparsers = app_parser.add_subparsers(
+        dest="app_command",
+        metavar="subcommand",
+    )
+    app_subparsers.required = True
+
+    serve_parser = app_subparsers.add_parser(
+        "serve",
+        help="Start the local FastAPI question-answering interface.",
+    )
+    serve_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Interface to bind (default: 127.0.0.1).",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=_server_port,
+        default=8000,
+        help="TCP port to bind (default: 8000).",
+    )
+    serve_parser.set_defaults(handler=_handle_app_serve)
+
+
+def _server_port(value: str) -> int:
+    port = int(value)
+    if not 1 <= port <= 65_535:
+        raise argparse.ArgumentTypeError("port must be between 1 and 65535")
+    return port
+
+
+def _handle_app_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    uvicorn.run(
+        "uni_rag_agent.app:create_app",
+        factory=True,
+        host=args.host,
+        port=args.port,
+    )
+    return SUCCESS
 
 
 def _handle_config_check(_: argparse.Namespace) -> int:

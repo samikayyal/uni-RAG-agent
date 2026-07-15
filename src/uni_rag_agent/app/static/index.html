@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Uni RAG Agent</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">LOCAL COURSE ARCHIVE</p>
+        <h1>Ask your university materials</h1>
+        <p class="subtitle">Answers stay tied to indexed evidence, citations, and explicit search coverage.</p>
+      </header>
+
+      <form id="ask-form" class="ask-panel">
+        <label for="query">Question</label>
+        <textarea id="query" name="query" maxlength="10000" required
+          placeholder="Explain MapReduce from my courses"></textarea>
+        <div class="form-row">
+          <div class="session-field">
+            <label for="session-id">Session ID <span>(optional)</span></label>
+            <input id="session-id" name="session_id" maxlength="128"
+              pattern="[A-Za-z0-9_-]{1,128}" placeholder="study-session">
+          </div>
+          <button id="ask-button" type="submit">Ask archive</button>
+        </div>
+        <p class="hint">Leave the session blank for a stateless question.</p>
+      </form>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+
+      <section id="result" class="result hidden" aria-live="polite">
+        <div class="result-heading">
+          <div>
+            <p class="eyebrow">GROUNDED RESPONSE</p>
+            <h2>Answer</h2>
+          </div>
+          <div id="trace-ids" class="trace-ids"></div>
+        </div>
+        <pre id="answer-text" class="answer-text"></pre>
+
+        <div class="grid two-columns">
+          <section class="card">
+            <h3>Citations and references</h3>
+            <div id="references" class="card-list"></div>
+          </section>
+          <section class="card">
+            <h3>Limitations</h3>
+            <ul id="limitations" class="plain-list"></ul>
+          </section>
+        </div>
+
+        <section class="card coverage-card">
+          <div class="card-heading">
+            <h3>Search coverage</h3>
+            <button id="refresh-coverage" class="secondary" type="button">Reload persisted coverage</button>
+          </div>
+          <div id="coverage" class="coverage-grid"></div>
+        </section>
+
+        <details class="card evidence-card">
+          <summary>Inspect persisted evidence packet</summary>
+          <div class="evidence-actions">
+            <button id="load-evidence" class="secondary" type="button">Load evidence</button>
+            <a id="answer-api-link" target="_blank" rel="noreferrer">Answer API</a>
+            <a id="coverage-api-link" target="_blank" rel="noreferrer">Coverage API</a>
+            <a id="evidence-api-link" target="_blank" rel="noreferrer">Evidence API</a>
+          </div>
+          <div id="evidence" class="evidence-list"></div>
+        </details>
+      </section>
+    </main>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
