@@ -12,7 +12,7 @@ exact immutable packet passed to the answer generator.
 
 - [08-query-routing-and-hybrid-retrieval.md](08-query-routing-and-hybrid-retrieval.md)
 - `context/architecture.md` tables: `search_runs`, `search_result_sets`, `search_results`, `evidence_packets`
-- DEC-004, DEC-005, DEC-014, DEC-020, DEC-028, DEC-029, DEC-031, DEC-033, DEC-034
+- DEC-004, DEC-005, DEC-014, DEC-020, DEC-028, DEC-029, DEC-031, DEC-033, DEC-034, DEC-039
 
 ## In Scope
 
@@ -24,6 +24,9 @@ exact immutable packet passed to the answer generator.
   `12,000` whitespace-estimated tokens.
 - Build canonical, JSON-safe, reloadable evidence packets with structured
   coverage and deterministic weaknesses.
+- Preserve the canonical embedding model identity selected through the provider
+  registry in retrieval runs, evidence settings, packet projections, and
+  telemetry; provider is not supplied through a separate environment variable.
 - Add `evidence build` and `evidence show` CLI commands.
 - Add the read-only `notebooks/retrieval_eda.ipynb` notebook.
 
@@ -87,7 +90,9 @@ no dataclass, path, secret, or conversation object leaks into persisted JSON.
 
 `RetrievalSettings` contains effective provider/model names, all retrieval
 limits, RRF settings, the evidence budget, and the bounded context-message
-count. It contains no API keys or conversation contents.
+count. Its `embedding_model` is the canonical registry identifier (for example,
+`google/gemini-embedding-001`, never its `gemini-embedding-001` alias). It
+contains no API keys, hosted endpoints, or conversation contents.
 
 `EvidenceLocation` contains `type`, `value`, and a deterministic `label`:
 `page 12`, `slide 8`, `notebook cell 23`, `function train_model`, or
@@ -202,6 +207,21 @@ packet. Packet-assembly or authoritative-drift failures roll back selection and
 packet insertion, then mark the run failed in a separate transaction while
 retaining raw/fused audit rows.
 
+The semantic backend inherits Feature 07's provider contract: local profiles use
+the `embeddings` extra, hosted Google/Nebius profiles use
+`embeddings-cloud`, hosted vectors use declared dimensions with actual-response
+validation and no dedicated probe, and embedding work uses shared three-total-
+attempt retry rules for network/408/429/5xx failures, 64-chunk batching, and
+per-batch commits. If hosted retries are exhausted,
+already committed index batches remain durable and a later incremental index run
+resumes missing chunks. Missing-extra, missing-credential, and provider errors
+are sanitized before they reach run records, packets, telemetry, or CLI output.
+
+Hosted evidence workflows send eligible course text and semantic queries to an
+external provider and may incur charges. Local profiles keep model execution
+local apart from model downloads as applicable. Manual credentialed hosted smokes
+are optional and are never required by automated packet tests.
+
 ## Evidence Selection and Authoritative Safety
 
 Selection walks the complete fused order. File-only candidates count toward
@@ -253,6 +273,10 @@ output includes both IDs, scopes, raw/fused/selectable/evidence counts, token
 total, selected rows, and weaknesses. Use `EVIDENCE_ERROR = 8` for packet
 assembly/loading/validation errors; retain `SEARCH_ERROR = 7` for planner and
 retrieval failures and `STORAGE_ERROR = 3` for schema/readiness failures.
+The `--model` value may be a local reviewed profile or either hosted canonical
+profile/accepted Gemini alias; provider construction is inferred from the
+registry and the matching embedding extra must be installed. Credentialed
+hosted packet smokes are optional.
 
 Create `notebooks/retrieval_eda.ipynb` with pandas and matplotlib only. It must
 resolve the repository root from either the repo root or `notebooks/`, open

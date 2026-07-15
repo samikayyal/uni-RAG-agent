@@ -33,7 +33,8 @@ from .eligibility import (
     source_types_for_indexes,
     validate_logical_index,
 )
-from .embeddings import build_embedding_model
+from .embedding_providers.common import EmbeddingValidationError, validate_vectors
+from .embedding_providers.factory import build_embedding_model
 from .models import SemanticSearchError, VectorIndexError, VectorIndexResult
 from .profiles import EmbeddingProfile, physical_collection_name
 
@@ -231,7 +232,15 @@ def semantic_search(
         canonical_courses = _canonical_course_names(config, courses)
         if courses is not None and not canonical_courses:
             return []
-        query_vector = built.embeddings.embed_query(query_text)
+        try:
+            query_vector = validate_vectors(
+                [built.embeddings.embed_query(query_text)],
+                expected_count=1,
+                expected_dimension=dimension,
+                context="embedding provider query response",
+            )[0]
+        except EmbeddingValidationError as exc:
+            raise SemanticSearchError(str(exc)) from exc
         client = _chroma_client(config, error=SemanticSearchError)
         candidates = _query_candidates(
             client,
@@ -368,7 +377,15 @@ def _embed_missing_chunks(
     embedded_at = _utc_now()
     for batch in _batches(rows, _EMBED_BATCH):
         texts = [str(row["text"]) for row in batch]
-        vectors = embeddings.embed_documents(texts)  # type: ignore[attr-defined]
+        try:
+            vectors = validate_vectors(
+                embeddings.embed_documents(texts),  # type: ignore[attr-defined]
+                expected_count=len(batch),
+                expected_dimension=dimension,
+                context="embedding provider response",
+            )
+        except EmbeddingValidationError as exc:
+            raise VectorIndexError(str(exc)) from exc
         ids = [f"chunk:{int(row['chunk_id'])}" for row in batch]
         metadatas = [
             _chunk_metadata(row, logical_index, model_name, dimension) for row in batch

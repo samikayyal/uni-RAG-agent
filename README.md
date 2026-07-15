@@ -136,36 +136,54 @@ model-namespaced collection per logical index, cosine distance) and records
 `embeddings` mapping rows in SQLite. There is no default embedding adapter or
 model. An unqualified `index vector` or `search semantic` command fails clearly
 until `UNI_RAG_EMBEDDING_MODEL` is configured or `--model` is supplied. The
-default run is incremental; `--rebuild` clears and repopulates only the selected
-model/profile and optional `--collection`. Semantic search queries those
-collections and joins ids back to SQLite for chunk text and citations.
+provider is inferred from the selected registry profile; there is no
+`UNI_RAG_EMBEDDING_PROVIDER`. The default run is incremental; `--rebuild` clears
+and repopulates only the selected model/profile and optional `--collection`.
+Semantic search queries those collections and joins ids back to SQLite for chunk
+text and citations.
 
 The lightweight base installation is enough for Features 01-06, including
 configuration, storage, inventory, extraction, data summaries, and keyword
-search. Vector commands require the optional local-model stack and one of these
-reviewed profiles:
+search. Reviewed embedding profiles are:
 
-```text
-BAAI/bge-m3
-jinaai/jina-embeddings-v3
-jinaai/jina-embeddings-v5-text-small
-google/embeddinggemma-300m
-```
+| Identifier | Provider / execution | Declared dimension |
+| :--- | :--- | :---: |
+| `BAAI/bge-m3` | Hugging Face / local | 1024 |
+| `jinaai/jina-embeddings-v3` | Hugging Face / local | 1024 |
+| `jinaai/jina-embeddings-v5-text-small` | Hugging Face / local | 1024 |
+| `google/embeddinggemma-300m` | Hugging Face / local | 768 |
+| `google/gemini-embedding-001` | Direct Google Gemini API / hosted | 3072 |
+| `Qwen/Qwen3-Embedding-8B` | Nebius Token Factory / hosted | 4096 |
 
-Use either supported workflow after `uv sync --extra embeddings`:
+`gemini-embedding-001` is an accepted alias for the canonical
+`google/gemini-embedding-001` identity. The canonical identifier is used in
+Chroma collection identity, SQLite, retrieval, evidence, and telemetry.
+
+Install the extra that matches the selected profile:
 
 ```powershell
-# Configure once, then omit --model from vector commands.
-$env:UNI_RAG_EMBEDDING_MODEL = "BAAI/bge-m3"
-uv run -m uni_rag_agent index vector
-uv run -m uni_rag_agent search semantic "distributed computation"
+# Local Hugging Face profiles.
+uv sync --extra embeddings
 
-# Or select a reviewed profile on each vector command.
-uv run -m uni_rag_agent index vector --model BAAI/bge-m3 --rebuild
-uv run -m uni_rag_agent search semantic "distributed computation" --model BAAI/bge-m3 --json
+# Hosted Google Gemini or Nebius Token Factory profiles.
+uv sync --extra embeddings-cloud
+
+# Query-planner and answer-generation LLM integrations remain separate.
+uv sync --extra llm
 ```
 
-For a manual real-model smoke run against the fixture or a small local corpus:
+Local construction loads Hugging Face SDKs lazily and probes the runtime vector
+dimension. Hosted construction loads provider SDKs lazily, uses the declared
+dimension, makes no dedicated hosted probe, and validates actual vectors during
+normal embedding batches. Both paths use shared validation/retry rules, batches
+of up to 64 chunks, and per-batch commits. If hosted retries are exhausted,
+already committed batches remain durable and a later incremental run resumes the
+missing chunks. Shared retries allow three total attempts for network failures,
+HTTP 408/429, and HTTP 5xx responses; malformed/dimension-invalid responses,
+credential or permission failures, model failures, and other HTTP 4xx responses
+fail without retry.
+
+For a manual optional local smoke run against the fixture or a small local corpus:
 
 ```powershell
 uv sync --extra embeddings
@@ -177,24 +195,76 @@ uv run -m uni_rag_agent index vector --rebuild
 uv run -m uni_rag_agent search semantic "distributed computation" --json
 ```
 
-The first model run may download weights. Review any model-specific remote-code,
-license, gating, token, or authentication requirements before running it.
+For an optional manual credentialed Gemini smoke:
 
-`index vector` writes lifecycle JSONL logs under `data/runs/`. Direct semantic
-search does not write `search_runs` or `search_results`.
+```powershell
+uv sync --extra embeddings-cloud
+$env:GOOGLE_API_KEY = "<set locally; never commit>"
+uv run -m uni_rag_agent index vector --model gemini-embedding-001 --rebuild
+uv run -m uni_rag_agent search semantic "distributed computation" --model gemini-embedding-001 --json
+```
+
+For an optional manual credentialed Nebius smoke:
+
+```powershell
+uv sync --extra embeddings-cloud
+$env:NEBIUS_API_KEY = "<set locally; never commit>"
+uv run -m uni_rag_agent index vector --model Qwen/Qwen3-Embedding-8B --rebuild
+uv run -m uni_rag_agent search semantic "distributed computation" --model Qwen/Qwen3-Embedding-8B --json
+```
+
+The hosted Google path uses the direct Gemini API with `GOOGLE_API_KEY`; Vertex
+AI is not supported. The Nebius path uses the fixed endpoint
+`https://api.tokenfactory.nebius.com/v1/` with `NEBIUS_API_KEY`. Its semantic
+query input is exactly:
+
+```text
+Instruct: Given a web search query, retrieve relevant passages that answer the query
+Query:{query}
+```
+
+The first local model run may download weights. Review local model-specific
+remote-code, license, gating, token, or authentication requirements before
+running it. Missing extras and credentials produce sanitized setup errors.
+
+Hosted profiles send eligible course text and semantic queries to external
+providers and may incur charges. Local profiles keep model execution local apart
+from model downloads as applicable. `index vector` writes lifecycle JSONL logs
+under `data/runs/`; direct semantic search does not write `search_runs` or
+`search_results`.
+
+Embedding credentials belong only in the ignored `.env` or the current shell:
+
+- Direct Google Gemini embedding construction uses `GOOGLE_API_KEY`.
+- Nebius Token Factory embedding construction uses `NEBIUS_API_KEY` and the
+  fixed endpoint documented above.
+- Vertex AI credentials and settings are not supported for embeddings.
+
+Credentialed hosted smokes are optional. Automated tests and the normal local
+workflow do not require either hosted key. Do not print or commit key values;
+missing-extra and missing-credential failures are sanitized.
 
 The `retrieve` command is read-only: a configured LLM first produces a
 validated query plan, then it runs metadata/keyword/semantic search and merges
 ranked results with RRF. It does not write `search_runs`, `search_results`,
 evidence packets, or files under `Courses`; use Feature 09's `evidence build`
 workflow when a persisted search and packet are required.
-Retrieval requires an explicit reviewed embedding model and the optional `llm`
-extra with a configured LLM provider/model. Other commands do not require it:
+Retrieval requires an explicit reviewed embedding model, the embedding extra
+matching that profile, and the optional `llm` extra with a configured LLM
+provider/model. Other commands do not require the `llm` extra:
 
 ```powershell
+# Local embedding + query-planner LLM.
 uv sync --extra embeddings
 uv sync --extra llm
+
+# Hosted embedding + query-planner LLM.
+uv sync --extra embeddings-cloud
+uv sync --extra llm
+
+# Both local and hosted embedding constructors plus the LLM integrations.
 uv sync --extra embeddings --extra llm
+uv sync --extra embeddings-cloud --extra llm
 ```
 
 Evaluation and hardening uses the committed fixture set by default. Preparation

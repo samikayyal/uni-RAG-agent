@@ -50,6 +50,7 @@ from .indexing import (
     VectorIndexResult,
     keyword_query_terms,
     keyword_search,
+    resolve_embedding_profile,
     sync_keyword_index,
 )
 from .retrieval import (
@@ -292,7 +293,7 @@ def _add_index_commands(subparsers: argparse._SubParsersAction) -> None:
     vector_parser.add_argument(
         "--model",
         help=(
-            "Supported Hugging Face profile; falls back to "
+            "Supported reviewed local or hosted embedding profile; falls back to "
             "UNI_RAG_EMBEDDING_MODEL when omitted."
         ),
     )
@@ -365,7 +366,7 @@ def _add_search_commands(subparsers: argparse._SubParsersAction) -> None:
     semantic_parser.add_argument(
         "--model",
         help=(
-            "Supported Hugging Face profile; falls back to "
+            "Supported reviewed local or hosted embedding profile; falls back to "
             "UNI_RAG_EMBEDDING_MODEL when omitted. Must match the indexed model."
         ),
     )
@@ -446,7 +447,7 @@ def _add_retrieve_command(subparsers: argparse._SubParsersAction) -> None:
     retrieve_parser.add_argument("query", nargs="+", help="Query text.")
     retrieve_parser.add_argument(
         "--model",
-        help="Supported Hugging Face profile; overrides UNI_RAG_EMBEDDING_MODEL.",
+        help="Supported reviewed local or hosted embedding profile; overrides UNI_RAG_EMBEDDING_MODEL.",
     )
     retrieve_parser.add_argument(
         "--debug",
@@ -479,7 +480,7 @@ def _add_evidence_commands(subparsers: argparse._SubParsersAction) -> None:
     build_parser.add_argument("query", nargs="+", help="Query text.")
     build_parser.add_argument(
         "--model",
-        help="Supported Hugging Face profile; overrides UNI_RAG_EMBEDDING_MODEL.",
+        help="Supported reviewed local or hosted embedding profile; overrides UNI_RAG_EMBEDDING_MODEL.",
     )
     build_parser.add_argument(
         "--debug",
@@ -538,7 +539,7 @@ def _add_ask_command(subparsers: argparse._SubParsersAction) -> None:
     ask_parser.add_argument("query", nargs="+", help="Query text.")
     ask_parser.add_argument(
         "--model",
-        help="Supported Hugging Face embedding profile; overrides UNI_RAG_EMBEDDING_MODEL.",
+        help="Supported reviewed local or hosted embedding profile; overrides UNI_RAG_EMBEDDING_MODEL.",
     )
     ask_parser.add_argument(
         "--json",
@@ -1970,7 +1971,15 @@ def _command_logger(config: Config, command_name: str) -> Logger:
 def _embedding_model_log_label(config: Config, explicit_model: str | None) -> str:
     """Return the normalized model selection represented in command telemetry."""
     explicit = explicit_model.strip() if explicit_model else ""
-    return explicit or config.embedding_model or "(unset)"
+    selected = explicit or (config.embedding_model or "").strip()
+    if not selected:
+        return "(unset)"
+    try:
+        return resolve_embedding_profile(config, selected).model_name
+    except Exception:
+        # Keep the original selection visible for the subsequent sanitized
+        # construction error when the model is unknown or unsupported.
+        return selected
 
 
 def _print_count_mapping(label: str, counts: Mapping[str, int]) -> None:

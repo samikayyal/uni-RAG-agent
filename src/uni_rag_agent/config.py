@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -38,6 +38,8 @@ class Config:
     llm_model: str | None
     embedding_model: str | None
     ocr_enabled: bool
+    google_api_key: str | None = field(default=None, repr=False)
+    nebius_api_key: str | None = field(default=None, repr=False)
     metadata_top_k: int = 20
     semantic_query_limit: int = 3
     query_plan_min_confidence: float = 0.60
@@ -148,6 +150,8 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
         llm_model=_optional_str_from_env(env, "UNI_RAG_LLM_MODEL"),
         embedding_model=_optional_str_from_env(env, "UNI_RAG_EMBEDDING_MODEL"),
         ocr_enabled=_bool_from_env(env, "UNI_RAG_OCR_ENABLED", False),
+        google_api_key=_optional_str_from_env(env, "GOOGLE_API_KEY"),
+        nebius_api_key=_optional_str_from_env(env, "NEBIUS_API_KEY"),
         metadata_top_k=_int_from_env(env, "UNI_RAG_METADATA_TOP_K", 20),
         semantic_query_limit=_int_from_env(env, "UNI_RAG_SEMANTIC_QUERY_LIMIT", 3),
         query_plan_min_confidence=_float_from_env(

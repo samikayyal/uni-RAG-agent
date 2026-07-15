@@ -30,6 +30,12 @@ embeddings = [
     "langchain-huggingface>=0.1.0",
     "sentence-transformers>=3.0.0",
 ]
+# Hosted embedding providers are lazy and are needed only when a hosted
+# profile is selected.
+embeddings-cloud = [
+    "langchain-google-genai>=4.2.7",
+    "openai>=1.0.0",
+]
 # LLM integrations are lazy; the `llm` extra is required only by `retrieve`.
 llm = [
     "langchain-anthropic>=1.4.8",

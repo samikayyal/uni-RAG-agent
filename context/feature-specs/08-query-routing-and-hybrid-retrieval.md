@@ -11,7 +11,7 @@ Read first:
 
 - `context/project_overview.md`
 - `context/architecture.md`
-- `context/decisions.md` (especially DEC-005, DEC-014, DEC-031, DEC-033)
+- `context/decisions.md` (especially DEC-005, DEC-014, DEC-031, DEC-033, DEC-039)
 - Features 02, 06, and 07
 
 ## In Scope
@@ -26,7 +26,10 @@ Read first:
 - One metadata search, one keyword search, and one semantic search for each
   planned semantic query for every supported plan.
 - Existing hard course/index filters, RRF-only fusion, provenance, safe CLI/JSON
-  output, telemetry, and strict reviewed embedding-model precondition.
+  output, telemetry, and strict reviewed embedding-profile precondition.
+- Provider-based semantic search using the canonical embedding model identity;
+  the provider is inferred from the registry rather than a separate environment
+  variable.
 - Offline tests through injected chat models; no production fake provider.
 
 ## Out of Scope
@@ -92,11 +95,23 @@ exists.
 - LLM settings remain nullable during global configuration loading so Features
   01–07 and direct search commands run without the optional `llm` extra.
   `retrieve` requires the LLM pair and `uv sync --extra llm` as well as an
-  explicit reviewed embedding model.
+  explicit reviewed embedding model. The embedding extra is selected separately
+  from the registry: `uv sync --extra embeddings` for local Hugging Face or
+  `uv sync --extra embeddings-cloud` for hosted Google/Nebius construction.
+- `UNI_RAG_EMBEDDING_PROVIDER` does not exist. `RetrievalRun.embedding_model`,
+  semantic result metadata, and retrieval telemetry carry the canonical registry
+  identifier, including canonical `google/gemini-embedding-001` when the
+  `gemini-embedding-001` alias is supplied.
 - Planning telemetry uses `query_planning_completed` or
   `query_planning_unsupported` and includes query type, plan confidence, planned
   courses/indexes, semantic-query count, and configured provider/model without
   credentials or conversation contents.
+
+When a hosted embedding profile is selected, eligible course text used to build
+the vector index and semantic queries used by retrieval are sent to the external
+Google or Nebius provider and may incur charges. Local Hugging Face profiles keep
+model execution local apart from model downloads as applicable. Manual
+credentialed provider smokes are optional.
 
 ## Failure and Safety Rules
 
@@ -106,6 +121,9 @@ exists.
   workflow uses a private recorder-enabled execution seam around the same
   planner/backend/RRF sequence and does not expose a caller-supplied plan bypass.
 - Keep all backend failures fatal; zero results remain coverage weaknesses.
+- Normalize missing embedding extras, missing hosted credentials, and provider
+  failures to sanitized retrieval diagnostics. Never persist or emit API keys,
+  authorization headers, or raw provider response bodies.
 - Apply planned course and index scopes as hard filters before result limits.
 - Keep DEC-014's one-based unweighted RRF and no reranker.
 

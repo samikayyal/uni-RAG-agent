@@ -281,11 +281,15 @@ def test_storage_init_cli_uses_temp_config_and_prints_health(tmp_path: Path) -> 
 
 def test_storage_check_cli_fails_clearly_before_init(tmp_path: Path) -> None:
     courses_root = tmp_path / "Courses"
+    data_dir = tmp_path / "data"
     courses_root.mkdir()
     env = clean_subprocess_env(
         {
             "UNI_RAG_COURSES_ROOT": str(courses_root),
-            "UNI_RAG_DATA_DIR": str(tmp_path / "data"),
+            "UNI_RAG_DATA_DIR": str(data_dir),
+            "UNI_RAG_SQLITE_PATH": str(data_dir / "uni_rag.sqlite"),
+            "UNI_RAG_CHROMA_DIR": str(data_dir / "indexes" / "vector"),
+            "UNI_RAG_RUNS_DIR": str(data_dir / "runs"),
         }
     )
 

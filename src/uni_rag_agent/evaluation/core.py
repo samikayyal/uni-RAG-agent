@@ -26,7 +26,7 @@ from ..answering import (
 )
 from ..config import Config, load_config, validate_config
 from ..extraction import extract_pending_files, summarize_data_files
-from ..indexing import sync_keyword_index, sync_vector_index
+from ..indexing import resolve_embedding_profile, sync_keyword_index, sync_vector_index
 from ..inventory import inventory_courses
 from ..retrieval import EvidenceBuildResult, EvidencePacket, build_evidence
 from ..storage import connect_sqlite_read_only, ensure_data_dirs
@@ -703,6 +703,8 @@ def prepare_fixture_state(config: Config) -> Mapping[str, object]:
             "UNI_RAG_EMBEDDING_MODEL to a reviewed profile before running "
             "eval prepare-fixtures."
         )
+    profile = resolve_embedding_profile(config, error=EvaluationError)
+    canonical_config = replace(config, embedding_model=profile.model_name)
     source_root = fixture_source_root()
     if not source_root.is_dir():
         raise EvaluationError(f"Committed fixture source root is absent: {source_root}")
@@ -711,14 +713,14 @@ def prepare_fixture_state(config: Config) -> Mapping[str, object]:
     if not items:
         raise EvaluationError("fixture eval set is empty")
 
-    eval_root = _fixture_eval_root(config)
+    eval_root = _fixture_eval_root(canonical_config)
     eval_root.mkdir(parents=True, exist_ok=True)
     active = _guard_fixture_path(fixture_state_dir(config), eval_root)
     temporary = _guard_fixture_path(
         eval_root / f".fixture-state-{uuid.uuid4().hex}", eval_root
     )
     try:
-        state_config = fixture_state_config(config, temporary)
+        state_config = fixture_state_config(canonical_config, temporary)
         ensure_data_dirs(state_config)
         inventory_courses(state_config)
         extract_pending_files(state_config)
@@ -728,7 +730,7 @@ def prepare_fixture_state(config: Config) -> Mapping[str, object]:
         sync_keyword_index(state_config, rebuild=True)
         sync_vector_index(
             state_config,
-            model=config.embedding_model,
+            model=profile.model_name,
             rebuild=True,
         )
         snapshot = _fixture_state_snapshot(state_config)
@@ -736,7 +738,7 @@ def prepare_fixture_state(config: Config) -> Mapping[str, object]:
             "manifest_version": 1,
             "fixture_digest": _sha256_file(fixture_path),
             "source_digest": _sha256_tree(source_root),
-            "embedding_model": config.embedding_model,
+            "embedding_model": profile.model_name,
             **snapshot,
             "prepared_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -748,7 +750,7 @@ def prepare_fixture_state(config: Config) -> Mapping[str, object]:
         # Validate before touching the active state.  A failed extraction,
         # indexing run, or manifest write therefore leaves the previous state
         # available for ``eval run``.
-        validate_fixture_state(config, state_root=temporary)
+        validate_fixture_state(canonical_config, state_root=temporary)
         _activate_fixture_state(temporary, active, eval_root)
         return manifest
     except Exception:
@@ -795,7 +797,8 @@ def validate_fixture_state(
             "Fixture state is stale relative to committed fixtures. Run `uv run -m "
             "uni_rag_agent eval prepare-fixtures` again."
         )
-    if payload["embedding_model"] != config.embedding_model:
+    expected_profile = resolve_embedding_profile(config, error=EvaluationError)
+    if payload["embedding_model"] != expected_profile.model_name:
         raise EvaluationError(
             "Fixture state embedding model does not match configuration. Run `uv run "
             "-m uni_rag_agent eval prepare-fixtures` again."

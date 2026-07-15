@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Define configuration loading and initialize the generated local storage layout. This spec makes paths, optional model settings, retrieval limits, SQLite, and ChromaDB persistence explicit before feature modules write data.
+Define configuration loading and initialize the generated local storage layout. This spec makes paths, optional model settings, retrieval limits, SQLite, ChromaDB persistence, and provider-inferred embedding profiles explicit before feature modules write data.
 
 ## Depends On
 
 - [01-project-foundation.md](01-project-foundation.md)
 - `context/architecture.md`
-- DEC-009, DEC-011, DEC-021
+- DEC-009, DEC-011, DEC-021, DEC-039
 
 ## In Scope
 
@@ -18,7 +18,10 @@ Define configuration loading and initialize the generated local storage layout. 
 - Initialize `data/uni_rag.sqlite` with the MVP schema from `context/architecture.md`.
 - Define ChromaDB persistence under `data/indexes/vector/`.
 - Define optional LLM provider/model settings without requiring a specific paid/cloud provider.
-- Define the optional reviewed embedding model setting used by Feature 07.
+- Define the optional reviewed embedding model setting used by Feature 07 and
+  resolve its provider from the explicit profile registry.
+- Document the provider-specific embedding extras and credential names without
+  loading any SDK during configuration.
 
 ## Out of Scope
 
@@ -52,6 +55,8 @@ llm_provider: str | None
 llm_model: str | None
 embedding_model: str | None
 ocr_enabled
+google_api_key: str | None  # private/repr-suppressed; omitted from safe output
+nebius_api_key: str | None  # private/repr-suppressed; omitted from safe output
 ```
 
 Environment variables:
@@ -78,6 +83,37 @@ UNI_RAG_LLM_MODEL
 UNI_RAG_EMBEDDING_MODEL
 UNI_RAG_OCR_ENABLED
 ```
+
+The merged environment may also contain the provider credentials
+`GOOGLE_API_KEY` and `NEBIUS_API_KEY`. They are construction inputs, not model
+selection fields, and must never appear in `Config.as_safe_dict()`, SQLite,
+telemetry, or diagnostics.
+
+`UNI_RAG_EMBEDDING_MODEL` is the only embedding-selection environment variable.
+The selected identifier is resolved through the reviewed profile registry, which
+infers whether construction is local Hugging Face, hosted Google Gemini, or
+hosted Nebius Token Factory. `UNI_RAG_EMBEDDING_PROVIDER` does not exist and is
+not part of `Config`.
+
+Provider-specific optional installation paths are selected by the profile:
+
+```powershell
+# Local Hugging Face profiles.
+uv sync --extra embeddings
+
+# Hosted Google Gemini and Nebius Token Factory profiles.
+uv sync --extra embeddings-cloud
+
+# Query-planner/answer LLM integrations retain their existing semantics.
+uv sync --extra llm
+```
+
+The embedding SDKs are loaded lazily by Feature 07, not during `config check`.
+Hosted credentials are read by the selected provider construction path from
+`GOOGLE_API_KEY` or `NEBIUS_API_KEY`. If the implementation retains them in
+private, representation-suppressed config fields for construction, they must be
+omitted from safe configuration output, SQLite, telemetry, and user-facing
+diagnostics.
 
 Commands:
 
@@ -150,7 +186,9 @@ same transaction as its non-empty `search_results` rows.
 ## Failure and Safety Rules
 
 - Missing `Courses` root should fail `config check` with a clear path-specific error.
-- Unset optional model/provider values must not fail config checks.
+- Unset optional model/provider values must not fail config checks. In particular,
+  an unset `UNI_RAG_EMBEDDING_MODEL` is allowed until a vector/retrieval command
+  requires an explicit model selection.
 - `llm_provider` and `llm_model` are an atomic pair: both unset or both
   nonblank. Providers are exactly `openai`, `anthropic`, `gemini`, or `ollama`.
 - Retrieval tuning values use Feature 08 defaults: metadata top-K 20, semantic
@@ -161,6 +199,9 @@ same transaction as its non-empty `search_results` rows.
 - Storage initialization must be idempotent.
 - The implementation must never create files under `Courses`.
 - `.env` values must not be logged verbatim if they look like secrets.
+- Configuration must not infer a provider from a free-form environment variable;
+  provider inference is registry-based and the supported profile list is
+  explicit.
 
 ## Tests
 

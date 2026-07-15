@@ -8,13 +8,30 @@ import re
 
 from langchain_core.embeddings import Embeddings
 
-TEST_EMBEDDING_DIMENSIONS = {
+LOCAL_TEST_EMBEDDING_DIMENSIONS = {
     # Keep enough dimensions for stable Chroma HNSW filtering while still
-    # making tests substantially lighter than real embedding models.
+    # making local-model tests substantially lighter than real models.
     "BAAI/bge-m3": 384,
     "jinaai/jina-embeddings-v3": 384,
     "jinaai/jina-embeddings-v5-text-small": 384,
     "google/embeddinggemma-300m": 768,
+}
+
+HOSTED_TEST_EMBEDDING_DIMENSIONS = {
+    # Hosted adapters declare these dimensions in the reviewed profile
+    # registry.  The doubles keep that contract without making network/API
+    # calls or requiring provider credentials in pytest.
+    "google/gemini-embedding-001": 3072,
+    "Qwen/Qwen3-Embedding-8B": 4096,
+}
+
+TEST_EMBEDDING_DIMENSIONS = {
+    **LOCAL_TEST_EMBEDDING_DIMENSIONS,
+    **HOSTED_TEST_EMBEDDING_DIMENSIONS,
+}
+
+TEST_EMBEDDING_ALIASES = {
+    "gemini-embedding-001": "google/gemini-embedding-001",
 }
 
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
@@ -59,9 +76,10 @@ class DeterministicTestEmbeddings(Embeddings):
 
 
 def embeddings_for_model(model_name: str) -> DeterministicTestEmbeddings:
-    """Build the configured test dimension for a legitimate registry model."""
+    """Build the configured test dimension for a canonical or aliased model."""
+    canonical_model_name = TEST_EMBEDDING_ALIASES.get(model_name, model_name)
     try:
-        dimension = TEST_EMBEDDING_DIMENSIONS[model_name]
+        dimension = TEST_EMBEDDING_DIMENSIONS[canonical_model_name]
     except KeyError as exc:
         raise ValueError(f"No test embedding dimension for {model_name!r}") from exc
     return DeterministicTestEmbeddings(dimension)

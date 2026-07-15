@@ -14,9 +14,9 @@ This document records the key decisions made during the design and development o
 | **DEC-006** | Keep binaries, archives, installers, and model artifacts metadata-only | `Accepted` | 2026-06-21 |
 | **DEC-007** | Defer video/audio transcription and index only existing transcripts initially | `Accepted` | 2026-06-21 |
 | **DEC-008** | Restrict Python/code execution tools by default | `Accepted` | 2026-06-21 |
-| **DEC-009** | Use `uv` for Python dependency and run workflows | `Accepted; amended by DEC-031` | 2026-06-21 |
+| **DEC-009** | Use `uv` for Python dependency and run workflows | `Accepted; amended by DEC-031 and DEC-039` | 2026-06-21 |
 | **DEC-010** | Use LangChain as core framework | `Accepted` | 2026-06-21 |
-| **DEC-011** | Use ChromaDB with separate collections per logical index | `Accepted; amended by DEC-031` | 2026-06-21 |
+| **DEC-011** | Use ChromaDB with separate collections per logical index | `Accepted; amended by DEC-031 and DEC-039` | 2026-06-21 |
 | **DEC-012** | Hybrid chunking for MVP, defer semantic chunking | `Accepted` | 2026-06-21 |
 | **DEC-013** | Two-stage query routing with rule-based pre-filter and LLM fallback | `Superseded by DEC-033` | 2026-06-21 |
 | **DEC-014** | Skip reranking for MVP, use Reciprocal Rank Fusion for score merging | `Accepted` | 2026-06-21 |
@@ -36,8 +36,9 @@ This document records the key decisions made during the design and development o
 | **DEC-028** | Null stale search-result chunk references on chunk deletion | `Accepted` | 2026-06-27 |
 | **DEC-029** | Exclude non-current source files from retrieval indexes | `Accepted` | 2026-06-30 |
 | **DEC-030** | Fake-default embeddings with optional real models and model-namespaced vector collections | `Superseded by DEC-031` | 2026-07-01 |
-| **DEC-031** | Real-only production models with injected test doubles | `Accepted` | 2026-07-11 |
+| **DEC-031** | Real-only production models with injected test doubles | `Accepted; amended by DEC-039` | 2026-07-11 |
 | **DEC-034** | Persisted evidence builds with authoritative immutable packets | `Accepted` | 2026-07-13 |
+| **DEC-039** | Provider-based embedding profiles with local and hosted construction | `Accepted` | 2026-07-15 |
 
 ---
 
@@ -218,9 +219,10 @@ Use `uv add package_name` for dependencies and `uv run ...` for execution.
 
 Documentation, scripts, and commands should assume `uv`. Avoid ad-hoc package installation or direct interpreter execution unless there is a clear reason.
 
-**Amendment:** DEC-031 governs the current model/dependency setup: the base
-installation supports non-vector Features 01-06, while vector indexing uses the
-optional Hugging Face extra and a reviewed configured profile.
+**Amendment:** DEC-031 and DEC-039 govern the current model/dependency setup:
+the base installation supports non-vector Features 01-06, while vector indexing
+uses the provider-specific optional embedding extra for the selected reviewed
+profile. The existing optional `llm` extra remains independent.
 
 ---
 
@@ -260,10 +262,12 @@ Use ChromaDB as the vector store. Create separate ChromaDB collections per logic
 
 ChromaDB is LangChain-native and simple to set up with disk persistence. Separate collections give clean isolation but cross-index queries require multiple searches. Collection dimensionality depends on the configured embedding model, and tests should use a deterministic injected embedding double.
 
-**Amendment:** DEC-031 replaces the former provider-selection guidance in this
+**Amendment:** DEC-031 replaced the former provider-selection guidance in this
 decision's historical text with reviewed real production profiles, explicit model
 selection, lazy optional dependencies, runtime dimension probing, and test-only
-injection at the model-loader boundary.
+injection at the model-loader boundary. DEC-039 extends that model-namespaced
+collection contract to the two reviewed hosted profiles and keeps provider
+inference in the registry rather than adding a provider environment variable.
 
 ---
 
@@ -699,7 +703,7 @@ SQLite is reconciled before incremental indexing.
 
 ## DEC-031: Real-only production models with injected test doubles
 
-* **Status**: Accepted
+* **Status**: Accepted; amended by DEC-039
 * **Date**: 2026-07-11
 
 ### Context
@@ -714,19 +718,45 @@ test providers.
 
 ### Decision
 
-- Production vector commands accept only the four reviewed Hugging Face profiles:
-  `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
-  `jinaai/jina-embeddings-v5-text-small`, and
-  `google/embeddinggemma-300m`.
+The following production rules were accepted here on 2026-07-11 and remain
+historical record: vector commands accepted only the four reviewed local
+Hugging Face profiles `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
+`jinaai/jina-embeddings-v5-text-small`, and `google/embeddinggemma-300m`; there
+was no default embedding model; the local `embeddings` extra was lazy; runtime
+dimensions were probed; model-namespaced collections and SQLite reconciliation
+were retained; and deterministic test doubles were injected only at loader
+boundaries.
+
+The Hugging-Face-only production language above is explicitly amended by
+DEC-039. It no longer describes the complete supported production profile set:
+DEC-039 adds the reviewed hosted Google and Nebius profiles while preserving the
+real-only, explicit-selection, lazy-loading, test-double, collection, and
+reconciliation rules recorded here.
+
+The amended current rules are:
+
+- Production vector commands accept the reviewed local Hugging Face profiles plus
+  `google/gemini-embedding-001` (alias `gemini-embedding-001`) and
+  `Qwen/Qwen3-Embedding-8B` through the provider-based registry.
 - There is no default embedding model. `index vector` and `search semantic`
   require a nonblank `--model` or `UNI_RAG_EMBEDDING_MODEL`, and report the
-  supported profile list when selection is missing or unknown.
-- `langchain-huggingface` and `sentence-transformers` remain in the optional
-  `embeddings` extra. Model construction and runtime dimension probing stay
-  lazy, while the probed dimension remains part of collection identity and
-  SQLite telemetry.
-- Production LLM provider/model settings are nullable and unset by default until
-  routing and answering are implemented.
+  supported profile list when selection is missing or unknown. Provider is
+  inferred from the registry; `UNI_RAG_EMBEDDING_PROVIDER` does not exist.
+- Local Hugging Face construction remains in the optional `embeddings` extra.
+  Hosted Google/Nebius construction is in the optional `embeddings-cloud` extra.
+  Both SDK paths load lazily.
+- Local models use runtime dimension probing. Hosted profiles use declared
+  dimensions and validate actual vectors during real batches without a dedicated
+  hosted probe.
+- Shared vector validation/retry rules process 64 chunks per batch and commit
+  each successful batch separately. Exhausted hosted retries leave prior commits
+  durable so incremental indexing can resume missing chunks.
+- Canonical model identity, rather than a user-facing alias, remains part of
+  collection identity, SQLite mappings, retrieval/evidence settings, and
+  telemetry.
+- Production LLM provider/model settings remain nullable and unset by default;
+  their existing `llm` extra is required only by the planner/answer consumers
+  that are executed.
 - Automated tests inject deterministic LangChain embedding and chat doubles at
   model-loader boundaries. Test doubles are not production exports, registry
   profiles, CLI options, or configuration values.
@@ -737,11 +767,15 @@ test providers.
 ### Consequences
 
 Plain `uv sync` remains sufficient for non-vector Features 01-06. Vector setup
-requires `uv sync --extra embeddings`, a reviewed model selection, and any
-model-specific access requirements. Automated tests remain offline and exercise
-the real ChromaDB and SQLite pipeline through injected model boundaries. Existing
-local vector state created under the superseded contract must be cleared and
-rebuilt by its owner; this workspace has no generated vector state to migrate.
+requires the extra matching the selected profile (`embeddings` for local
+Hugging Face or `embeddings-cloud` for hosted Google/Nebius), a reviewed model
+selection, and any model-specific access requirements. Automated tests remain
+offline and exercise the real ChromaDB and SQLite pipeline through injected model
+boundaries. Existing local vector state created under the superseded contract
+must be cleared and rebuilt by its owner; this workspace has no generated vector
+state to migrate. Hosted eligible course text and semantic queries are external
+provider inputs and may incur charges; local model execution remains local apart
+from applicable model downloads.
 
 ---
 
@@ -1039,4 +1073,77 @@ Interrupted preparation cannot destroy a known-good fixture state, and stale
 or same-count index drift fails with setup guidance before evaluation. Reports
 remain useful for scores and trace IDs without persisting user query content or
 credential-shaped exception details.
+
+---
+
+## DEC-039: Provider-based embedding profiles with local and hosted construction
+
+* **Status**: Accepted
+* **Date**: 2026-07-15
+
+### Context
+
+DEC-031 correctly removed the ambiguous fake production embedding path and made
+local Hugging Face model selection explicit. The next embedding implementation
+slice needs the same strict profile and storage contract for two reviewed hosted
+providers without introducing a generic plugin system or a second provider
+environment variable. Local execution and hosted construction also have
+different dimension-discovery and failure boundaries that must be explicit before
+the implementation changes.
+
+### Decision
+
+- Keep one explicit embedding-profile registry. It contains the four reviewed
+  local Hugging Face profiles and two reviewed hosted profiles:
+  `google/gemini-embedding-001` with accepted alias `gemini-embedding-001` and
+  declared dimension `3072`, and `Qwen/Qwen3-Embedding-8B` through Nebius Token
+  Factory with declared dimension `4096`.
+- Infer the provider from the selected registry profile. `UNI_RAG_EMBEDDING_MODEL`
+  remains the only embedding-selection environment variable;
+  `UNI_RAG_EMBEDDING_PROVIDER` does not exist. The Gemini alias canonicalizes to
+  `google/gemini-embedding-001` before collection, SQLite, retrieval, evidence,
+  or telemetry identity is written.
+- Keep optional installation provider-specific: `uv sync --extra embeddings`
+  for local Hugging Face construction and `uv sync --extra embeddings-cloud` for
+  hosted Google/Nebius construction. Preserve the existing independent
+  `uv sync --extra llm` semantics for LLM integrations.
+- Load provider SDKs lazily. Local Hugging Face profiles use a runtime dimension
+  probe. Hosted profiles use declared dimensions, make no dedicated probe call,
+  and validate actual returned vectors against those dimensions during ordinary
+  embedding batches.
+- Apply shared vector validation and bounded retry rules to local and hosted
+  paths. Validation requires the expected vector count, nonempty finite numeric
+  vectors, and the expected dimension. Allow three total attempts for network
+  failures, HTTP 408/429, and HTTP 5xx responses; do not retry malformed or
+  dimension-invalid responses, authentication/permission failures, model
+  failures, or other HTTP 4xx responses. Process 64 chunks per batch and commit
+  each successful batch separately. When hosted retries are exhausted, keep
+  earlier commits and make incremental reruns resume the missing chunks.
+- Use the direct Gemini API with `GOOGLE_API_KEY`; Vertex AI is not supported.
+  Use Nebius's fixed `https://api.tokenfactory.nebius.com/v1/` endpoint with
+  `NEBIUS_API_KEY`. Qwen query input uses exactly:
+
+  ```text
+  Instruct: Given a web search query, retrieve relevant passages that answer the query
+  Query:{query}
+  ```
+
+- Normalize missing-extra, missing-credential, provider, vector-validation, and
+  exhausted-retry failures to sanitized diagnostics. Never emit API keys,
+  credential values, raw authorization headers, or provider response bodies in
+  persisted telemetry or user-facing errors.
+- Treat hosted use as an explicit privacy and cost boundary: eligible course
+  text and semantic queries are sent to the selected external provider and may
+  incur charges. Local profiles keep model execution local apart from model
+  downloads as applicable.
+
+### Consequences
+
+The vector pipeline can support local and hosted profiles without changing the
+SQLite/Chroma authority boundary or adding a generic provider framework. Physical
+collections remain isolated by provider/model/dimension/metric, while retrieval,
+evidence, and telemetry retain the canonical model identity. Hosted smokes are
+manual and credentialed when desired; automated tests remain offline through
+injected doubles. A provider-specific extra or credential is a clear setup
+requirement rather than a configuration value silently selecting another loader.
 

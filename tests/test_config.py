@@ -35,11 +35,14 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_SEMANTIC_TOP_K",
     "UNI_RAG_SQLITE_PATH",
 }
+PROVIDER_ENV_KEYS = {"GOOGLE_API_KEY", "NEBIUS_API_KEY"}
 
 
 @pytest.fixture(autouse=True)
 def clear_uni_rag_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in UNI_RAG_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    for key in PROVIDER_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
 
 

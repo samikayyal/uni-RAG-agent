@@ -175,7 +175,7 @@ def _execute_retrieval(
                 semantic_query,
                 courses=query_plan.candidate_courses,
                 indexes=query_plan.candidate_indexes,
-                model=model or profile.model_name,
+                model=profile.model_name,
             )
             result_sets.append(
                 RetrievalResultSet(

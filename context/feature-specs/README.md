@@ -21,7 +21,7 @@ The root `project-overview.md` remains the fuller narrative background, but impl
 | 04 | [Text Extraction and Chunking](04-text-extraction-and-chunking.md) | Extractors, natural chunks, source locations |
 | 05 | [Data Schema Summaries](05-data-schema-summaries.md) | CSV/XLSX/JSON/SQLite summaries and sample rows |
 | 06 | [Keyword Indexing](06-keyword-indexing.md) | SQLite FTS5 synchronization and search |
-| 07 | [Vector Indexing](07-vector-indexing.md) | Reviewed Hugging Face embeddings, Chroma collections, injected test doubles |
+| 07 | [Vector Indexing](07-vector-indexing.md) | Reviewed local/hosted embedding profiles, Chroma collections, injected test doubles |
 | 08 | [Mandatory LLM Query Planning and Hybrid Retrieval](08-query-routing-and-hybrid-retrieval.md) | Validated LLM query plans, deterministic retrieval, RRF |
 | 09 | [Evidence Packets and Coverage](09-evidence-packets-and-coverage.md) | Evidence packet contract, weakness reporting, persistence |
 | 10 | [Answering and Citations](10-answering-and-citations.md) | Evidence-only answers, inline citations, references |
@@ -64,7 +64,7 @@ EDA notebooks are planned only for stages that produce generated artifacts worth
 | 04 | `notebooks/extraction_eda.ipynb` | Implemented | `extraction_runs`, `extracted_documents`, `chunks`, extraction failures, failure-reason plots, text/chunk coverage. |
 | 05 | `notebooks/data_schema_eda.ipynb` | Implemented | `data_summaries`, data-schema chunks, row/column/table/sheet counts, sample coverage. |
 | 06 | `notebooks/keyword_index_eda.ipynb` | Planned | `chunk_fts`, keyword coverage, source-type distribution, query smoke checks. |
-| 07 | `notebooks/vector_index_eda.ipynb` | Planned | `embeddings`, Chroma collection metadata, embedding model/dimension coverage. |
+| 07 | `notebooks/vector_index_eda.ipynb` | Implemented | `embeddings`, Chroma collection metadata, canonical provider/model/dimension coverage. |
 | 08-09 | `notebooks/retrieval_eda.ipynb` | Implemented | Query plans, `search_runs`, result-set completion envelopes, `search_results`, RRF mix, evidence packets, coverage, token budgets, failures, and weaknesses. |
 | 10 | `notebooks/answering_eda.ipynb` | Implemented | `answers`, strict packet-relative citation validation, parse diagnostics, limitations, and model traces. |
 | 11 | None required for MVP | Not applicable | UI behavior is covered by API/UI tests; inspect underlying traces through retrieval/answering notebooks. |
@@ -82,7 +82,7 @@ EDA notebooks are planned only for stages that produce generated artifacts worth
 - Clear notebook outputs and execution counts before committing unless a future decision explicitly permits committed output snapshots.
 - Keep `.env` local and ignored. Commit `.env.example`.
 - Treat the SQLite schema in `context/architecture.md` as the MVP storage contract.
-- Keep optional LLM settings and the reviewed embedding model choice in configuration. Production providers are real/configured; tests inject deterministic doubles at model-loader or chat-model boundaries.
+- Keep optional LLM settings and the reviewed embedding model choice in configuration. Production providers are real/configured; the embedding provider is inferred from the reviewed profile registry. Tests inject deterministic doubles at model-loader or chat-model boundaries.
 - Automated tests must use small committed fixtures. Full `Courses` archive checks are optional smoke tests only.
 
 ## Standard Spec Shape

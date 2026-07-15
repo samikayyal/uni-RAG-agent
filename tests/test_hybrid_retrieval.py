@@ -307,6 +307,57 @@ def test_retrieve_runs_each_semantic_query_without_persistence(
         assert connection.execute("SELECT COUNT(*) FROM search_runs").fetchone()[0] == 0
 
 
+def test_retrieve_passes_canonical_embedding_model_to_semantic_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_initialized_config(
+        tmp_path,
+        embedding_model="gemini-embedding-001",
+        llm_provider="ollama",
+        llm_model="test-planner",
+    )
+    with connect_sqlite(config) as connection:
+        inserted = insert_minimal_chunk(
+            connection,
+            config,
+            course_name="Information Retrieval",
+            filename="notes.md",
+            text="BM25 retrieval",
+        )
+        connection.commit()
+
+    monkeypatch.setattr(
+        "uni_rag_agent.retrieval.core.plan_query",
+        lambda *args, **kwargs: _supported_retrieval_plan(),
+    )
+    monkeypatch.setattr(
+        "uni_rag_agent.retrieval.core.metadata_search",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        "uni_rag_agent.retrieval.core.keyword_search_terms",
+        lambda *args, **kwargs: [],
+    )
+    models: list[str | None] = []
+
+    def semantic_backend(
+        _config: object, _query: str, **kwargs: object
+    ) -> list[RetrievalResult]:
+        models.append(kwargs.get("model"))  # type: ignore[arg-type]
+        return [_result(chunk_id=inserted.chunk_id, method="semantic")]
+
+    monkeypatch.setattr(
+        "uni_rag_agent.retrieval.core.semantic_search",
+        semantic_backend,
+    )
+
+    run = retrieve(config, "BM25", model="gemini-embedding-001")
+
+    assert run.embedding_model == "google/gemini-embedding-001"
+    assert models == ["google/gemini-embedding-001"]
+
+
 def test_retrieve_requires_model_before_unsupported_routing(tmp_path: Path) -> None:
     config = make_initialized_config(
         tmp_path,

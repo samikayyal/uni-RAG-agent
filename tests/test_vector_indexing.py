@@ -8,6 +8,7 @@ import subprocess
 import sys
 from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 
 import nbformat
 import pytest
@@ -22,7 +23,12 @@ from uni_rag_agent.indexing import (
     semantic_search,
     sync_vector_index,
 )
-from uni_rag_agent.indexing import embeddings as embeddings_module
+from uni_rag_agent.indexing.embedding_providers import factory as factory_module
+from uni_rag_agent.indexing.embedding_providers import (
+    google_genai as google_genai_module,
+)
+from uni_rag_agent.indexing.embedding_providers import huggingface as huggingface_module
+from uni_rag_agent.indexing.embedding_providers import nebius as nebius_module
 from uni_rag_agent.indexing import vector as vector_module
 from uni_rag_agent.retrieval import RetrievalResult
 from uni_rag_agent import cli as cli_module
@@ -53,10 +59,113 @@ def patch_huggingface_loader(monkeypatch: pytest.MonkeyPatch) -> None:
         return embeddings_for_model(str(kwargs["model_name"]))
 
     monkeypatch.setattr(
-        embeddings_module,
+        huggingface_module,
         "_require_huggingface",
         lambda *_args, **_kwargs: load_test_embeddings,
     )
+
+
+class _GoogleHostedClient:
+    def __init__(self, dimension: int, recorder: dict[str, object]) -> None:
+        self._embeddings = DeterministicTestEmbeddings(dimension)
+        self._recorder = recorder
+        self.document_calls = 0
+        self.query_calls = 0
+
+    def embed_documents(
+        self,
+        texts: list[str],
+        **kwargs: object,
+    ) -> list[list[float]]:
+        self.document_calls += 1
+        self._recorder.setdefault("google_document_kwargs", []).append(kwargs)  # type: ignore[union-attr]
+        return self._embeddings.embed_documents(list(texts))
+
+    def embed_query(self, text: str, **kwargs: object) -> list[float]:
+        self.query_calls += 1
+        self._recorder.setdefault("google_query_kwargs", []).append(kwargs)  # type: ignore[union-attr]
+        return self._embeddings.embed_query(text)
+
+
+class _NebiusHostedClient:
+    def __init__(self, dimension: int, recorder: dict[str, object]) -> None:
+        self._embeddings = DeterministicTestEmbeddings(dimension)
+        self._recorder = recorder
+        self.calls = 0
+
+    def create(
+        self,
+        *,
+        model: str,
+        input: str | list[str],
+        dimensions: int,
+    ) -> SimpleNamespace:
+        self.calls += 1
+        self._recorder.setdefault("nebius_request_kwargs", []).append(  # type: ignore[union-attr]
+            {"model": model, "input": input, "dimensions": dimensions}
+        )
+        values = [input] if isinstance(input, str) else list(input)
+        vectors = self._embeddings.embed_documents(values)
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(index=index, embedding=vector)
+                for index, vector in enumerate(vectors)
+            ]
+        )
+
+
+@pytest.fixture()
+def patch_hosted_provider_doubles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+    """Inject deterministic clients through the live hosted provider seams."""
+    recorder: dict[str, object] = {}
+
+    def google_constructor(**kwargs: object) -> _GoogleHostedClient:
+        recorder["google_constructor_kwargs"] = kwargs
+        client = _GoogleHostedClient(3072, recorder)
+        recorder["google_client"] = client
+        return client
+
+    def nebius_constructor(**kwargs: object) -> SimpleNamespace:
+        recorder["nebius_constructor_kwargs"] = kwargs
+        client = _NebiusHostedClient(4096, recorder)
+        recorder["nebius_client"] = client
+        return SimpleNamespace(embeddings=client)
+
+    monkeypatch.setattr(
+        google_genai_module,
+        "_google_api_key",
+        lambda _config: "offline-google-test-key",
+    )
+    monkeypatch.setattr(
+        google_genai_module,
+        "_require_google_embeddings",
+        lambda *_args, **_kwargs: google_constructor,
+    )
+    monkeypatch.setattr(
+        google_genai_module,
+        "_require_google_genai",
+        lambda *_args, **_kwargs: google_constructor,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        nebius_module,
+        "_nebius_api_key",
+        lambda _config: "offline-nebius-test-key",
+    )
+    monkeypatch.setattr(
+        nebius_module,
+        "_require_openai",
+        lambda *_args, **_kwargs: nebius_constructor,
+    )
+    monkeypatch.setattr(
+        nebius_module,
+        "_require_nebius_openai",
+        lambda *_args, **_kwargs: nebius_constructor,
+        raising=False,
+    )
+    return recorder
 
 
 # --------------------------------------------------------------------------- #
@@ -107,12 +216,39 @@ def test_real_profile_registry_metadata() -> None:
         "jinaai/jina-embeddings-v3",
         "jinaai/jina-embeddings-v5-text-small",
         "google/embeddinggemma-300m",
+        "google/gemini-embedding-001",
+        "Qwen/Qwen3-Embedding-8B",
     }
-    for profile in EMBEDDING_PROFILES.values():
+    local_profiles = {
+        profile
+        for profile in EMBEDDING_PROFILES.values()
+        if profile.provider == "huggingface"
+    }
+    assert len(local_profiles) == 4
+    for profile in local_profiles:
         assert profile.provider == "huggingface"
         assert profile.requires_extra == "embeddings"
         assert profile.metric == "cosine"
         assert profile.access_notes
+
+    hosted_profiles = {
+        profile.model_name: profile
+        for profile in EMBEDDING_PROFILES.values()
+        if profile.provider != "huggingface"
+    }
+    assert hosted_profiles["google/gemini-embedding-001"].provider == "google_genai"
+    assert hosted_profiles["google/gemini-embedding-001"].requires_extra == (
+        "embeddings-cloud"
+    )
+    assert hosted_profiles["google/gemini-embedding-001"].dimension == 3072
+    assert hosted_profiles["google/gemini-embedding-001"].aliases == (
+        "gemini-embedding-001",
+    )
+    assert hosted_profiles["Qwen/Qwen3-Embedding-8B"].provider == "nebius"
+    assert hosted_profiles["Qwen/Qwen3-Embedding-8B"].requires_extra == (
+        "embeddings-cloud"
+    )
+    assert hosted_profiles["Qwen/Qwen3-Embedding-8B"].dimension == 4096
 
     assert EMBEDDING_PROFILES["jinaai/jina-embeddings-v3"].trust_remote_code is True
     assert EMBEDDING_PROFILES["BAAI/bge-m3"].dimension == 1024
@@ -165,7 +301,11 @@ def test_build_embedding_model_uses_runtime_test_dimension(
     config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
     built = build_embedding_model(config)
 
-    assert isinstance(built.embeddings, DeterministicTestEmbeddings)
+    assert isinstance(
+        built.embeddings,
+        huggingface_module.HuggingFaceEmbeddingsAdapter,
+    )
+    assert isinstance(built.embeddings.client, DeterministicTestEmbeddings)
     assert built.dimension == TEST_EMBEDDING_DIMENSIONS["BAAI/bge-m3"]
     assert (
         len(built.embeddings.embed_query("probe"))
@@ -185,7 +325,7 @@ def test_model_loader_forwards_trust_remote_code_to_jina_profiles(
         return embeddings_for_model(str(kwargs["model_name"]))
 
     monkeypatch.setattr(
-        embeddings_module,
+        huggingface_module,
         "_require_huggingface",
         lambda *_args, **_kwargs: test_constructor,
     )
@@ -205,6 +345,10 @@ def test_embedding_model_log_label_normalizes_whitespace_override(
     assert (
         cli_module._embedding_model_log_label(config, "  google/embeddinggemma-300m  ")
         == "google/embeddinggemma-300m"
+    )
+    assert (
+        cli_module._embedding_model_log_label(config, "  gemini-embedding-001  ")
+        == "google/gemini-embedding-001"
     )
 
 
@@ -233,7 +377,7 @@ def force_missing_embeddings_extra(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(
-        embeddings_module, "_require_huggingface", require_missing_extra
+        huggingface_module, "_require_huggingface", require_missing_extra
     )
 
 
@@ -375,6 +519,200 @@ def test_sync_indexes_only_current_eligible_chunks(
         assert row["embedding_dim"] == TEST_EMBEDDING_DIMENSIONS["BAAI/bge-m3"]
     document_row = next(r for r in rows if r["chunk_id"] == document.chunk_id)
     assert document_row["vector_collection"].startswith("document_index__")
+
+
+@pytest.mark.parametrize(
+    ("selected_model", "canonical_model", "provider", "dimension"),
+    [
+        (
+            "gemini-embedding-001",
+            "google/gemini-embedding-001",
+            "google_genai",
+            3072,
+        ),
+        (
+            "Qwen/Qwen3-Embedding-8B",
+            "Qwen/Qwen3-Embedding-8B",
+            "nebius",
+            4096,
+        ),
+    ],
+)
+def test_hosted_profiles_flow_through_real_chroma_and_sqlite(
+    tmp_path: Path,
+    patch_hosted_provider_doubles: dict[str, object],
+    selected_model: str,
+    canonical_model: str,
+    provider: str,
+    dimension: int,
+) -> None:
+    config = make_config(
+        tmp_path,
+        embedding_model=selected_model,
+        google_api_key="offline-google-test-key",
+        nebius_api_key="offline-nebius-test-key",
+    )
+    with initialized_connection(config) as connection:
+        stored = insert_minimal_chunk(
+            connection,
+            config,
+            filename="hosted.md",
+            text="distributed computation with hosted embeddings",
+        )
+        connection.commit()
+
+    result = sync_vector_index(
+        config, model=selected_model, collection="document_index"
+    )
+
+    assert result.model == canonical_model
+    assert result.provider == provider
+    assert result.embedding_dim == dimension
+    assert result.vectors_indexed == 1
+
+    with closing(connect_sqlite(config)) as connection:
+        row = connection.execute(
+            """
+            SELECT embedding_model, embedding_dim, vector_collection, vector_id
+            FROM embeddings
+            WHERE chunk_id = ?
+            """,
+            (stored.chunk_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["embedding_model"] == canonical_model
+    assert row["embedding_dim"] == dimension
+    assert row["vector_id"] == f"chunk:{stored.chunk_id}"
+    assert row["vector_collection"] == physical_collection_name(
+        "document_index",
+        provider=provider,
+        model_name=canonical_model,
+        dimension=dimension,
+        metric="cosine",
+    )
+
+    results = semantic_search(
+        config,
+        "distributed computation",
+        indexes=("document_index",),
+        model=selected_model,
+    )
+    assert [item.chunk_id for item in results] == [stored.chunk_id]
+
+
+def test_gemini_alias_and_canonical_selection_share_one_physical_profile(
+    tmp_path: Path,
+    patch_hosted_provider_doubles: dict[str, object],
+) -> None:
+    config = make_config(
+        tmp_path,
+        embedding_model="gemini-embedding-001",
+        google_api_key="offline-google-test-key",
+    )
+    with initialized_connection(config) as connection:
+        stored = insert_minimal_chunk(
+            connection,
+            config,
+            filename="alias.md",
+            text="canonical Gemini collection identity",
+        )
+        connection.commit()
+
+    alias_result = sync_vector_index(config, model="gemini-embedding-001")
+    canonical_result = sync_vector_index(
+        config,
+        model="google/gemini-embedding-001",
+    )
+
+    assert alias_result.model == canonical_result.model == "google/gemini-embedding-001"
+    assert alias_result.vectors_indexed == 1
+    assert canonical_result.vectors_indexed == 0
+    with closing(connect_sqlite(config)) as connection:
+        rows = connection.execute(
+            """
+            SELECT embedding_model, vector_collection
+            FROM embeddings
+            WHERE chunk_id = ?
+            """,
+            (stored.chunk_id,),
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["embedding_model"] == "google/gemini-embedding-001"
+
+
+def test_exhausted_hosted_retries_preserve_completed_batches_for_resume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(
+        tmp_path,
+        embedding_model="google/gemini-embedding-001",
+        google_api_key="offline-google-test-key",
+    )
+    with initialized_connection(config) as connection:
+        for index in range(65):
+            insert_minimal_chunk(
+                connection,
+                config,
+                filename=f"batch-{index}.md",
+                text=f"batch document {index} distributed computation",
+            )
+        connection.commit()
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+    class FailingGoogleClient:
+        def __init__(self, *, fail_single: bool) -> None:
+            self._embeddings = DeterministicTestEmbeddings(3072)
+            self.fail_single = fail_single
+            self.calls = 0
+
+        def embed_documents(
+            self, texts: list[str], **_kwargs: object
+        ) -> list[list[float]]:
+            self.calls += 1
+            if self.fail_single and len(texts) == 1:
+                raise RateLimitError("secret-key must not surface")
+            return self._embeddings.embed_documents(texts)
+
+        def embed_query(self, text: str, **_kwargs: object) -> list[float]:
+            return self._embeddings.embed_query(text)
+
+    failing_client = FailingGoogleClient(fail_single=True)
+    monkeypatch.setattr(
+        google_genai_module,
+        "_google_api_key",
+        lambda _config: "offline-google-test-key",
+    )
+    monkeypatch.setattr(
+        google_genai_module,
+        "_require_google_embeddings",
+        lambda *_args, **_kwargs: lambda **_kwargs: failing_client,
+    )
+
+    with pytest.raises(
+        VectorIndexError, match="Google GenAI embedding document embedding failed"
+    ):
+        sync_vector_index(config, collection="document_index")
+
+    with closing(connect_sqlite(config)) as connection:
+        committed = connection.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+    assert committed == 64
+    assert failing_client.calls == 4  # one successful batch plus three retries
+
+    successful_client = FailingGoogleClient(fail_single=False)
+    monkeypatch.setattr(
+        google_genai_module,
+        "_require_google_embeddings",
+        lambda *_args, **_kwargs: lambda **_kwargs: successful_client,
+    )
+    resumed = sync_vector_index(config, collection="document_index")
+
+    assert resumed.vectors_indexed == 1
+    with closing(connect_sqlite(config)) as connection:
+        total = connection.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+    assert total == 65
 
 
 def test_sync_is_idempotent(

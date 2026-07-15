@@ -333,6 +333,64 @@ def test_fixture_state_missing_has_setup_guidance(tmp_path: Path) -> None:
         validate_fixture_state(config)
 
 
+def test_fixture_prepare_and_validate_canonicalizes_gemini_alias_offline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alias = "gemini-embedding-001"
+    canonical = "google/gemini-embedding-001"
+    config = make_config(tmp_path, embedding_model=alias)
+    snapshot = _manifest_snapshot()
+    snapshot["vector_collections"] = [
+        {
+            **snapshot["vector_collections"][0],  # type: ignore[index]
+            "embedding_model": canonical,
+            "embedding_dim": 3072,
+        }
+    ]
+    vector_calls: list[tuple[str | None, str | None]] = []
+
+    def fake_ensure_data_dirs(state_config: object) -> None:
+        state_config.data_dir.mkdir(parents=True, exist_ok=True)  # type: ignore[attr-defined]
+        state_config.sqlite_path.parent.mkdir(parents=True, exist_ok=True)  # type: ignore[attr-defined]
+        state_config.sqlite_path.touch()  # type: ignore[attr-defined]
+        state_config.chroma_dir.mkdir(parents=True, exist_ok=True)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(evaluation_core, "ensure_data_dirs", fake_ensure_data_dirs)
+    monkeypatch.setattr(evaluation_core, "inventory_courses", lambda _config: None)
+    monkeypatch.setattr(evaluation_core, "extract_pending_files", lambda _config: None)
+    monkeypatch.setattr(evaluation_core, "summarize_data_files", lambda _config: None)
+    monkeypatch.setattr(
+        evaluation_core,
+        "sync_keyword_index",
+        lambda _config, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        evaluation_core,
+        "sync_vector_index",
+        lambda state_config, **kwargs: vector_calls.append(
+            (state_config.embedding_model, kwargs.get("model"))
+        ),
+    )
+    monkeypatch.setattr(
+        evaluation_core,
+        "_fixture_state_snapshot",
+        lambda _state: snapshot,
+    )
+
+    manifest = evaluation_core.prepare_fixture_state(config)
+
+    assert manifest["embedding_model"] == canonical
+    assert vector_calls == [(canonical, canonical)]
+    assert validate_fixture_state(config)["embedding_model"] == canonical
+    assert (
+        validate_fixture_state(replace(config, embedding_model=canonical))[
+            "embedding_model"
+        ]
+        == canonical
+    )
+
+
 @pytest.mark.parametrize(
     ("field", "wrong_value"),
     (

@@ -1,8 +1,8 @@
 """Indexing public API.
 
 Keyword indexing and the pure embedding-profile registry import eagerly. The
-vector adapters and ChromaDB-backed sync/search import lazily so that importing
-this package for keyword-only use does not pull in ``langchain-core`` or
+provider factory and ChromaDB-backed sync/search import lazily so importing
+this package for keyword-only use does not pull in optional provider SDKs or
 ``chromadb``.
 """
 
@@ -34,11 +34,12 @@ from .profiles import (
 )
 
 if TYPE_CHECKING:
-    from .embeddings import build_embedding_model
+    from .embedding_providers.factory import BuiltEmbeddingModel, build_embedding_model
     from .vector import semantic_search, sync_vector_index
 
 _LAZY_EXPORTS = {
-    "build_embedding_model": "embeddings",
+    "BuiltEmbeddingModel": "embedding_providers.factory",
+    "build_embedding_model": "embedding_providers.factory",
     "semantic_search": "vector",
     "sync_vector_index": "vector",
 }
@@ -48,6 +49,7 @@ __all__ = [
     "INDEX_TO_SOURCE_TYPE",
     "EMBEDDING_PROFILES",
     "EmbeddingProfile",
+    "BuiltEmbeddingModel",
     "KeywordIndexError",
     "KeywordIndexResult",
     "KeywordSearchError",

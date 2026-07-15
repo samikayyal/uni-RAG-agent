@@ -68,7 +68,7 @@ Core flow:
 * **Document Extraction**: PyMuPDF for PDFs, with optional Tesseract OCR fallback for scanned PDFs only when `UNI_RAG_OCR_ENABLED` is true and Tesseract is installed; `python-pptx` for PPTX; `python-docx` for DOCX; `nbformat` for notebooks; pandas/openpyxl for tabular summaries.
 * **Notebook EDA**: pandas for tabular analysis and matplotlib-backed pandas plots for lightweight diagnostic charts over generated app data.
 * **App/API Layer**: FastAPI backend with a simple HTML/JS frontend.
-* **LLM Provider**: Multi-provider via LangChain. Production LLM and embedding provider/model values are nullable configuration loaded from environment variables; a configured LLM provider/model and the optional `llm` extra are mandatory when executing `retrieve`, while production vector commands use only reviewed Hugging Face profiles. Tests inject deterministic LangChain doubles at model-loader boundaries. Do not hardcode a paid or cloud provider as required.
+* **LLM and embedding providers**: Multi-provider via LangChain. Production LLM and embedding model values are nullable configuration loaded from environment variables; a configured LLM provider/model and the optional `llm` extra are mandatory when executing `retrieve`. Production vector commands use only the explicit reviewed profile registry: four local Hugging Face profiles plus the hosted direct-Gemini and Nebius Token Factory profiles documented in Feature 07. Providers are inferred from the selected profile, not a separate provider variable. Tests inject deterministic LangChain doubles at model-loader boundaries. Do not hardcode a paid or cloud provider as required.
 * **Configuration**: Environment variables loaded from a `.env` file via `python-dotenv`.
 
 ## Key System Constraints

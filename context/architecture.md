@@ -84,6 +84,64 @@ Recommended MVP:
 - SQLite for metadata and FTS5 keyword search (unicode61 default tokenizer).
 - ChromaDB for vector embeddings, with separate collections per logical index.
 
+### Embedding profile registry
+
+The registry is the source of truth for supported embedding identities, provider
+construction, installation extra, declared dimension, and access notes. Provider
+selection is inferred from the registry; callers select a model identifier and do
+not provide a separate provider setting. The reviewed profiles are:
+
+| Registry identifier | Provider / execution | Declared dimension | Identity notes |
+| :--- | :--- | :---: | :--- |
+| `BAAI/bge-m3` | `huggingface` / local | 1024 | Local Hugging Face profile. |
+| `jinaai/jina-embeddings-v3` | `huggingface` / local | 1024 | Local profile; remote-code requirements remain profile metadata. |
+| `jinaai/jina-embeddings-v5-text-small` | `huggingface` / local | 1024 | Local profile; access and dimension metadata remain reviewable. |
+| `google/embeddinggemma-300m` | `huggingface` / local | 768 | Local Hugging Face profile; gated/access notes remain profile metadata. |
+| `google/gemini-embedding-001` | `google_genai` / hosted direct Gemini API | 3072 | Canonical hosted identifier; `gemini-embedding-001` is an accepted alias. |
+| `Qwen/Qwen3-Embedding-8B` | `nebius` / hosted Nebius Token Factory | 4096 | Canonical hosted identifier. |
+
+The alias `gemini-embedding-001` resolves to the canonical registry identity
+`google/gemini-embedding-001` before construction, storage, retrieval, evidence,
+or telemetry. The canonical model identifier is preserved everywhere downstream;
+an alias must never create a second vector profile. There is no
+`UNI_RAG_EMBEDDING_PROVIDER` variable.
+
+Local Hugging Face construction uses `uv sync --extra embeddings`. Hosted Google
+and Nebius construction uses `uv sync --extra embeddings-cloud`. Query planning
+and answer-generation integrations retain their existing independent
+`uv sync --extra llm` semantics.
+
+Hosted construction is provider-specific and explicit. Google uses the direct
+Gemini API with `GOOGLE_API_KEY`; Vertex AI is not supported by this contract.
+Nebius uses `https://api.tokenfactory.nebius.com/v1/` with `NEBIUS_API_KEY` and
+the model `Qwen/Qwen3-Embedding-8B`. Nebius query embeddings use exactly:
+
+```text
+Instruct: Given a web search query, retrieve relevant passages that answer the query
+Query:{query}
+```
+
+The instruction is applied to semantic queries; eligible document/chunk text is
+embedded as document input without inventing a second provider-specific prompt.
+
+Embedding SDKs are imported lazily only after a profile has been selected. Local
+models use a runtime dimension probe. Hosted profiles use their declared
+dimensions and do not make a dedicated probe request; every actual hosted vector
+returned during a real batch is validated against the declared dimension before
+the batch can be committed. Local and hosted paths share vector-shape validation,
+bounded retry, sanitized failure, 64-chunk batching, and per-batch commit rules.
+The shared validation requires the expected vector count, nonempty finite numeric
+vectors, and the expected dimension. The shared retry policy allows three total
+attempts for network failures, HTTP 408/429, and HTTP 5xx responses; malformed or
+dimension-invalid responses, authentication/permission failures, model failures,
+and other HTTP 4xx responses are not retried.
+If hosted retries are exhausted, already committed batches remain valid and the
+incremental run can resume missing chunks on a later invocation.
+
+The eligible course text and semantic queries sent through hosted profiles leave
+the machine and may incur provider charges. Local profiles keep model execution
+local apart from model downloads as applicable.
+
 ## Exploratory Notebook Strategy
 
 Use notebooks as a read-only EDA layer over generated local app data, not as the application runtime or pipeline implementation.
@@ -380,13 +438,19 @@ CREATE INDEX idx_embeddings_chunk_id ON embeddings(chunk_id);
 `embeddings.chunk_id` uses `ON DELETE CASCADE` (DEC-030): re-extraction deletes
 and replaces stale chunks, and the orphaned vector-mapping rows are removed
 automatically so they cannot point at deleted chunks. The physical
-`vector_collection` is the canonical embedding-profile identity, so a chunk may
-have one mapping per backend/physical collection and side-by-side profiles stay
-isolated even when they share a display model name.
+`vector_collection` is the canonical embedding-profile storage identity, so a
+chunk may have one mapping per backend/physical collection and side-by-side
+profiles stay isolated even when they share a display model name. The
+`embedding_model` value stored in SQLite is always the canonical registry model
+identifier, never the `gemini-embedding-001` alias. The selected provider is
+inferred from that registry identity; the schema does not add or read a
+`UNI_RAG_EMBEDDING_PROVIDER` setting.
 `vector_collection` is the physical ChromaDB collection name
 `<logical_index>__<model_slug>__<hash>`; the logical index stays stable while
-different models hash to distinct physical collections. `vector_id` is the
-stable `chunk:<chunk_id>` id used inside ChromaDB.
+different provider/model/dimension/metric profiles hash to distinct physical
+collections. `vector_id` is the stable `chunk:<chunk_id>` id used inside ChromaDB.
+The same canonical model identity is carried through semantic retrieval results,
+the persisted retrieval settings/evidence packet, and vector/retrieval telemetry.
 
 ### data_summaries
 
@@ -632,16 +696,32 @@ Rules:
 - embed only current eligible chunks (`files.index_status = 'indexed'`,
   non-empty text, eligible `source_type`), reusing the same current-file-only
   contract as keyword indexing (DEC-029);
-- one ChromaDB collection per logical index, namespaced per embedding model;
+- one ChromaDB collection per logical index, namespaced per canonical embedding
+  profile (provider, model, dimension, and metric);
 - ChromaDB collections use cosine distance;
 - the default `index vector` run is incremental: it reconciles the selected
   physical collection with SQLite, removes Chroma-only vectors and stale mapping
   rows, restores mappings whose Chroma vectors disappeared, then embeds current
   eligible chunks missing the selected physical profile; `--rebuild` clears and
   repopulates only the selected model/profile and optional logical collection;
-- production vector commands require an explicitly configured or selected reviewed
-  Hugging Face profile; the local model stack loads lazily through the optional
-  `embeddings` extra (DEC-031).
+- production vector commands require an explicitly configured or selected
+  reviewed registry profile. Provider inference comes from the registry; there is
+  no `UNI_RAG_EMBEDDING_PROVIDER` environment variable. Local Hugging Face
+  profiles load lazily through `uv sync --extra embeddings`, while Google and
+  Nebius hosted profiles load lazily through `uv sync --extra embeddings-cloud`.
+- local model construction probes the runtime vector dimension. Hosted profiles
+  use their declared dimensions without a dedicated probe request, then validate
+  the count, shape, and declared dimension of every actual returned vector before
+  committing a batch.
+- Both provider paths use the same validation and bounded retry rules. Eligible
+  chunks are processed in batches of 64 and each successful batch is committed
+  separately. If hosted retries are exhausted, prior commits remain durable and
+  the next incremental run resumes the missing chunks rather than rebuilding
+  completed batches.
+- The canonical model identifier is preserved in physical collection identity,
+  `embeddings.embedding_model`/`embedding_dim`, semantic retrieval results,
+  persisted retrieval/evidence settings, and telemetry. Provider-specific
+  construction errors, missing extras, and missing credentials are sanitized.
 - semantic search accepts a Chroma hit only when its exact backend, physical
   collection, vector id, and chunk mapping still exist in SQLite; course filters
   are resolved before the final top-K limit so they cannot silently discard a

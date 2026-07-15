@@ -11,7 +11,7 @@ Create a small, repeatable evaluation harness that checks retrieval quality, cit
 - [08-query-routing-and-hybrid-retrieval.md](08-query-routing-and-hybrid-retrieval.md)
 - [09-evidence-packets-and-coverage.md](09-evidence-packets-and-coverage.md)
 - [10-answering-and-citations.md](10-answering-and-citations.md)
-- DEC-022, DEC-026
+- DEC-022, DEC-026, DEC-039
 
 ## In Scope
 
@@ -22,6 +22,9 @@ Create a small, repeatable evaluation harness that checks retrieval quality, cit
 - Support optional smoke evals against the real `Courses` archive.
 - Check citation validity, evidence packet completeness, and weak retrieval reporting.
 - Record performance and failure summaries.
+- Keep evaluation provider-neutral while preserving canonical embedding model
+  identity and declared dimension in safe traces; allow optional manual smokes
+  for the reviewed Gemini and Nebius hosted profiles.
 - Add or update the evaluation EDA notebook for eval reports and quality trends.
 
 ## Out of Scope
@@ -96,6 +99,12 @@ Locked implementation rules for this slice:
   rebuilds keyword/vector indexes, and records a manifest. Fixture runs fail
   with setup guidance when the manifest or generated state is absent or stale;
   they never rebuild implicitly or touch normal archive state.
+- Fixture preparation selects a reviewed embedding profile by canonical model
+  identifier. Local Hugging Face preparation uses `uv sync --extra embeddings`;
+  hosted Google/Nebius preparation uses `uv sync --extra embeddings-cloud`.
+  Provider inference comes from the registry and there is no
+  `UNI_RAG_EMBEDDING_PROVIDER` setting. The existing `uv sync --extra llm`
+  semantics remain independent.
 - Preparation builds below a guarded temporary sibling, validates deterministic
   file/chunk/FTS/embedding identities plus vector-collection/Chroma state, and
   activates the result only after validation. A failed preparation preserves a
@@ -130,6 +139,10 @@ Locked implementation rules for this slice:
 - Do not use LLM judging as the sole pass/fail mechanism.
 - Test-only injected model/chat dependencies should keep fixture evals independent of provider credentials.
 - Reports should avoid storing secrets or full environment values.
+- Hosted evaluation sends eligible course text and semantic queries to an
+  external provider and may incur charges; local profiles keep model execution
+  local apart from model downloads as applicable. Do not run hosted evaluation
+  in the automated fixture path merely because credentials are present.
 - The EDA notebook must read generated eval reports and app traces only; it must not mutate reports, SQLite, indexes, or `Courses`.
 - Notebook outputs and execution counts should be cleared before commit.
 
@@ -142,7 +155,10 @@ Locked implementation rules for this slice:
 - Verify weak-retrieval expected cases pass only when limitations are reported.
 - Verify reports are written under a temporary runs directory in tests.
 - Verify `notebooks/evaluation_eda.ipynb`, once created, is valid notebook JSON, imports pandas successfully, and documents its read-only safety boundary.
-- Optional smoke: `uv run -m uni_rag_agent eval run --smoke-real-archive` after a real local index exists.
+- Optional manual credentialed smokes: after installing the matching embedding
+  extra, run the small Gemini or Nebius vector/retrieval smoke commands from the
+  root README. These are optional and are not part of pytest or the default eval
+  path.
 
 ## Acceptance Criteria
 
