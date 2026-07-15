@@ -966,3 +966,77 @@ and remain bounded in memory. Timeout cancellation requires an explicit guard
 at the answer persistence boundary because synchronous provider work may
 outlive the HTTP request.
 
+---
+
+## DEC-037: Fixture-isolated deterministic evaluation reports
+
+* **Status**: Accepted
+* **Date**: 2026-07-15
+
+### Context
+
+Evaluation must be repeatable without mutating the normal archive database or
+vector index, while still exercising production providers and the authoritative
+evidence/answer persistence boundaries.
+
+### Decision
+
+- Commit one strict UTF-8 JSON fixture set at `evals/fixtures.json` with exact
+  fields, explicit arrays, canonical courses/indexes, and fixture-root-relative
+  expected paths.
+- Keep generated fixture state under `data/runs/eval/fixture-state` and require
+  an identity/count manifest produced by `eval prepare-fixtures`; `eval run`
+  never rebuilds stale or missing state implicitly.
+- Make bare `eval run` fixture mode, with `--fixtures` equivalent. Real archive
+  smoke runs require `--smoke-real-archive` and a strict local
+  `real-archive.json` set.
+- Score retrieval, required terms, packet-relative citations, answer
+  limitations, and explicit absence cases deterministically. Always emit paired
+  timestamped JSON and Markdown reports containing only safe scores, trace IDs,
+  failures, and stage timing aggregates.
+- Keep deterministic planner/embedding/answer doubles in pytest seams only;
+  public fixture commands resolve configured production providers/models.
+
+### Consequences
+
+Fixture evaluation can be run repeatedly and audited back to normal evidence
+and answer traces without mixing state with the user's archive. Reports remain
+safe to inspect and compare, while provider availability remains an explicit
+setup prerequisite for public fixture preparation and execution.
+
+---
+
+## DEC-038: Atomic fixture-state activation and redacted eval projections
+
+* **Status**: Accepted
+* **Date**: 2026-07-15
+
+### Context
+
+Fixture preparation can fail part-way through extraction or indexing, and
+count-only manifests cannot detect same-count file, chunk, keyword, or vector
+drift. Evaluation reports also contain sensitive query and failure-boundary
+inputs unless their projection is deliberately narrower than the in-memory
+result.
+
+### Decision
+
+- Generate fixture state beneath a guarded unique sibling of
+  `data/runs/eval/fixture-state`, validate it completely, and activate it only
+  after validation. A failed generation preserves the previous active state;
+  swap failures restore the previous state from a guarded backup sibling.
+- Extend the manifest with deterministic file/chunk/FTS/embedding identities,
+  physical vector-collection profiles, and a persisted Chroma-tree digest in
+  addition to counts, source digests, and the configured embedding model.
+- Match eval evidence files exactly relative to the configured courses root;
+  do not use suffix-only path matching for actual eval runs.
+- Reuse the retrieval persistence sanitizer for eval failures and omit raw
+  query text from JSON/Markdown report projections.
+
+### Consequences
+
+Interrupted preparation cannot destroy a known-good fixture state, and stale
+or same-count index drift fails with setup guidance before evaluation. Reports
+remain useful for scores and trace IDs without persisting user query content or
+credential-shaped exception details.
+

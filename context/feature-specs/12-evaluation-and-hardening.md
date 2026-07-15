@@ -83,6 +83,34 @@ data/runs/eval/
 
 If later persistence is useful, add an explicit architecture update before introducing eval tables.
 
+Locked implementation rules for this slice:
+
+- `evals/fixtures.json` is strict UTF-8 JSON with exactly the item fields shown
+  above. Arrays are explicit JSON arrays; unknown or missing fields are errors.
+- Bare `eval run` means fixture mode and is equivalent to `--fixtures`.
+  `--smoke-real-archive` is explicit and mutually exclusive. Fixture state is
+  prepared only by `eval prepare-fixtures` under
+  `data/runs/eval/fixture-state`, using production embedding/model providers;
+  deterministic doubles remain pytest-only.
+- Fixture preparation inventories, extracts (including data-schema summaries),
+  rebuilds keyword/vector indexes, and records a manifest. Fixture runs fail
+  with setup guidance when the manifest or generated state is absent or stale;
+  they never rebuild implicitly or touch normal archive state.
+- Preparation builds below a guarded temporary sibling, validates deterministic
+  file/chunk/FTS/embedding identities plus vector-collection/Chroma state, and
+  activates the result only after validation. A failed preparation preserves a
+  previously valid active fixture state.
+- Retrieval scoring matches canonical courses/indexes and fixture-root-relative
+  files exactly. Required terms must occur in both selected evidence and the
+  final answer; expected weakness substrings must occur in both packet
+  weaknesses and answer limitations. Empty expected sources with nonempty
+  weaknesses is an explicit zero-evidence case.
+- Every item uses the existing `build_evidence` and `store_answer` boundaries.
+  Paired timestamped JSON/Markdown reports under `data/runs/eval` include only
+  safe per-item field results, trace IDs, failures, and evidence/answer/total
+  timings plus p50/p95 aggregates. They never include raw evidence, model
+  output, raw query text, full environment values, or secrets.
+
 ## Workflow
 
 1. Maintain a committed eval set for fixture data.

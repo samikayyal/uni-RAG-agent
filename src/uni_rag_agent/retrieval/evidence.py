@@ -51,6 +51,10 @@ INDEX_TO_SOURCE_TYPE = {
 class EvidenceError(RuntimeError):
     """Raised when a packet cannot be assembled or loaded safely."""
 
+    def __init__(self, message: str, *, search_run_id: int | None = None) -> None:
+        super().__init__(message)
+        self.search_run_id = search_run_id
+
 
 @dataclass(frozen=True)
 class _HydratedCandidate:
@@ -76,25 +80,46 @@ def build_evidence(
 ) -> EvidenceBuildResult:
     """Run the mandatory planner/retriever and persist one evidence packet."""
     recorder = _SearchRunRecorder(config)
-    execution = _execute_retrieval(
-        config,
-        query,
-        conversation_context=conversation_context,
-        model=model,
-        chat_model=chat_model,
-        recorder=recorder,
-    )
+    try:
+        execution = _execute_retrieval(
+            config,
+            query,
+            conversation_context=conversation_context,
+            model=model,
+            chat_model=chat_model,
+            recorder=recorder,
+        )
+    except Exception as exc:  # noqa: BLE001 - retain persisted run identity
+        run_id = recorder.search_run_id if recorder.search_run_id > 0 else None
+        if run_id is not None and getattr(exc, "search_run_id", None) is None:
+            try:
+                exc.search_run_id = run_id  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        raise
     try:
         return _assemble_packet(config, recorder, execution)
     except (EvidenceError, StorageError) as exc:
+        run_id = recorder.search_run_id if recorder.search_run_id > 0 else None
+        if run_id is not None and getattr(exc, "search_run_id", None) is None:
+            try:
+                exc.search_run_id = run_id  # type: ignore[attr-defined]
+            except Exception:
+                pass
         _mark_packet_build_failed(config, recorder.search_run_id, exc)
         raise
     except sqlite3.Error as exc:
-        error = EvidenceError(f"Evidence packet assembly failed: {exc}")
+        error = EvidenceError(
+            f"Evidence packet assembly failed: {exc}",
+            search_run_id=recorder.search_run_id or None,
+        )
         _mark_packet_build_failed(config, recorder.search_run_id, error)
         raise error from exc
     except Exception as exc:  # noqa: BLE001 - packet boundary must be explicit
-        error = EvidenceError(f"Evidence packet assembly failed: {exc}")
+        error = EvidenceError(
+            f"Evidence packet assembly failed: {exc}",
+            search_run_id=recorder.search_run_id or None,
+        )
         _mark_packet_build_failed(config, recorder.search_run_id, error)
         raise error from exc
 

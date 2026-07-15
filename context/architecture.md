@@ -101,7 +101,7 @@ Stage notebooks are created when the producing stage is implemented. Do not add 
 | Retrieval and evidence / 08-09 | `notebooks/retrieval_eda.ipynb` | Implemented with Feature 09 | `search_runs`, `search_result_sets`, `search_results`, `evidence_packets` | Query-plan behavior, result-set completion, RRF mix, evidence selection, weaknesses, searched/found/missing coverage. |
 | Answering / 10 | `notebooks/answering_eda.ipynb` | Implemented with Feature 10 | `answers`, `evidence_packets` | Citation validity, limitations, model traces, injected-test behavior, insufficient-evidence handling. |
 | UI / 11 | None required for MVP | Not applicable | FastAPI responses and UI tests | UI correctness is covered by API/UI tests; use retrieval/answering notebooks for underlying traces. |
-| Evaluation / 12 | `notebooks/evaluation_eda.ipynb` | Planned when Feature 12 lands | `data/runs/eval/` reports, optional answer/search traces | Eval score trends, failures, citation quality, retrieval quality, runtime summaries. |
+| Evaluation / 12 | `notebooks/evaluation_eda.ipynb` | Implemented with Feature 12 | `data/runs/eval/` reports, optional answer/search traces | Eval score trends, failures, citation quality, retrieval quality, runtime summaries. |
 
 `inventory_eda.ipynb` uses pandas to read `data/uni_rag.sqlite` after `uv run -m uni_rag_agent inventory run` and explores:
 

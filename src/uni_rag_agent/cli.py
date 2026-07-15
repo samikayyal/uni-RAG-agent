@@ -20,6 +20,11 @@ from .answering import (
     store_answer,
 )
 from .config import Config, ConfigError, load_config, validate_config
+from .evaluation import (
+    EvaluationError,
+    prepare_fixture_state,
+    run_eval_set,
+)
 from .extraction import (
     DataSummaryRunResult,
     ExtractionError,
@@ -58,6 +63,7 @@ from .retrieval import (
     retrieve,
 )
 from .retrieval.evidence_models import EvidencePacket
+from .retrieval.evidence_persistence import sanitize_error
 from .retrieval.models import RetrievalRun
 from .storage import (
     StorageCheckResult,
@@ -80,6 +86,9 @@ INDEX_ERROR = 6
 SEARCH_ERROR = 7
 EVIDENCE_ERROR = 8
 ANSWER_ERROR = 9
+EVALUATION_ERROR = 10
+# Short alias for callers that use the command-group name.
+EVAL_ERROR = EVALUATION_ERROR
 
 CommandHandler = Callable[[argparse.Namespace], int]
 
@@ -141,12 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_evidence_commands(subparsers)
     _add_answer_commands(subparsers)
     _add_ask_command(subparsers)
-    _add_stub_group(
-        subparsers,
-        "eval",
-        "Evaluation commands.",
-        {"run": ("eval run", "Feature Spec 12: Evaluation and Hardening")},
-    )
+    _add_eval_commands(subparsers)
     _add_app_commands(subparsers)
 
     return parser
@@ -393,6 +397,47 @@ def _add_stub_group(
         )
 
 
+def _add_eval_commands(subparsers: argparse._SubParsersAction) -> None:
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Evaluation and hardening commands.",
+    )
+    eval_subparsers = eval_parser.add_subparsers(
+        dest="eval_command",
+        metavar="subcommand",
+    )
+    eval_subparsers.required = True
+
+    prepare_parser = eval_subparsers.add_parser(
+        "prepare-fixtures",
+        help=(
+            "Build isolated fixture inventory, extraction, keyword, and vector "
+            "state using configured production providers."
+        ),
+    )
+    prepare_parser.set_defaults(handler=_handle_eval_prepare_fixtures)
+
+    run_parser = eval_subparsers.add_parser(
+        "run",
+        help="Run the committed fixture eval set (the default mode).",
+    )
+    mode = run_parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--fixtures",
+        action="store_true",
+        help="Run the committed fixture set (equivalent to bare eval run).",
+    )
+    mode.add_argument(
+        "--smoke-real-archive",
+        action="store_true",
+        help=(
+            "Explicitly run data/runs/eval/real-archive.json against the normal "
+            "configured archive state."
+        ),
+    )
+    run_parser.set_defaults(handler=_handle_eval_run)
+
+
 def _add_retrieve_command(subparsers: argparse._SubParsersAction) -> None:
     retrieve_parser = subparsers.add_parser(
         "retrieve",
@@ -549,6 +594,63 @@ def _handle_app_serve(args: argparse.Namespace) -> int:
         port=args.port,
     )
     return SUCCESS
+
+
+def _handle_eval_prepare_fixtures(_: argparse.Namespace) -> int:
+    try:
+        config = load_config()
+        validate_config(config)
+        manifest = prepare_fixture_state(config)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (
+        EvaluationError,
+        StorageError,
+        InventoryError,
+        ExtractionError,
+        KeywordIndexError,
+        VectorIndexError,
+    ) as exc:
+        print(f"Evaluation error: {sanitize_error(exc)}", file=sys.stderr)
+        return EVALUATION_ERROR
+
+    print("Fixture evaluation state prepared")
+    print(f"manifest_version: {manifest['manifest_version']}")
+    print(f"embedding_model: {manifest['embedding_model']}")
+    print(f"files: {manifest['files']}")
+    print(f"chunks: {manifest['chunks']}")
+    print(f"keyword_rows: {manifest['keyword_rows']}")
+    print(f"vector_rows: {manifest['vector_rows']}")
+    return SUCCESS
+
+
+def _handle_eval_run(args: argparse.Namespace) -> int:
+    smoke = bool(args.smoke_real_archive)
+    try:
+        config = load_config()
+        validate_config(config)
+        report_path, results = run_eval_set(
+            config,
+            fixtures=not smoke,
+            smoke_real_archive=smoke,
+        )
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return CONFIG_ERROR
+    except (EvaluationError, StorageError) as exc:
+        print(f"Evaluation error: {sanitize_error(exc)}", file=sys.stderr)
+        return EVALUATION_ERROR
+
+    failed = sum(not result.passed for result in results)
+    print("Evaluation run completed")
+    print(f"mode: {'real-archive' if smoke else 'fixtures'}")
+    print(f"items: {len(results)}")
+    print(f"passed: {len(results) - failed}")
+    print(f"failed: {failed}")
+    print(f"json_report: {report_path}")
+    print(f"markdown_report: {report_path.with_suffix('.md')}")
+    return SUCCESS if failed == 0 else EVALUATION_ERROR
 
 
 def _handle_config_check(_: argparse.Namespace) -> int:

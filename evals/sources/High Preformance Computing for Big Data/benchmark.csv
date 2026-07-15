@@ -1,0 +1,4 @@
+workload,latency_ms,throughput
+small,12.5,800
+medium,31.0,420
+large,88.0,160

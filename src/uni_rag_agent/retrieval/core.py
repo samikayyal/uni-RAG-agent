@@ -31,6 +31,10 @@ from .rrf import merge_with_rrf
 class RetrievalError(RuntimeError):
     """Raised when a configured retrieval backend fails."""
 
+    def __init__(self, message: str, *, search_run_id: int | None = None) -> None:
+        super().__init__(message)
+        self.search_run_id = search_run_id
+
 
 @dataclass(frozen=True)
 class _RetrievalExecution:
@@ -185,13 +189,20 @@ def _execute_retrieval(
                 recorder.record_result_set(result_sets[-1])
     except (MetadataSearchError, KeywordSearchError, SemanticSearchError) as exc:
         _mark_recorder_failed(recorder, exc)
-        raise RetrievalError(f"Retrieval backend failed: {exc}") from exc
+        raise RetrievalError(
+            f"Retrieval backend failed: {exc}",
+            search_run_id=_recorder_search_run_id(recorder),
+        ) from exc
     except (StorageError, QueryPlanningError) as exc:
         _mark_recorder_failed(recorder, exc)
+        _attach_search_run_id(exc, recorder)
         raise
     except Exception as exc:  # noqa: BLE001 - backend failures are fatal
         _mark_recorder_failed(recorder, exc)
-        raise RetrievalError(f"Retrieval backend failed: {exc}") from exc
+        raise RetrievalError(
+            f"Retrieval backend failed: {exc}",
+            search_run_id=_recorder_search_run_id(recorder),
+        ) from exc
 
     try:
         all_results = merge_with_rrf(
@@ -201,12 +212,16 @@ def _execute_retrieval(
         )
     except Exception as exc:  # noqa: BLE001 - fusion failures are fatal
         _mark_recorder_failed(recorder, exc)
-        raise RetrievalError(f"Retrieval fusion failed: {exc}") from exc
+        raise RetrievalError(
+            f"Retrieval fusion failed: {exc}",
+            search_run_id=_recorder_search_run_id(recorder),
+        ) from exc
     if recorder is not None:
         try:
             recorder.record_fused_results(all_results)
         except Exception as exc:  # noqa: BLE001 - persistence failures are fatal
             _mark_recorder_failed(recorder, exc)
+            _attach_search_run_id(exc, recorder)
             raise
     results = all_results[: config.final_top_k]
     weaknesses = _weaknesses(
@@ -244,6 +259,28 @@ def _mark_recorder_failed(
     except Exception:
         # Preserve the original retrieval/storage failure. The recorder owns
         # its own best-effort diagnostics and must not mask it.
+        return
+
+
+def _recorder_search_run_id(recorder: _SearchRunRecorder | None) -> int | None:
+    """Return the persisted run id when a failure happens after planning."""
+
+    if recorder is None:
+        return None
+    value = getattr(recorder, "search_run_id", None)
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _attach_search_run_id(
+    error: Exception,
+    recorder: _SearchRunRecorder | None,
+) -> None:
+    run_id = _recorder_search_run_id(recorder)
+    if run_id is None or getattr(error, "search_run_id", None) is not None:
+        return
+    try:
+        error.search_run_id = run_id  # type: ignore[attr-defined]
+    except Exception:
         return
 
 

@@ -14,6 +14,7 @@ import uni_rag_agent.cli as cli
 from tests.support import clean_subprocess_env
 from tests.support import make_config
 from uni_rag_agent.answering import AnswerGenerationError, AnswerResult
+from uni_rag_agent.evaluation import EvalSetError
 from uni_rag_agent.retrieval import EvidenceError
 from uni_rag_agent.storage import StorageError
 
@@ -305,6 +306,48 @@ def test_ask_storage_failure_uses_sanitized_error_telemetry(
     assert logger.events[-1]["event"] == "ask_failed"
     assert logger.events[-1]["answer_error"] == "StorageError"
     assert "exception" not in logger.events[-1]
+
+
+def test_eval_prepare_maps_malformed_eval_set_to_sanitized_evaluation_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: SimpleNamespace())
+    monkeypatch.setattr(cli, "validate_config", lambda _: None)
+    monkeypatch.setattr(
+        cli,
+        "prepare_fixture_state",
+        lambda _: (_ for _ in ()).throw(EvalSetError("api_key = 'prepare-secret'")),
+    )
+
+    return_code = cli.main(["eval", "prepare-fixtures"])
+    captured = capsys.readouterr()
+
+    assert return_code == cli.EVALUATION_ERROR
+    assert "Evaluation error:" in captured.err
+    assert "prepare-secret" not in captured.err
+
+
+def test_eval_run_maps_malformed_eval_set_to_sanitized_evaluation_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: SimpleNamespace())
+    monkeypatch.setattr(cli, "validate_config", lambda _: None)
+    monkeypatch.setattr(
+        cli,
+        "run_eval_set",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            EvalSetError("Authorization: Basic run-secret")
+        ),
+    )
+
+    return_code = cli.main(["eval", "run"])
+    captured = capsys.readouterr()
+
+    assert return_code == cli.EVALUATION_ERROR
+    assert "Evaluation error:" in captured.err
+    assert "run-secret" not in captured.err
 
 
 def test_retrieval_eda_notebook_contract_is_read_only_and_output_free() -> None:

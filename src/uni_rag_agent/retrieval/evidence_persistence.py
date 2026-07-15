@@ -15,14 +15,33 @@ from .evidence_models import RetrievalSettings, canonical_json
 from .models import FusedRetrievalResult, QueryPlan, RetrievalResultSet
 
 MAX_STORED_ERROR_LENGTH = 500
-_SENSITIVE_ERROR_RE = re.compile(
-    r"(?i)(api[_ -]?key|access[_ -]?token|token|secret|password|authorization)"
-    r"\s*[:=]\s*[^\s,;]+"
+_AUTH_HEADER_RE = re.compile(
+    r"(?i)(?P<prefix>\b(?:proxy-authorization|authorization)\s*[:=]\s*)"
+    r"(?P<scheme>[A-Za-z][A-Za-z0-9_-]*)\s+[^;\r\n]*"
 )
-_BEARER_RE = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
+_AUTH_ASSIGNMENT_RE = re.compile(
+    r"(?i)(?P<prefix>\b(?:proxy-authorization|authorization)\s*[:=]\s*)"
+    r"[^,;&\r\n]+"
+)
+_SENSITIVE_ERROR_RE = re.compile(
+    r"(?i)(['\"]?(?:api[_ -]?key|access[_ -]?token|token|secret|password)['\"]?)"
+    r"\s*[:=]\s*[^,;&\r\n]+?"
+    r"(?=\s+[A-Za-z][A-Za-z0-9_-]*\s*[:=]|[,;&\r\n]|$)"
+)
+_SENSITIVE_QUOTED_ERROR_RE = re.compile(
+    r"(?i)(['\"]?(?:api[_ -]?key|access[_ -]?token|token|secret|password)['\"]?)"
+    r"\s*[:=]\s*(['\"])[^'\"\r\n]*\2"
+)
+_BEARER_QUOTED_RE = re.compile(r"(?i)\bbearer\s+(['\"])[^'\"\r\n]*\1")
+_BEARER_RE = re.compile(r"(?i)\bbearer\s+[^,;\r\n]+")
+_URL_QUOTED_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|token|secret|password|authorization)=)"
+    r"(['\"])[^'\"\r\n]*\2"
+)
+_URL_CREDENTIALS_RE = re.compile(r"(?i)(https?|ftp)://[^/@\s]+@")
 _URL_SECRET_RE = re.compile(
     r"(?i)([?&](?:api[_-]?key|access[_-]?token|token|secret|password|authorization)=)"
-    r"[^&#\s,;]+"
+    r"[^&#,;\r\n]+"
 )
 _TOKEN_LITERAL_RE = re.compile(r"\b(?:sk-[A-Za-z0-9_-]+|AIza[A-Za-z0-9_-]+)\b")
 
@@ -322,8 +341,20 @@ def sanitize_error(error: Exception | str) -> str:
     text = str(error).splitlines()[0].strip()
     if not text:
         text = type(error).__name__
+    text = _AUTH_HEADER_RE.sub(lambda match: match.group("prefix") + "[redacted]", text)
+    text = _AUTH_ASSIGNMENT_RE.sub(
+        lambda match: match.group("prefix") + "[redacted]", text
+    )
+    text = _BEARER_QUOTED_RE.sub("Bearer [redacted]", text)
     text = _BEARER_RE.sub("Bearer [redacted]", text)
+    text = _URL_QUOTED_SECRET_RE.sub(r"\1[redacted]", text)
+    text = _URL_CREDENTIALS_RE.sub(
+        lambda match: f"{match.group(1)}://[redacted]@", text
+    )
     text = _URL_SECRET_RE.sub(r"\1[redacted]", text)
+    text = _SENSITIVE_QUOTED_ERROR_RE.sub(
+        lambda match: match.group(1) + "=[redacted]", text
+    )
     text = _SENSITIVE_ERROR_RE.sub(r"\1=[redacted]", text)
     text = _TOKEN_LITERAL_RE.sub("[redacted]", text)
     text = text.replace("\x00", "")

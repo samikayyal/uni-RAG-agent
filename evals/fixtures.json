@@ -1,0 +1,200 @@
+[
+  {
+    "id": "concept-rrf",
+    "query": "Explain reciprocal rank fusion in Information Retrieval.",
+    "query_type": "concept_explanation",
+    "expected_courses": ["Information Retrieval"],
+    "expected_files": ["Information Retrieval/hybrid_retrieval.md"],
+    "expected_indexes": ["document_index"],
+    "must_include_terms": ["reciprocal rank fusion"],
+    "expected_weaknesses": [],
+    "notes": "Core document concept with a phrase-level term check."
+  },
+  {
+    "id": "course-summary-ir",
+    "query": "Summarize the Information Retrieval course project.",
+    "query_type": "course_summary",
+    "expected_courses": ["Information Retrieval"],
+    "expected_files": ["Information Retrieval/hybrid_retrieval.md"],
+    "expected_indexes": ["document_index"],
+    "must_include_terms": ["lexical", "semantic vector search"],
+    "expected_weaknesses": [],
+    "notes": "Checks that a summary remains grounded in the course notes."
+  },
+  {
+    "id": "compare-courses",
+    "query": "Compare retrieval ranking with MapReduce throughput across my courses.",
+    "query_type": "cross_course_comparison",
+    "expected_courses": ["Information Retrieval", "High Preformance Computing for Big Data"],
+    "expected_files": ["Information Retrieval/hybrid_retrieval.md", "High Preformance Computing for Big Data/mapreduce_code.py"],
+    "expected_indexes": ["document_index", "code_index"],
+    "must_include_terms": ["ranking", "partition"],
+    "expected_weaknesses": [],
+    "notes": "Cross-course comparison covers two exact course names."
+  },
+  {
+    "id": "find-mapreduce-file",
+    "query": "Find the file that implements MapReduce partitioning.",
+    "query_type": "find_file",
+    "expected_courses": ["High Preformance Computing for Big Data"],
+    "expected_files": ["High Preformance Computing for Big Data/mapreduce_code.py"],
+    "expected_indexes": ["code_index"],
+    "must_include_terms": ["map_partition"],
+    "expected_weaknesses": [],
+    "notes": "Filename and function lookup over the code index."
+  },
+  {
+    "id": "assignment-lookup",
+    "query": "Where is the MapReduce assignment's reduce_counts function?",
+    "query_type": "assignment_or_project_lookup",
+    "expected_courses": ["High Preformance Computing for Big Data"],
+    "expected_files": ["High Preformance Computing for Big Data/mapreduce_code.py"],
+    "expected_indexes": ["code_index"],
+    "must_include_terms": ["reduce_counts"],
+    "expected_weaknesses": [],
+    "notes": "Assignment lookup must preserve the exact misspelled course name."
+  },
+  {
+    "id": "code-partition",
+    "query": "How does the code partition records before reduce?",
+    "query_type": "code_question",
+    "expected_courses": ["High Preformance Computing for Big Data"],
+    "expected_files": ["High Preformance Computing for Big Data/mapreduce_code.py"],
+    "expected_indexes": ["code_index"],
+    "must_include_terms": ["partition records"],
+    "expected_weaknesses": [],
+    "notes": "AST code extraction should retain the function docstring."
+  },
+  {
+    "id": "data-throughput",
+    "query": "What throughput and latency are recorded in the benchmark data?",
+    "query_type": "data_question",
+    "expected_courses": ["High Preformance Computing for Big Data"],
+    "expected_files": ["High Preformance Computing for Big Data/benchmark.csv"],
+    "expected_indexes": ["data_schema_index"],
+    "must_include_terms": ["throughput", "latency_ms"],
+    "expected_weaknesses": [],
+    "notes": "Data-schema summary checks both named columns."
+  },
+  {
+    "id": "slides-cosine-quiz",
+    "query": "Quiz me on cosine similarity from the retrieval slides.",
+    "query_type": "study_quiz",
+    "expected_courses": ["Information Retrieval"],
+    "expected_files": ["Information Retrieval/lecture_slides.pptx"],
+    "expected_indexes": ["slides_index"],
+    "must_include_terms": ["cosine similarity"],
+    "expected_weaknesses": [],
+    "notes": "Committed PPTX fixture proves slide extraction and citations."
+  },
+  {
+    "id": "portfolio-evidence",
+    "query": "Which course work best demonstrates retrieval and distributed processing for my portfolio?",
+    "query_type": "portfolio_resume",
+    "expected_courses": ["Information Retrieval", "High Preformance Computing for Big Data"],
+    "expected_files": ["Information Retrieval/hybrid_retrieval.md", "High Preformance Computing for Big Data/mapreduce_code.py"],
+    "expected_indexes": ["document_index", "code_index"],
+    "must_include_terms": ["project", "MapReduce"],
+    "expected_weaknesses": [],
+    "notes": "Portfolio answer must cite both representative projects."
+  },
+  {
+    "id": "unsupported-absence",
+    "query": "What is the weather on Mars in my course archive?",
+    "query_type": "unknown_or_unsupported",
+    "expected_courses": [],
+    "expected_files": [],
+    "expected_indexes": [],
+    "must_include_terms": [],
+    "expected_weaknesses": ["unsupported"],
+    "notes": "Explicit absence case: zero evidence and an unsupported limitation."
+  },
+  {
+    "id": "transcript-ranking",
+    "query": "What does the lecture transcript say about ranking quality?",
+    "query_type": "concept_explanation",
+    "expected_courses": ["Information Retrieval"],
+    "expected_files": ["Information Retrieval/retrieval_transcript.vtt"],
+    "expected_indexes": ["transcript_index"],
+    "must_include_terms": ["precision", "recall"],
+    "expected_weaknesses": [],
+    "notes": "Timestamped transcript source coverage."
+  },
+  {
+    "id": "notebook-evaluation",
+    "query": "What evaluation metric appears in the retrieval notebook?",
+    "query_type": "study_quiz",
+    "expected_courses": ["Information Retrieval"],
+    "expected_files": ["Information Retrieval/search_demo.ipynb"],
+    "expected_indexes": ["notebook_index"],
+    "must_include_terms": ["reciprocal rank fusion"],
+    "expected_weaknesses": [],
+    "notes": "Notebook cell extraction must preserve code and markdown text."
+  },
+  {
+    "id": "slides-summary",
+    "query": "Summarize the retrieval slide deck.",
+    "query_type": "course_summary",
+    "expected_courses": ["Information Retrieval"],
+    "expected_files": ["Information Retrieval/lecture_slides.pptx"],
+    "expected_indexes": ["slides_index"],
+    "must_include_terms": ["semantic retrieval"],
+    "expected_weaknesses": [],
+    "notes": "Second slide item exercises stable slide locations."
+  },
+  {
+    "id": "compare-benchmark",
+    "query": "Compare retrieval evaluation with benchmark throughput.",
+    "query_type": "cross_course_comparison",
+    "expected_courses": ["Information Retrieval", "High Preformance Computing for Big Data"],
+    "expected_files": ["Information Retrieval/hybrid_retrieval.md", "High Preformance Computing for Big Data/benchmark.csv"],
+    "expected_indexes": ["document_index", "data_schema_index"],
+    "must_include_terms": ["evaluation", "throughput"],
+    "expected_weaknesses": [],
+    "notes": "Comparison across document and data-schema evidence."
+  },
+  {
+    "id": "code-assignment",
+    "query": "Which function aggregates counts in the assignment code?",
+    "query_type": "assignment_or_project_lookup",
+    "expected_courses": ["High Preformance Computing for Big Data"],
+    "expected_files": ["High Preformance Computing for Big Data/mapreduce_code.py"],
+    "expected_indexes": ["code_index"],
+    "must_include_terms": ["aggregates counts"],
+    "expected_weaknesses": [],
+    "notes": "Function-level source location and assignment lookup regression."
+  },
+  {
+    "id": "data-latency",
+    "query": "Which benchmark workload has the highest latency?",
+    "query_type": "data_question",
+    "expected_courses": ["High Preformance Computing for Big Data"],
+    "expected_files": ["High Preformance Computing for Big Data/benchmark.csv"],
+    "expected_indexes": ["data_schema_index"],
+    "must_include_terms": ["latency_ms"],
+    "expected_weaknesses": [],
+    "notes": "Schema-only data question remains source-grounded."
+  },
+  {
+    "id": "portfolio-notebook",
+    "query": "Can the retrieval notebook support a portfolio claim about ranking?",
+    "query_type": "portfolio_resume",
+    "expected_courses": ["Information Retrieval"],
+    "expected_files": ["Information Retrieval/search_demo.ipynb"],
+    "expected_indexes": ["notebook_index"],
+    "must_include_terms": ["ranking"],
+    "expected_weaknesses": [],
+    "notes": "Portfolio evidence can come from a notebook cell."
+  },
+  {
+    "id": "code-throughput",
+    "query": "Explain how MapReduce partitions support throughput.",
+    "query_type": "code_question",
+    "expected_courses": ["High Preformance Computing for Big Data"],
+    "expected_files": ["High Preformance Computing for Big Data/mapreduce_code.py"],
+    "expected_indexes": ["code_index"],
+    "must_include_terms": ["partition", "throughput"],
+    "expected_weaknesses": [],
+    "notes": "Code question includes a cross-file term that may be reported weakly."
+  }
+]

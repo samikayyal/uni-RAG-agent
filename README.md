@@ -197,14 +197,25 @@ uv sync --extra llm
 uv sync --extra embeddings --extra llm
 ```
 
-The remaining MVP command shape registered for a later spec is:
+Evaluation and hardening uses the committed fixture set by default. Preparation
+builds isolated inventory, extraction, keyword, and vector state under
+`data/runs/eval/fixture-state`; it requires a configured reviewed production
+embedding model and never touches the normal archive database or index:
 
 ```powershell
 uv run -m uni_rag_agent eval run
+uv run -m uni_rag_agent eval run --fixtures
+uv run -m uni_rag_agent eval prepare-fixtures
+uv run -m uni_rag_agent eval run --smoke-real-archive
 ```
 
-`eval` remains a stub until Feature 12. It should fail clearly and must not
-scan or mutate `Courses/`.
+Bare `eval run` and `eval run --fixtures` are equivalent. The real-archive mode
+is explicit and reads only `data/runs/eval/real-archive.json` against the normal
+configured archive state; it never prepares or traverses the archive
+implicitly. Every run writes paired timestamped JSON and Markdown reports under
+`data/runs/eval/`, with safe scores, trace ids, failures, and p50/p95 timings
+but no raw evidence, model output, environment values, or secrets. Inspect
+report trends with `notebooks/evaluation_eda.ipynb` (read-only).
 
 Feature 09 adds the persisted evidence workflow. `retrieve` remains read-only;
 `evidence build` invokes the same mandatory planner/retriever, records raw and
