@@ -237,6 +237,39 @@ def test_extract_file_empty_notebook_reports_no_text_reason(tmp_path: Path) -> N
         extract_file(_pending_file(path, file_id=1, category="notebook"), config)
 
 
+def test_notebook_markdown_embedded_images_are_removed_without_losing_text(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    path = config.courses_root / "embedded-images.ipynb"
+    notebook = nbformat.v4.new_notebook()
+    notebook.cells = [
+        nbformat.v4.new_markdown_cell(
+            "# Graphs\n\n"
+            "The graph has nodes and edges.\n\n"
+            "![image.png](data:image/png;base64," + ("A" * 150_000) + ")\n\n"
+            "<img alt='chart' src=\"data:image/jpeg;base64," + ("B" * 80_000) + '">\n\n'
+            "![external](https://example.com/diagram.png)"
+        )
+    ]
+    nbformat.write(notebook, path)
+
+    extracted = extract_file(
+        _pending_file(path, file_id=1, category="notebook"),
+        config,
+    )
+
+    assert len(extracted.chunks) == 1
+    chunk = extracted.chunks[0]
+    assert "The graph has nodes and edges." in chunk.text
+    assert "image.png" in chunk.text
+    assert "https://example.com/diagram.png" in chunk.text
+    assert "data:image/" not in chunk.text
+    assert "base64" not in chunk.text
+    metadata = json.loads(chunk.metadata_json)
+    assert metadata["inline_images_removed"] == 2
+
+
 def test_python_module_docstring_is_not_duplicated_in_module_chunk(
     tmp_path: Path,
 ) -> None:

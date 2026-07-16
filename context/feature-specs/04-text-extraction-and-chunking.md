@@ -133,7 +133,9 @@ subchunk
    - PPTX: one chunk per slide, including speaker notes when available.
    - DOCX: paragraph/table groups preserving document order.
    - TXT/MD: section or size-bounded chunks.
-   - Notebook: one chunk per markdown or code cell; append text outputs truncated to about 500 characters.
+   - Notebook: one chunk per markdown or code cell; remove inline Markdown/HTML
+     image data URIs, append text outputs truncated to about 500 characters,
+     and preserve external image URLs as text.
    - Python: imports plus functions/classes using `ast`.
    - Other code: regex function split or whole-file fallback.
    - VTT: timestamp blocks.
@@ -151,6 +153,8 @@ subchunk
 - Password-protected, corrupted, or unsupported files fail per file with a detailed error.
 - OCR is disabled unless explicitly configured. If a scanned PDF needs OCR and OCR is disabled or unavailable, mark it failed with reason `scanned PDF, OCR not available`.
 - Do not include notebook image/binary outputs.
+- Do not embed inline Markdown/HTML image data URIs from notebook source; keep
+  useful alt text or a short omission marker instead.
 - Truncate long text outputs and long error tracebacks.
 - The EDA notebook must read generated app data only, must not mutate SQLite or `Courses`, and must not execute course files or course notebooks.
 - Notebook outputs and execution counts should be cleared before commit.
