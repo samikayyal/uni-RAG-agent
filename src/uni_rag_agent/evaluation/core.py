@@ -29,6 +29,7 @@ from ..extraction import extract_pending_files, summarize_data_files
 from ..indexing import resolve_embedding_profile, sync_keyword_index, sync_vector_index
 from ..inventory import inventory_courses
 from ..retrieval import EvidenceBuildResult, EvidencePacket, build_evidence
+from ..source_filters import is_ipynb_checkpoint_path
 from ..storage import connect_sqlite_read_only, ensure_data_dirs
 from .models import (
     CitationScore,
@@ -1082,7 +1083,11 @@ def _sha256_file(path: Path) -> str:
 
 def _sha256_tree(root: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted(value for value in root.rglob("*") if value.is_file()):
+    for path in sorted(
+        value
+        for value in root.rglob("*")
+        if value.is_file() and not is_ipynb_checkpoint_path(value)
+    ):
         relative = path.relative_to(root).as_posix().encode("utf-8")
         digest.update(relative)
         digest.update(b"\0")

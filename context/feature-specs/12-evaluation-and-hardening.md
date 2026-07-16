@@ -136,6 +136,8 @@ Locked implementation rules for this slice:
 - Normal automated evals must use fixtures only.
 - Real archive smoke evals require an explicit `--smoke-real-archive` flag.
 - Eval runs must not mutate `Courses`.
+- Jupyter `.ipynb_checkpoints` trees are excluded from fixture source digests and
+  cannot be expected evaluation files.
 - Do not use LLM judging as the sole pass/fail mechanism.
 - Test-only injected model/chat dependencies should keep fixture evals independent of provider credentials.
 - Reports should avoid storing secrets or full environment values.

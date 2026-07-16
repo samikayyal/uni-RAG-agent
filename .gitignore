@@ -21,6 +21,9 @@ data/
 .pytest_cache/
 .ruff_cache/
 
+# Jupyter-generated checkpoint trees are never project sources.
+**/.ipynb_checkpoints/
+
 # Ignore all markdown files in the project root except README.md
 /*.md
 !/README.md

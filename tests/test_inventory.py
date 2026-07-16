@@ -16,6 +16,7 @@ from uni_rag_agent.inventory import (
 )
 from uni_rag_agent.inventory import core as inventory_core
 from uni_rag_agent.inventory import file_io as inventory_file_io
+from uni_rag_agent.source_filters import is_ipynb_checkpoint_path
 from uni_rag_agent.storage import connect_sqlite
 from tests.support import make_config
 
@@ -128,6 +129,51 @@ def test_inventory_run_preserves_exact_paths_and_classifies_mixed_files(
     assert "never executed" in rows_by_name["setup.exe"]["reason_not_indexed"]
     assert "serialized artifact" in rows_by_name["vectors.bin"]["reason_not_indexed"]
     assert "unsupported extension" in rows_by_name["unknown"]["reason_not_indexed"]
+
+
+def test_inventory_ignores_ipynb_checkpoint_trees_without_metadata(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    course_dir = config.courses_root / "Information Retrieval"
+    course_dir.mkdir()
+    (course_dir / "kept.ipynb").write_text("{}", encoding="utf-8")
+    nested_checkpoint_dir = course_dir / "Week 01" / ".ipynb_checkpoints"
+    nested_checkpoint_dir.mkdir(parents=True)
+    (nested_checkpoint_dir / "kept-checkpoint.ipynb").write_text(
+        "should not be inventoried",
+        encoding="utf-8",
+    )
+    root_checkpoint_dir = config.courses_root / ".ipynb_checkpoints"
+    root_checkpoint_dir.mkdir()
+    (root_checkpoint_dir / "root-checkpoint.ipynb").write_text(
+        "should not become a course or file",
+        encoding="utf-8",
+    )
+
+    result = inventory_courses(config)
+
+    assert result.courses_seen == 1
+    assert result.files_seen == 1
+    with closing(connect_sqlite(config)) as connection:
+        rows = connection.execute(
+            "SELECT relative_path FROM files ORDER BY relative_path"
+        ).fetchall()
+        courses = connection.execute("SELECT name FROM courses").fetchall()
+
+    assert [row["relative_path"] for row in rows] == [
+        str(Path("Information Retrieval") / "kept.ipynb")
+    ]
+    assert [row["name"] for row in courses] == ["Information Retrieval"]
+
+
+def test_checkpoint_filter_matches_only_the_directory_component() -> None:
+    assert is_ipynb_checkpoint_path(r"C:\Courses\IR\.ipynb_checkpoints\notes.ipynb")
+    assert is_ipynb_checkpoint_path("/Courses/IR/.IPYNB_CHECKPOINTS/notes.ipynb")
+    assert not is_ipynb_checkpoint_path(
+        r"C:\Courses\IR\my_ipynb_checkpoints_notes.ipynb"
+    )
+    assert not is_ipynb_checkpoint_path(r"C:\Courses\IR\checkpoints\notes.ipynb")
 
 
 def test_inventory_rerun_is_idempotent_and_skips_hash_for_unchanged_files(

@@ -146,6 +146,8 @@ subchunk
 
 - Do not execute course code, notebooks, installers, archives, or media files.
 - Do not mutate source files under `Courses`.
+- Do not process files under `.ipynb_checkpoints`; inventory excludes them and
+  inventory is the source admission boundary for extraction.
 - Password-protected, corrupted, or unsupported files fail per file with a detailed error.
 - OCR is disabled unless explicitly configured. If a scanned PDF needs OCR and OCR is disabled or unavailable, mark it failed with reason `scanned PDF, OCR not available`.
 - Do not include notebook image/binary outputs.

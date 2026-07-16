@@ -8,6 +8,8 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from uni_rag_agent.source_filters import is_ipynb_checkpoint_path
+
 from .models import InventoryError
 
 HASH_CHUNK_SIZE = 1024 * 1024
@@ -31,6 +33,8 @@ def discover_course_entries(
         with os.scandir(courses_root) as entries:
             for entry in entries:
                 try:
+                    if is_ipynb_checkpoint_path(entry.path):
+                        continue
                     if entry.is_dir(follow_symlinks=False):
                         course_dirs.append(Path(entry.path))
                     elif entry.is_file(follow_symlinks=False):
@@ -49,6 +53,9 @@ def discover_course_entries(
 
 
 def walk_files(root: Path, diagnostics: list[str]) -> Iterable[Path]:
+    if is_ipynb_checkpoint_path(root):
+        return
+
     stack = [root]
     while stack:
         current = stack.pop()
@@ -58,6 +65,8 @@ def walk_files(root: Path, diagnostics: list[str]) -> Iterable[Path]:
             with os.scandir(current) as entries:
                 for entry in entries:
                     try:
+                        if is_ipynb_checkpoint_path(entry.path):
+                            continue
                         if entry.is_dir(follow_symlinks=False):
                             directories.append(Path(entry.path))
                         elif entry.is_file(follow_symlinks=False):

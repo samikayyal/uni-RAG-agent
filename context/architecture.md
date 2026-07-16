@@ -8,7 +8,7 @@ The root `project-overview.md` contains the fuller product narrative. This file 
 
 The system must:
 
-- inventory every file under `Courses`;
+- inventory every eligible source file under `Courses`;
 - selectively extract/index useful text-like course knowledge;
 - keep images, binaries, archives, installers, unsafe artifacts, and most media metadata-only;
 - search through hybrid retrieval;
@@ -184,6 +184,14 @@ Rules:
 - clear notebook outputs and execution counts before committing unless a future decision explicitly allows committed output snapshots.
 
 ## File Classification
+
+Jupyter checkpoint trees are excluded sources, not metadata-only files. Any path
+containing a component named `.ipynb_checkpoints` (case-insensitive) is pruned
+before inventory, so it receives no `files` row, extraction record, chunk,
+keyword/vector index entry, metadata-search result, evidence item, or evaluation
+source-digest contribution. Generated state is disposable; if older state
+exists, a clean rebuild removes `data/` and reruns inventory without mutating
+the source archive.
 
 Every file gets one classification.
 
@@ -627,6 +635,8 @@ Rules:
 
 - direct child folder name is the course name;
 - preserve exact path spellings;
+- prune `.ipynb_checkpoints` directories and all descendants before creating
+  file records;
 - do not mutate course files;
 - use metadata-only status for images, archives, media, binaries, installers, and model artifacts.
 

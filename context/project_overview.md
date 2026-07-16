@@ -38,12 +38,12 @@ Core flow:
 
 ## In-Scope
 
-* **File inventory**: Inventory every file under `Courses`, including skipped files, with path, course, extension, size, modified time, category, and indexing status.
+* **File inventory**: Inventory every eligible file under `Courses`, including skipped files, with path, course, extension, size, modified time, category, and indexing status. Jupyter `.ipynb_checkpoints` directories and their descendants are excluded before inventory and never receive metadata rows.
 * **Selective ingestion**: Extract and index text-like course knowledge files such as PDFs, PowerPoints, Word documents, text/Markdown files, notebooks, code, structured data summaries, and existing transcripts.
 * **Hybrid retrieval**: Use vector search, keyword/BM25 search, metadata filters, file-name matching, and course-name matching. Merge MVP keyword and semantic results with Reciprocal Rank Fusion (RRF), not a reranker.
 * **Evidence packet workflow**: Separate retrieval/research from final answering through a structured, auditable evidence object.
 * **Source-grounded answers**: Cite course, file path, source type, and location such as page, slide, notebook cell, row sample, or timestamp where available.
-* **Code and notebook inspection**: Search and inspect `.ipynb`, `.py`, `.r`, `.cpp`, `.h`, and `.m` files without automatically executing old course code.
+* **Code and notebook inspection**: Search and inspect `.ipynb`, `.py`, `.r`, `.cpp`, `.h`, and `.m` files without automatically executing old course code. Notebook checkpoint trees are excluded from this inspection boundary.
 * **Data schema summaries**: Summarize CSV, Excel, JSON/JSONL, SQLite, and DB files through schema/sample metadata rather than embedding full datasets.
 * **Exploratory analysis notebooks**: Keep read-only EDA notebooks under `notebooks/` for inspecting generated inventory, extraction, data-summary, indexing, retrieval, answering, and evaluation artifacts where that stage produces useful analysis data. These notebooks analyze app data such as `data/uni_rag.sqlite`, `data/runs/`, and index metadata; they must not mutate `Courses` or execute old course files.
 * **Weak retrieval reporting**: Clearly state searched courses, indexes, keywords, semantic queries, evidence found, and missing coverage.

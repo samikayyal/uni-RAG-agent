@@ -39,6 +39,7 @@ This document records the key decisions made during the design and development o
 | **DEC-031** | Real-only production models with injected test doubles | `Accepted; amended by DEC-039` | 2026-07-11 |
 | **DEC-034** | Persisted evidence builds with authoritative immutable packets | `Accepted` | 2026-07-13 |
 | **DEC-039** | Provider-based embedding profiles with local and hosted construction | `Accepted` | 2026-07-15 |
+| **DEC-040** | Exclude Jupyter checkpoint trees from the source pipeline | `Accepted` | 2026-07-16 |
 
 ---
 
@@ -1146,4 +1147,33 @@ evidence, and telemetry retain the canonical model identity. Hosted smokes are
 manual and credentialed when desired; automated tests remain offline through
 injected doubles. A provider-specific extra or credential is a clear setup
 requirement rather than a configuration value silently selecting another loader.
+
+---
+
+## DEC-040: Exclude Jupyter checkpoint trees from the source pipeline
+
+* **Status**: Accepted
+* **Date**: 2026-07-16
+
+### Context
+
+Jupyter creates `.ipynb_checkpoints` directories throughout course folders.
+Their files are transient notebook snapshots, not additional course knowledge.
+Earlier inventory runs included them as ordinary notebooks, which polluted file
+metadata and downstream extraction/index state.
+
+### Decision
+
+Treat every path with a case-insensitive `.ipynb_checkpoints` component as
+outside the source corpus. Inventory is the source admission boundary and
+prunes the directory subtree before classification, hashing, or metadata
+persistence. Downstream stages consume inventory records rather than walking
+`Courses` directly. If generated state predates this decision, delete `data/`
+and rerun inventory; source files are never touched.
+
+### Consequences
+
+Only authored course files participate in the normal pipeline. A notebook's
+ordinary `.ipynb` file remains eligible, while its auto-generated checkpoint
+copies do not enter inventory or any downstream generated artifact.
 

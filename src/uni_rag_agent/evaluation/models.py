@@ -14,6 +14,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 
 from ..retrieval.models import LOGICAL_INDEXES, QUERY_TYPES
 from ..retrieval.evidence_persistence import sanitize_error
+from ..source_filters import is_ipynb_checkpoint_path
 
 
 class EvaluationError(RuntimeError):
@@ -50,6 +51,8 @@ def _relative_fixture_path(value: str, field: str) -> str:
     parts = PurePosixPath(normalized).parts
     if not parts or any(part in {"", ".", ".."} for part in parts):
         raise EvalSetError(f"{field} must contain normalized relative paths")
+    if is_ipynb_checkpoint_path(normalized):
+        raise EvalSetError(f"{field} cannot reference Jupyter checkpoint files")
     return "/".join(parts)
 
 

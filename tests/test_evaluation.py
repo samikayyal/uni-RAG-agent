@@ -230,12 +230,34 @@ def test_committed_fixture_set_is_strict_and_covers_contract() -> None:
     }
 
 
+def test_evaluation_source_digest_ignores_ipynb_checkpoint_files(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    (source_root / "kept.md").write_text("kept", encoding="utf-8")
+    checkpoint_dir = source_root / ".ipynb_checkpoints"
+    checkpoint_dir.mkdir()
+    checkpoint = checkpoint_dir / "kept-checkpoint.ipynb"
+    checkpoint.write_text("first", encoding="utf-8")
+
+    first_digest = evaluation_core._sha256_tree(source_root)
+    checkpoint.write_text("second", encoding="utf-8")
+
+    assert evaluation_core._sha256_tree(source_root) == first_digest
+
+
 def test_eval_set_rejects_unknown_fields_and_non_utf8(tmp_path: Path) -> None:
     path = tmp_path / "bad.json"
     value = json.loads(default_eval_set_path().read_text(encoding="utf-8"))[0]
     value["unknown"] = True
     path.write_text(json.dumps([value]), encoding="utf-8")
     with pytest.raises(EvalSetError, match="unknown"):
+        load_eval_set(path)
+    value.pop("unknown")
+    value["expected_files"] = ["Information Retrieval/.ipynb_checkpoints/notes.ipynb"]
+    path.write_text(json.dumps([value]), encoding="utf-8")
+    with pytest.raises(EvalSetError, match="checkpoint"):
         load_eval_set(path)
     path.write_bytes(b"\xff")
     with pytest.raises(EvalSetError, match="UTF-8"):

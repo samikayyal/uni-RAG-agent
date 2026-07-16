@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Inventory every file under `Courses`, classify it into an indexing category, preserve exact paths and course names, and store skip reasons for metadata-only files.
+Inventory every eligible file under `Courses`, classify it into an indexing category, preserve exact paths and course names, and store skip reasons for metadata-only files. Jupyter checkpoint trees are excluded before classification and do not receive metadata rows.
 
 This spec creates the foundation for extraction, search coverage reporting, and metadata queries.
 
@@ -17,6 +17,8 @@ This spec creates the foundation for extraction, search coverage reporting, and 
 
 - Discover direct child folders under `Courses` as courses.
 - Recursively inventory files under each course.
+- Exclude `.ipynb_checkpoints` directories and descendants before creating file
+  metadata rows.
 - Preserve exact course names and path spellings.
 - Classify files by extension into extractable or metadata-only categories.
 - Store file size, modified time, relative path, extension, category, index status, and reason.
@@ -119,6 +121,8 @@ Required status behavior:
 ## Failure and Safety Rules
 
 - Never mutate, rename, move, or delete files under `Courses`.
+- Jupyter checkpoint trees are outside the inventory corpus; do not classify,
+  hash, soft-delete, or report their files as metadata.
 - Permission errors should mark individual files as failed or skipped with diagnostics and continue.
 - Large file hashing should be streaming.
 - Archives, installers, binaries, and model artifacts must not be opened beyond metadata and optional streaming hash.
