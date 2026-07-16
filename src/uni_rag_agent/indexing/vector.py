@@ -84,6 +84,8 @@ def sync_vector_index(
     collection: str | None = None,
     model: str | None = None,
     rebuild: bool = False,
+    *,
+    show_progress: bool = False,
 ) -> VectorIndexResult:
     """Embed eligible chunks into ChromaDB for the selected model.
 
@@ -138,6 +140,7 @@ def sync_vector_index(
                     model_name=profile.model_name,
                     dimension=dimension,
                     embeddings=built.embeddings,
+                    show_progress=show_progress,
                 )
                 if indexed:
                     by_source_type[source_type] = indexed
@@ -364,6 +367,7 @@ def _embed_missing_chunks(
     model_name: str,
     dimension: int,
     embeddings: object,
+    show_progress: bool,
 ) -> int:
     rows = _missing_chunk_rows(
         connection,
@@ -375,6 +379,8 @@ def _embed_missing_chunks(
 
     indexed = 0
     embedded_at = _utc_now()
+    if show_progress:
+        print(f"Embedding {logical_index}: 0/{len(rows)}", flush=True)
     for batch in _batches(rows, _EMBED_BATCH):
         texts = [str(row["text"]) for row in batch]
         try:
@@ -410,6 +416,8 @@ def _embed_missing_chunks(
             )
         connection.commit()
         indexed += len(batch)
+        if show_progress:
+            print(f"Embedding {logical_index}: {indexed}/{len(rows)}", flush=True)
     return indexed
 
 

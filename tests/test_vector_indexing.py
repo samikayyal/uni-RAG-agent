@@ -521,6 +521,30 @@ def test_sync_indexes_only_current_eligible_chunks(
     assert document_row["vector_collection"].startswith("document_index__")
 
 
+def test_sync_can_print_embedding_progress(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = make_config(tmp_path)
+    with initialized_connection(config) as connection:
+        insert_minimal_chunk(
+            connection,
+            config,
+            filename="notes.md",
+            source_type="document",
+            text="distributed computation with MapReduce",
+        )
+        connection.commit()
+
+    sync_vector_index(config, collection="document_index", show_progress=True)
+
+    assert capsys.readouterr().out.splitlines() == [
+        "Embedding document_index: 0/1",
+        "Embedding document_index: 1/1",
+    ]
+
+
 @pytest.mark.parametrize(
     ("selected_model", "canonical_model", "provider", "dimension"),
     [

@@ -993,6 +993,7 @@ def _handle_index_vector(args: argparse.Namespace) -> int:
             collection=args.collection,
             model=args.model,
             rebuild=args.rebuild,
+            show_progress=True,
         )
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
