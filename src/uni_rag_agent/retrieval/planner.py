@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Mapping, Sequence
 from contextlib import closing
@@ -15,6 +16,10 @@ from .models import LOGICAL_INDEXES, QUERY_TYPES, QueryPlan
 
 MAX_QUERY_PLAN_CONTEXT_MESSAGES = 6
 MAX_QUERY_PLAN_KEYWORD_TERMS = 20
+_JSON_CODE_FENCE_RE = re.compile(
+    r"^\s*```(?:json)?\s*(?P<payload>\{.*\})\s*```\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class QueryPlanningError(RuntimeError):
@@ -64,8 +69,12 @@ def plan_query(
             item.get("text", "") if isinstance(item, Mapping) else str(item)
             for item in content
         )
+    content_text = str(content)
+    fenced_match = _JSON_CODE_FENCE_RE.fullmatch(content_text)
+    if fenced_match is not None:
+        content_text = fenced_match.group("payload")
     try:
-        payload = json.loads(str(content))
+        payload = json.loads(content_text)
     except (TypeError, json.JSONDecodeError) as exc:
         raise QueryPlanningError("LLM query plan must be one JSON object.") from exc
     return _parse_query_plan(config, payload, courses=courses)

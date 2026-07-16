@@ -83,6 +83,18 @@ def test_plan_query_validates_and_canonicalizes_supported_plan(tmp_path: Path) -
     assert prompt["semantic_query_limit"] == config.semantic_query_limit
 
 
+def test_plan_query_accepts_json_object_wrapped_in_json_code_fence(
+    tmp_path: Path,
+) -> None:
+    config = _planning_config(tmp_path)
+    chat = FakeChat(f"```json\n{json.dumps(_supported_payload())}\n```")
+
+    plan = plan_query(config, "Explain BM25", chat_model=chat)
+
+    assert plan.query_type == "concept_explanation"
+    assert plan.candidate_courses == ("Information Retrieval",)
+
+
 def test_plan_query_truncates_context_and_rejects_unexpected_fields(
     tmp_path: Path,
 ) -> None:
