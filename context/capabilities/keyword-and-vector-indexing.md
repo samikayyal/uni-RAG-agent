@@ -2,11 +2,13 @@
 
 ## Current behavior
 
-`indexing/eligibility.py` is shared by both indexers: only chunks joined to
-`files.index_status = 'indexed'` and one of six eligible source types are
-indexed. `sync_keyword_index()` rebuilds SQLite FTS5 `chunk_fts` (unicode61)
-from that set. `keyword_search()` supports plain-text terms, exact course
-filters, logical-index filters, and bounded results; direct search is read-only.
+`search_contracts.py` owns the one logical-index/source-type taxonomy. The
+`indexing/eligibility.py` helpers reuse its derived eligible source types and
+inverse lookups, so only chunks joined to `files.index_status = 'indexed'` and
+one of six eligible source types are indexed. `sync_keyword_index()` rebuilds
+SQLite FTS5 `chunk_fts` (unicode61) from that set. `keyword_search()` supports
+plain-text terms, exact course filters, logical-index filters, and bounded
+results; direct search is read-only.
 
 `sync_vector_index()` resolves one reviewed embedding profile, maps source types
 to logical Chroma indexes, reconciles stale vectors/mappings, embeds missing
@@ -32,7 +34,8 @@ Profiles are `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
 
 ## Source, tests, and artifacts
 
-- Source: `src/uni_rag_agent/indexing/{eligibility,keyword,vector,profiles}.py`
+- Source: `src/uni_rag_agent/search_contracts.py` and
+  `src/uni_rag_agent/indexing/{eligibility,keyword,vector,profiles}.py`
   and `indexing/embedding_providers/`.
 - Tests: `tests/test_keyword_indexing.py`, `tests/test_vector_indexing.py`,
   `tests/test_embedding_providers.py`.

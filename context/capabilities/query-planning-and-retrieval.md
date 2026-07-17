@@ -4,7 +4,8 @@
 
 `plan_query()` calls the configured chat model exactly once and validates a
 structured `QueryPlan`: query type, canonical course/index scopes, keyword
-terms, semantic queries, inspection flags, confidence, and reason. A valid
+terms, semantic queries, inspection flags, confidence, and reason. Logical
+index validation uses the taxonomy derived from `search_contracts.py`. A valid
 `unknown_or_unsupported` plan intentionally runs no backends. For supported
 plans, `retrieve()` executes deterministic metadata, FTS5 keyword, and Chroma
 semantic searches with hard planned filters and merges their provenance using

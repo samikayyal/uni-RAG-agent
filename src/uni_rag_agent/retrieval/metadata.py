@@ -10,7 +10,7 @@ from contextlib import closing
 from rapidfuzz import fuzz
 
 from uni_rag_agent.config import Config
-from uni_rag_agent.indexing.eligibility import INDEX_TO_SOURCE_TYPE
+from uni_rag_agent.search_contracts import LOGICAL_INDEX_TO_SOURCE_TYPE
 from uni_rag_agent.storage import connect_sqlite_read_only
 
 from .models import RetrievalResult
@@ -206,10 +206,10 @@ def _allowed_categories(indexes: Sequence[str] | None) -> tuple[str, ...] | None
         return ()
     categories: list[str] = []
     for index in indexes:
-        source_type = INDEX_TO_SOURCE_TYPE.get(index)
+        source_type = LOGICAL_INDEX_TO_SOURCE_TYPE.get(index)
         if source_type is not None and source_type not in categories:
             categories.append(source_type)
-    unknown = [index for index in indexes if index not in INDEX_TO_SOURCE_TYPE]
+    unknown = [index for index in indexes if index not in LOGICAL_INDEX_TO_SOURCE_TYPE]
     if unknown:
         raise MetadataSearchError(
             f"Unknown logical index name(s): {', '.join(unknown)}"

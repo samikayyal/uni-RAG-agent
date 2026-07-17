@@ -12,7 +12,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
 
-from ..retrieval.models import LOGICAL_INDEXES, QUERY_TYPES
+from ..retrieval.models import QUERY_TYPES
+from ..search_contracts import LOGICAL_INDEXES
 from ..retrieval.evidence_persistence import sanitize_error
 from ..source_filters import is_ipynb_checkpoint_path
 

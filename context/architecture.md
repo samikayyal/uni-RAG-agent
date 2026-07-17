@@ -22,7 +22,8 @@ that are reconciled through SQLite mappings. The complete executable schema is
 3. `index keyword` rebuilds the SQLite FTS5 `chunk_fts` projection from current
    indexed chunks. `index vector` embeds the same eligible chunk set into one
    model-namespaced Chroma collection per logical index and records `embeddings`
-   mappings. Both indexers share current-file eligibility.
+   mappings. Both indexers share current-file eligibility and the canonical
+   logical-index/source-type mapping in `src/uni_rag_agent/search_contracts.py`.
 
 ### Planning, retrieval, evidence, and answering
 
@@ -49,10 +50,12 @@ that are reconciled through SQLite mappings. The complete executable schema is
 
 | Layer | Modules | Responsibility |
 | --- | --- | --- |
-| Entry/config | `src/uni_rag_agent/__main__.py`, `cli.py`, `config.py`, `logging_config.py` | `uv run -m uni_rag_agent` dispatch, typed environment loading, safe JSONL telemetry |
+| CLI composition | `src/uni_rag_agent/__main__.py`, `cli.py`, `cli_commands/`, `cli_support/` | Thin parser/dispatcher, cohesive command-family handlers, shared renderers, and telemetry adapters |
+| Configuration | `config.py`, `logging_config.py` | Typed environment loading and safe JSONL telemetry |
 | Storage | `storage/core.py` | Paths, SQLite connections, schema initialization/migrations, health checks |
 | Admission | `inventory/{core,file_io,classification,models}.py` | Crawl, checkpoint pruning, classification, idempotent inventory and soft-missing state |
 | Extraction | `extraction/{core,chunking,persistence,extractors,data_summaries}/` | Format adapters, bounded chunking, per-file lifecycle, schema/sample summaries |
+| Search contracts | `search_contracts.py` | Canonical logical-index/source-type mapping and derived collections/inverse lookups |
 | Indexing | `indexing/{eligibility,keyword,vector,profiles,embedding_providers}/` | FTS5 projection/search, reviewed embedding construction, Chroma reconciliation/search |
 | Retrieval | `retrieval/{planner,metadata,rrf,core,evidence,evidence_persistence,evidence_models}.py` | Query-plan validation, backend orchestration, RRF provenance, persistence and coverage |
 | Answering | `answering/{core,persistence,session,audit,providers}.py` | Packet-only generation, citation/rendering validation, append-only traces, planner-only memory |

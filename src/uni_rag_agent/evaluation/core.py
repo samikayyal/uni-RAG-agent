@@ -29,6 +29,7 @@ from ..extraction import extract_pending_files, summarize_data_files
 from ..indexing import resolve_embedding_profile, sync_keyword_index, sync_vector_index
 from ..inventory import inventory_courses
 from ..retrieval import EvidenceBuildResult, EvidencePacket, build_evidence
+from ..search_contracts import SOURCE_TYPE_TO_LOGICAL_INDEX
 from ..source_filters import is_ipynb_checkpoint_path
 from ..storage import connect_sqlite_read_only, ensure_data_dirs
 from .models import (
@@ -69,14 +70,6 @@ MANIFEST_FIELDS = {
     "vector_collections",
     "chroma_digest",
     "prepared_at",
-}
-_SOURCE_TO_INDEX = {
-    "document": "document_index",
-    "slides": "slides_index",
-    "notebook": "notebook_index",
-    "code": "code_index",
-    "data_schema": "data_schema_index",
-    "transcript": "transcript_index",
 }
 
 
@@ -265,9 +258,9 @@ def score_retrieval(
     found_courses = tuple(dict.fromkeys(value.course for value in evidence))
     found_indexes = tuple(
         dict.fromkeys(
-            _SOURCE_TO_INDEX[item.source_type]
+            SOURCE_TYPE_TO_LOGICAL_INDEX[item.source_type]
             for item in evidence
-            if item.source_type in _SOURCE_TO_INDEX
+            if item.source_type in SOURCE_TYPE_TO_LOGICAL_INDEX
         )
     )
     found_files = tuple(

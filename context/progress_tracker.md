@@ -22,6 +22,9 @@ The implemented pipeline is complete through evaluation hardening:
 7. Provider-lazy FastAPI/UI routes with timeout-safe persistence boundaries.
 8. Fixture-isolated evaluation preparation, deterministic scoring, atomic state
    activation, drift validation, and redacted JSON/Markdown reports.
+9. Cross-cutting maintenance hardening: one canonical logical-index taxonomy and
+   a thin CLI composition root with separated command families, renderers, and
+   telemetry adapters.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

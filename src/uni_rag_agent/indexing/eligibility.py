@@ -11,73 +11,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-ELIGIBLE_SOURCE_TYPES = (
-    "document",
-    "slides",
-    "notebook",
-    "code",
-    "data_schema",
-    "transcript",
+from uni_rag_agent.search_contracts import (
+    ELIGIBLE_SOURCE_TYPES,
+    INDEX_TO_SOURCE_TYPE,
+    SOURCE_TYPE_TO_INDEX,
+    source_types_for_indexes,
+    validate_logical_index,
 )
-
-INDEX_TO_SOURCE_TYPE = {
-    "document_index": "document",
-    "slides_index": "slides",
-    "notebook_index": "notebook",
-    "code_index": "code",
-    "data_schema_index": "data_schema",
-    "transcript_index": "transcript",
-}
-
-SOURCE_TYPE_TO_INDEX = {
-    source_type: index_name for index_name, source_type in INDEX_TO_SOURCE_TYPE.items()
-}
-
-
-def source_types_for_indexes(
-    indexes: Sequence[str] | None,
-    *,
-    error: type[Exception],
-) -> tuple[str, ...] | None:
-    """Map logical index names to chunk source types.
-
-    Returns ``None`` when ``indexes`` is ``None`` (meaning "all eligible source
-    types") and an empty tuple when ``indexes`` is an empty sequence (meaning
-    "no indexes selected"). Unknown index names raise ``error`` so callers can
-    surface a domain-specific exception (keyword vs semantic search).
-    """
-    if indexes is None:
-        return None
-    if not indexes:
-        return ()
-
-    source_types: list[str] = []
-    unknown: list[str] = []
-    for index_name in indexes:
-        source_type = INDEX_TO_SOURCE_TYPE.get(index_name)
-        if source_type is None:
-            unknown.append(index_name)
-        elif source_type not in source_types:
-            source_types.append(source_type)
-
-    if unknown:
-        allowed = ", ".join(sorted(INDEX_TO_SOURCE_TYPE))
-        raise error(
-            f"Unknown logical index name(s): {', '.join(unknown)}. "
-            f"Allowed indexes: {allowed}"
-        )
-    return tuple(source_types)
-
-
-def validate_logical_index(index_name: str, *, error: type[Exception]) -> str:
-    """Return the chunk source type for one logical index or raise ``error``."""
-    source_type = INDEX_TO_SOURCE_TYPE.get(index_name)
-    if source_type is None:
-        allowed = ", ".join(sorted(INDEX_TO_SOURCE_TYPE))
-        raise error(
-            f"Unknown logical index name: {index_name}. Allowed indexes: {allowed}"
-        )
-    return source_type
 
 
 def current_chunk_where_sql(

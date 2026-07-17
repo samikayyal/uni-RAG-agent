@@ -7,22 +7,19 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from uni_rag_agent.search_contracts import ELIGIBLE_SOURCE_TYPES, LOGICAL_INDEXES
+
 from .models import (
-    LOGICAL_INDEXES,
     QUERY_TYPES,
     QueryPlan,
     RetrievalContribution,
     RetrievalRun,
 )
 
-EVIDENCE_SOURCE_TYPES = (
-    "document",
-    "slides",
-    "notebook",
-    "code",
-    "data_schema",
-    "transcript",
-)
+# Evidence currently accepts every source type that the logical-index contract
+# admits.  Keep this named view local because evidence may intentionally narrow
+# its restrictions later, but derive today's values from the canonical mapping.
+EVIDENCE_SOURCE_TYPES = ELIGIBLE_SOURCE_TYPES
 SEARCHED_KEYS = ("courses", "indexes", "keyword_terms", "semantic_queries")
 ANSWER_CONSTRAINTS = (
     "Answer only from evidence.",

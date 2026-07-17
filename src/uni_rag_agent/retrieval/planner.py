@@ -10,9 +10,10 @@ from contextlib import closing
 from typing import Any
 
 from uni_rag_agent.config import ALLOWED_LLM_PROVIDERS, Config, validate_config
+from uni_rag_agent.search_contracts import LOGICAL_INDEXES
 from uni_rag_agent.storage import connect_sqlite_read_only
 
-from .models import LOGICAL_INDEXES, QUERY_TYPES, QueryPlan
+from .models import QUERY_TYPES, QueryPlan
 
 MAX_QUERY_PLAN_CONTEXT_MESSAGES = 6
 MAX_QUERY_PLAN_KEYWORD_TERMS = 20

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from uni_rag_agent.search_contracts import LOGICAL_INDEXES
+
 
 @dataclass(frozen=True)
 class RetrievalResult:
@@ -66,15 +68,6 @@ QUERY_TYPES = (
     "study_quiz",
     "portfolio_resume",
     "unknown_or_unsupported",
-)
-
-LOGICAL_INDEXES = (
-    "document_index",
-    "slides_index",
-    "notebook_index",
-    "code_index",
-    "data_schema_index",
-    "transcript_index",
 )
 
 

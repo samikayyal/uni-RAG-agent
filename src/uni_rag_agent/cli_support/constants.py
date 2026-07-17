@@ -1,0 +1,30 @@
+"""Stable CLI exit codes shared by the dispatcher and command modules."""
+
+SUCCESS = 0
+NOT_IMPLEMENTED = 1
+CONFIG_ERROR = 2
+STORAGE_ERROR = 3
+INVENTORY_ERROR = 4
+EXTRACTION_ERROR = 5
+INDEX_ERROR = 6
+SEARCH_ERROR = 7
+EVIDENCE_ERROR = 8
+ANSWER_ERROR = 9
+EVALUATION_ERROR = 10
+# Short alias for callers that use the command-group name.
+EVAL_ERROR = EVALUATION_ERROR
+
+__all__ = [
+    "ANSWER_ERROR",
+    "CONFIG_ERROR",
+    "EVAL_ERROR",
+    "EVALUATION_ERROR",
+    "EVIDENCE_ERROR",
+    "EXTRACTION_ERROR",
+    "INDEX_ERROR",
+    "INVENTORY_ERROR",
+    "NOT_IMPLEMENTED",
+    "SEARCH_ERROR",
+    "STORAGE_ERROR",
+    "SUCCESS",
+]

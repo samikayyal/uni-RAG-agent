@@ -14,6 +14,7 @@ from uni_rag_agent.storage import (
     connect_sqlite,
     connect_sqlite_read_only,
 )
+from uni_rag_agent.search_contracts import LOGICAL_INDEX_TO_SOURCE_TYPE
 
 from .core import _execute_retrieval, _RetrievalExecution
 from .evidence_models import (
@@ -37,15 +38,6 @@ from .evidence_persistence import (
 )
 from .metadata import MISSING_INVENTORY_REASON
 from .models import FusedRetrievalResult, QueryPlan, RetrievalResultSet, RetrievalRun
-
-INDEX_TO_SOURCE_TYPE = {
-    "document_index": "document",
-    "slides_index": "slides",
-    "notebook_index": "notebook",
-    "code_index": "code",
-    "data_schema_index": "data_schema",
-    "transcript_index": "transcript",
-}
 
 
 class EvidenceError(RuntimeError):
@@ -456,15 +448,15 @@ def _build_coverage(
     hit_source_types = {candidate.item.source_type for candidate in content_hydrated}
     planned_source_types = tuple(
         dict.fromkeys(
-            INDEX_TO_SOURCE_TYPE[index]
+            LOGICAL_INDEX_TO_SOURCE_TYPE[index]
             for index in query_plan.candidate_indexes
-            if index in INDEX_TO_SOURCE_TYPE
+            if index in LOGICAL_INDEX_TO_SOURCE_TYPE
         )
     )
     hit_indexes = {
         index
         for index in query_plan.candidate_indexes
-        if INDEX_TO_SOURCE_TYPE.get(index) in hit_source_types
+        if LOGICAL_INDEX_TO_SOURCE_TYPE.get(index) in hit_source_types
     }
     courses_with = tuple(
         course for course in query_plan.candidate_courses if course in hit_courses
@@ -555,7 +547,7 @@ def _build_weaknesses(
     hit_indexes = {
         index
         for index in query_plan.candidate_indexes
-        if INDEX_TO_SOURCE_TYPE.get(index)
+        if LOGICAL_INDEX_TO_SOURCE_TYPE.get(index)
         in {candidate.item.source_type for candidate in content_hydrated}
     }
     for index in query_plan.candidate_indexes:
@@ -906,12 +898,12 @@ def _coverage_from_partial_rows(
     indexes_with = tuple(
         index
         for index in searched_indexes
-        if INDEX_TO_SOURCE_TYPE.get(index) in hit_source_types
+        if LOGICAL_INDEX_TO_SOURCE_TYPE.get(index) in hit_source_types
     )
     source_types_with = tuple(
-        INDEX_TO_SOURCE_TYPE[index]
+        LOGICAL_INDEX_TO_SOURCE_TYPE[index]
         for index in searched_indexes
-        if INDEX_TO_SOURCE_TYPE.get(index) in hit_source_types
+        if LOGICAL_INDEX_TO_SOURCE_TYPE.get(index) in hit_source_types
     )
     weaknesses = _json_string_tuple(run_row["weaknesses_json"] or "[]")
     if not weaknesses and str(run_row["status"]) in {"failed", "running"}:

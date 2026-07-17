@@ -49,6 +49,8 @@ reports with safe scores, trace ids, failures, and p50/p95 stage timings.
 - Reports omit raw queries, evidence, model output, authorization values, and
   secrets. Failures are sanitized and linked to persisted search/evidence trace
   ids when available.
+- Expected logical indexes and source-type-to-index scoring use the shared
+  taxonomy from `src/uni_rag_agent/search_contracts.py`.
 
 Binding decisions: [DEC-037/038](../decisions.md#dec-037038--isolated-safe-evaluation),
 [DEC-002/003/006/007](../decisions.md#dec-002003006007--selective-non-destructive-source-admission),
