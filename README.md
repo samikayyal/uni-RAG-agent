@@ -36,6 +36,15 @@ uv run -m uni_rag_agent index vector --model google/gemini-embedding-001
 uv run -m uni_rag_agent index vector --model Qwen/Qwen3-Embedding-8B
 ```
 
+### Supported embedding models
+
+- `BAAI/bge-m3`
+- `jinaai/jina-embeddings-v3`
+- `jinaai/jina-embeddings-v5-text-small`
+- `google/embeddinggemma-300m`
+- `google/gemini-embedding-001` (hosted)
+- `Qwen/Qwen3-Embedding-8B` (hosted)
+
 Planner settings (`UNI_RAG_LLM_PROVIDER` and `UNI_RAG_LLM_MODEL`) and, for a
 non-empty packet, answer settings (`UNI_RAG_ANSWER_LLM_PROVIDER` and
 `UNI_RAG_ANSWER_LLM_MODEL`) are separate pairs. There is no default embedding
