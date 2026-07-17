@@ -293,7 +293,12 @@ def build_chat_model(config: Config) -> object:
         if config.llm_provider == "gemini":
             from langchain_google_genai import ChatGoogleGenerativeAI
 
-            return ChatGoogleGenerativeAI(model=config.llm_model, temperature=0)
+            return ChatGoogleGenerativeAI(
+                model=config.llm_model,
+                temperature=0.5,
+                api_key=config.google_api_key,
+                thinking_level="low",
+            )
         from langchain_ollama import ChatOllama
 
         return ChatOllama(model=config.llm_model, temperature=0)
