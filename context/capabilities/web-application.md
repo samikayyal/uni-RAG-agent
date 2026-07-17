@@ -1,0 +1,48 @@
+# Web application
+
+## Current behavior
+
+`create_app()` builds a provider-lazy FastAPI application and serves the
+package-owned HTML/JavaScript screen. It exposes the existing ask workflow and
+safe persisted-resource projections; ingestion, indexing, evaluation, upload,
+and source mutation are not web operations. An omitted `session_id` is
+stateless. A valid supplied id uses an in-process planner-only session registry
+with at most 20 least-recently-used sessions, a two-hour inactivity TTL, and
+per-session serialization. The default ask timeout is 120 seconds; evidence
+stored before timeout remains inspectable, and no late answer is appended.
+
+## Public entry points
+
+- `uv run -m uni_rag_agent app serve [--host 127.0.0.1] [--port 8000]`.
+- Routes: `GET /health`, `GET /config`, `POST /api/ask`,
+  `GET /api/search-runs/{search_run_id}/coverage`,
+  `GET /api/evidence-packets/{evidence_packet_id}`, and
+  `GET /api/answers/{answer_id}`. `/` serves the UI and `/static` serves its
+  assets.
+- `POST /api/ask` accepts a nonempty query (up to 10,000 characters) and an
+  optional alphanumeric/underscore/hyphen session id. Provider/model overrides
+  are not accepted through HTTP.
+
+## Source, tests, and artifacts
+
+- Source: `src/uni_rag_agent/app/{api,service}.py` and `src/uni_rag_agent/app/static/`.
+- Tests: `tests/test_app.py` (route projections, validation, sessions,
+  cancellation, timeout, and sanitized failures).
+- Artifacts: routes read/write through the evidence and answering stores; no new
+  tables or web-specific generated state.
+
+## Invariants and failure boundaries
+
+- `/health` is provider/storage-independent and returns `{"status":"ok"}`.
+  `/config` reports non-secret operational settings and path-existence flags,
+  never credentials or absolute local paths.
+- Errors are stable safe JSON: missing resources 404, invalid config 503,
+  planner/retrieval/provider failures 502, timeout 504, and storage/unexpected
+  failures 500. Successful insufficient-evidence answers remain 200.
+- A timed-out/cancelled request cannot append an answer after the response;
+  `PersistenceGate` protects the final write while preserving an evidence packet
+  already committed.
+
+Binding decisions: [DEC-036/017](../decisions.md#dec-036017--thin-provider-lazy-local-web-app),
+[DEC-035/020](../decisions.md#dec-035020--strict-packet-only-answers-and-citations),
+and [DEC-034](../decisions.md#dec-034--persisted-evidence-boundary).
