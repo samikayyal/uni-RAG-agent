@@ -27,7 +27,12 @@ def build_answer_chat_model(config: Config) -> object:
         if provider == "gemini":
             from langchain_google_genai import ChatGoogleGenerativeAI
 
-            return ChatGoogleGenerativeAI(model=model, temperature=0)
+            return ChatGoogleGenerativeAI(
+                model=model,
+                temperature=0,
+                api_key=config.google_api_key,
+                thinking_level="medium",
+            )
         if provider == "ollama":
             from langchain_ollama import ChatOllama
 
