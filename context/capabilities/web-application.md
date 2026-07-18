@@ -2,14 +2,19 @@
 
 ## Current behavior
 
-`create_app()` builds a provider-lazy FastAPI application and serves the
-package-owned HTML/JavaScript screen. It exposes the existing ask workflow and
-safe persisted-resource projections; ingestion, indexing, evaluation, upload,
-and source mutation are not web operations. An omitted `session_id` is
-stateless. A valid supplied id uses an in-process planner-only session registry
-with at most 20 least-recently-used sessions, a two-hour inactivity TTL, and
-per-session serialization. The default ask timeout is 120 seconds; evidence
-stored before timeout remains inspectable, and no late answer is appended.
+`create_app()` builds a FastAPI application and serves the package-owned
+HTML/JavaScript screen. During normal application startup, configured planner
+and answer models are constructed once and retained in a process-scoped
+registry for reuse across requests. Startup construction failures do not turn
+the liveness route into a provider health check; the relevant ask request
+surfaces the sanitized configuration/provider failure. The app exposes the
+existing ask workflow and safe persisted-resource projections; ingestion,
+indexing, evaluation, upload, and source mutation are not web operations. An
+omitted `session_id` is stateless. A valid supplied id uses an in-process
+planner-only session registry with at most 20 least-recently-used sessions, a
+two-hour inactivity TTL, and per-session serialization. The default ask timeout
+is 120 seconds; evidence stored before timeout remains inspectable, and no late
+answer is appended.
 
 ## Public entry points
 
@@ -36,6 +41,8 @@ stored before timeout remains inspectable, and no late answer is appended.
 - `/health` is provider/storage-independent and returns `{"status":"ok"}`.
   `/config` reports non-secret operational settings and path-existence flags,
   never credentials or absolute local paths.
+- Planner and answer settings remain separate; each configured model is cached
+  once per active configuration and shared by stateless and session requests.
 - Errors are stable safe JSON: missing resources 404, invalid config 503,
   planner/retrieval/provider failures 502, timeout 504, and storage/unexpected
   failures 500. Successful insufficient-evidence answers remain 200.
@@ -43,6 +50,6 @@ stored before timeout remains inspectable, and no late answer is appended.
   `PersistenceGate` protects the final write while preserving an evidence packet
   already committed.
 
-Binding decisions: [DEC-036/017](../decisions.md#dec-036017--thin-provider-lazy-local-web-app),
+Binding decisions: [DEC-036/017](../decisions.md#dec-036017--thin-local-web-app-with-process-scoped-models),
 [DEC-035/020](../decisions.md#dec-035020--strict-packet-only-answers-and-citations),
 and [DEC-034](../decisions.md#dec-034--persisted-evidence-boundary).

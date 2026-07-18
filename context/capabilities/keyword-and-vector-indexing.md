@@ -13,9 +13,15 @@ results; direct search is read-only.
 `sync_vector_index()` resolves one reviewed embedding profile, maps source types
 to logical Chroma indexes, reconciles stale vectors/mappings, embeds missing
 chunks in bounded batches, and records SQLite `embeddings` mappings. Collections
-are cosine, physical, model-namespaced identities. `semantic_search()` validates
-the exact SQLite mapping and reapplies current-file/course/index filters before
-returning results; it does not persist search runs.
+are cosine, physical, model-namespaced identities. `semantic_search_many()`
+reuses one embedding provider, one Chroma client, and one set of collection
+handles for all queries in a retrieval request. Hosted providers batch query
+vectors; local Hugging Face profiles reuse the loaded model while preserving
+the provider's query-specific operation. Chroma receives all query vectors per
+collection in one call, then the application returns one independently ranked
+result list per input query. `semantic_search()` is the single-query wrapper.
+Both seams validate the exact SQLite mapping, reapply current-file/course/index
+filters, and do not persist search runs.
 
 Profiles are `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
 `jinaai/jina-embeddings-v5-text-small`, `google/embeddinggemma-300m`,
@@ -30,7 +36,8 @@ Profiles are `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
 - `uv run -m uni_rag_agent index vector --model <profile> [--collection ...] [--rebuild]`
 - `uv run -m uni_rag_agent search semantic "query" --model <profile> [--course ...] [--index ...] [--json]`
 - Python: `sync_keyword_index`, `keyword_search`, `sync_vector_index`,
-  `semantic_search`, profile resolution, and provider builders.
+  `semantic_search`, `semantic_search_many`, profile resolution, and provider
+  builders.
 
 ## Source, tests, and artifacts
 

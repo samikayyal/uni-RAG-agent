@@ -80,6 +80,17 @@ class HuggingFaceEmbeddingsAdapter(Embeddings):
                 )
             ) from exc
 
+    def embed_queries(self, texts: Sequence[str]) -> list[list[float]]:
+        """Reuse the loaded model while preserving its query operation."""
+        values = list(texts)
+        if not values:
+            return []
+        # The generic Hugging Face client exposes separate document and query
+        # operations but no query-batch contract. Reusing the adapter still
+        # avoids rebuilding the local model; calling embed_query preserves any
+        # model-specific query prompt or preprocessing.
+        return [self.embed_query(text) for text in values]
+
 
 def build_embeddings(
     config: Config,

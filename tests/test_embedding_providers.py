@@ -203,6 +203,30 @@ def test_local_huggingface_documents_and_queries_use_shared_retries(
     assert query_attempts == 3
 
 
+def test_local_huggingface_query_batch_preserves_query_operation() -> None:
+    query_calls: list[str] = []
+
+    class FakeLocalEmbeddings:
+        def embed_documents(self, _texts: list[str]) -> list[list[float]]:
+            raise AssertionError("query batches must not use document embeddings")
+
+        def embed_query(self, text: str) -> list[float]:
+            query_calls.append(text)
+            return [float(len(query_calls)), 0.0]
+
+    embeddings = huggingface.HuggingFaceEmbeddingsAdapter(
+        FakeLocalEmbeddings(),
+        model="local-test-model",
+        dimension=2,
+    )
+
+    assert embeddings.embed_queries(["first", "second"]) == [
+        [1.0, 0.0],
+        [2.0, 0.0],
+    ]
+    assert query_calls == ["first", "second"]
+
+
 def test_google_constructor_tasks_dimension_and_no_probe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

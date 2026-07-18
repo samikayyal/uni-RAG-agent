@@ -280,10 +280,13 @@ def test_retrieve_runs_each_semantic_query_without_persistence(
     )
     semantic_queries: list[str] = []
     monkeypatch.setattr(
-        "uni_rag_agent.retrieval.core.semantic_search",
-        lambda _config, query, **kwargs: (
-            semantic_queries.append(query)
-            or [_result(chunk_id=inserted.chunk_id, method="semantic")]
+        "uni_rag_agent.retrieval.core.semantic_search_many",
+        lambda _config, queries, **kwargs: (
+            semantic_queries.extend(queries)
+            or [
+                [_result(chunk_id=inserted.chunk_id, method="semantic")]
+                for _ in queries
+            ]
         ),
     )
 
@@ -342,13 +345,13 @@ def test_retrieve_passes_canonical_embedding_model_to_semantic_backend(
     models: list[str | None] = []
 
     def semantic_backend(
-        _config: object, _query: str, **kwargs: object
-    ) -> list[RetrievalResult]:
+        _config: object, _queries: object, **kwargs: object
+    ) -> list[list[RetrievalResult]]:
         models.append(kwargs.get("model"))  # type: ignore[arg-type]
-        return [_result(chunk_id=inserted.chunk_id, method="semantic")]
+        return [[_result(chunk_id=inserted.chunk_id, method="semantic")]]
 
     monkeypatch.setattr(
-        "uni_rag_agent.retrieval.core.semantic_search",
+        "uni_rag_agent.retrieval.core.semantic_search_many",
         semantic_backend,
     )
 
@@ -395,7 +398,11 @@ def test_retrieve_uses_planner_and_skips_backends_for_supported_unsupported_plan
         )
 
     monkeypatch.setattr("uni_rag_agent.retrieval.core.plan_query", planned_unsupported)
-    for backend in ("metadata_search", "keyword_search_terms", "semantic_search"):
+    for backend in (
+        "metadata_search",
+        "keyword_search_terms",
+        "semantic_search_many",
+    ):
         monkeypatch.setattr(
             f"uni_rag_agent.retrieval.core.{backend}",
             lambda *args, **kwargs: pytest.fail("unsupported plans must not search"),
@@ -414,7 +421,7 @@ def test_retrieve_uses_planner_and_skips_backends_for_supported_unsupported_plan
     [
         ("metadata_search", MetadataSearchError("metadata unavailable")),
         ("keyword_search_terms", KeywordSearchError("keyword unavailable")),
-        ("semantic_search", SemanticSearchError("semantic unavailable")),
+        ("semantic_search_many", SemanticSearchError("semantic unavailable")),
     ],
     ids=["metadata", "keyword", "semantic"],
 )
@@ -441,7 +448,7 @@ def test_retrieve_translates_each_backend_failure_to_retrieval_error(
     backend_functions = {
         "metadata_search": lambda *args, **kwargs: [],
         "keyword_search_terms": lambda *args, **kwargs: [],
-        "semantic_search": lambda *args, **kwargs: [],
+        "semantic_search_many": lambda *args, **kwargs: [[]],
     }
     backend_functions[backend_name] = fail
     for name, function in backend_functions.items():
@@ -477,8 +484,8 @@ def test_retrieve_reports_complete_zero_hit_weaknesses(
         lambda *args, **kwargs: [],
     )
     monkeypatch.setattr(
-        "uni_rag_agent.retrieval.core.semantic_search",
-        lambda *args, **kwargs: [],
+        "uni_rag_agent.retrieval.core.semantic_search_many",
+        lambda *args, **kwargs: [[]],
     )
 
     run = retrieve(config, "BM25", model="BAAI/bge-m3")
@@ -517,8 +524,8 @@ def test_retrieve_reports_partial_fusion_coverage(
         lambda *args, **kwargs: [_result(chunk_id=1)],
     )
     monkeypatch.setattr(
-        "uni_rag_agent.retrieval.core.semantic_search",
-        lambda *args, **kwargs: [],
+        "uni_rag_agent.retrieval.core.semantic_search_many",
+        lambda *args, **kwargs: [[]],
     )
 
     run = retrieve(config, "BM25", model="BAAI/bge-m3")
@@ -572,8 +579,8 @@ def test_retrieve_reports_metadata_only_non_selectable_matches(
         lambda *args, **kwargs: [],
     )
     monkeypatch.setattr(
-        "uni_rag_agent.retrieval.core.semantic_search",
-        lambda *args, **kwargs: [],
+        "uni_rag_agent.retrieval.core.semantic_search_many",
+        lambda *args, **kwargs: [[]],
     )
 
     run = retrieve(config, "diagram.png", model="BAAI/bge-m3")

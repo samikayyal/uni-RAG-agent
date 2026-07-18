@@ -13,13 +13,15 @@ The implemented pipeline is complete through evaluation hardening:
    SQLite, and DB files.
 4. Current-file-only FTS5 and Chroma indexing with reviewed local/hosted
    embedding profiles, reconciliation, canonical model identity, and safe
-   semantic search.
+   single/multi-query semantic search with request-scoped provider and Chroma
+   reuse.
 5. Mandatory LLM query planning, metadata/keyword/semantic orchestration, RRF
    provenance, non-persisting `retrieve` execution with CLI run telemetry, and
    persisted evidence packets and coverage.
 6. Strict packet-only answer generation, deterministic citations/references,
    append-only answer traces, bounded planner-only sessions, and `ask`.
-7. Provider-lazy FastAPI/UI routes with timeout-safe persistence boundaries.
+7. FastAPI/UI routes with startup-constructed process-scoped planner and answer
+   models plus timeout-safe persistence boundaries.
 8. Fixture-isolated evaluation preparation, deterministic scoring, atomic state
    activation, drift validation, and redacted JSON/Markdown reports.
 9. Cross-cutting maintenance hardening: one canonical logical-index taxonomy and

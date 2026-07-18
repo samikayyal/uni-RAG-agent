@@ -9,9 +9,11 @@ index validation uses the taxonomy derived from `search_contracts.py`. A valid
 `unknown_or_unsupported` plan intentionally runs no backends. For supported
 plans, `retrieve()` executes deterministic metadata, FTS5 keyword, and Chroma
 semantic searches with hard planned filters and merges their provenance using
-unweighted Reciprocal Rank Fusion. Zero hits become coverage weaknesses; a
-backend/provider failure is fatal. Metadata may return file-level rows with no
-chunk id, but cannot become evidence text by itself.
+unweighted Reciprocal Rank Fusion. All planned semantic queries pass through
+one `semantic_search_many()` request context, while each query still produces
+its own ordered result set and audit identity. Zero hits become coverage
+weaknesses; a backend/provider failure is fatal. Metadata may return file-level
+rows with no chunk id, but cannot become evidence text by itself.
 
 `retrieve` is non-persisting with respect to SQLite search/evidence rows, Chroma,
 and `Courses/` source files; the CLI still writes JSONL run telemetry under
@@ -47,6 +49,9 @@ and `Courses/` source files; the CLI still writes JSONL run telemetry under
 - Planned courses/indexes are hard filters. RRF preserves backend method,
   source rank, native score, semantic-query identity, and contribution fields;
   no reranker or score normalization is inserted.
+- One retrieval request constructs one embedding provider and Chroma client,
+  reuses collection handles across all semantic queries, and preserves exactly
+  one result set per semantic query in planner order.
 - Errors are sanitized and do not expose keys, prompts, or provider response
   bodies. Unsupported plans are successful empty results with a reason.
 

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from tests.support import make_config
 from uni_rag_agent.answering import AnswerCitation, AnswerGenerationError, AnswerResult
 from uni_rag_agent.app import AppServices, create_app
-from uni_rag_agent.app.service import SessionRegistry
+from uni_rag_agent.app.service import ModelRegistry, SessionRegistry
 from uni_rag_agent.config import ConfigError
 from uni_rag_agent.storage import StorageError
 
@@ -154,6 +154,38 @@ def test_config_is_operational_and_hides_paths_and_secrets(tmp_path: Path) -> No
     assert payload["paths"]["courses_root_exists"] is True
     assert str(tmp_path) not in rendered
     assert "api_key" not in rendered.lower()
+
+
+def test_model_registry_builds_each_configured_model_once(tmp_path: Path) -> None:
+    config = make_config(
+        tmp_path,
+        llm_provider="ollama",
+        llm_model="planner",
+        answer_llm_provider="ollama",
+        answer_llm_model="answerer",
+    )
+    planner = object()
+    answer = object()
+    builds: list[str] = []
+    registry = ModelRegistry(
+        planner_builder=lambda _config: builds.append("planner") or planner,
+        answer_builder=lambda _config: builds.append("answer") or answer,
+    )
+
+    with TestClient(
+        create_app(
+            config_loader=lambda: config,
+            services=_services(),
+            model_registry=registry,
+        )
+    ):
+        pass
+
+    assert registry.planner(config) is planner
+    assert registry.planner(config) is planner
+    assert registry.answer(config) is answer
+    assert registry.answer(config) is answer
+    assert builds == ["planner", "answer"]
 
 
 def test_config_failure_uses_sanitized_503_envelope() -> None:

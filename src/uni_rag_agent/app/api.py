@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Annotated
@@ -35,6 +36,7 @@ from ..storage import StorageError
 from .service import (
     AskCancelled,
     AskOrchestrator,
+    ModelRegistry,
     PersistenceGate,
     SessionCapacityError,
     SessionRegistry,
@@ -80,9 +82,18 @@ def create_app(
     clock: Any = None,
     session_registry: SessionRegistry | None = None,
     enforce_model_config: bool | None = None,
+    model_registry: ModelRegistry | None = None,
+    warm_models: bool = True,
 ) -> FastAPI:
-    """Create a provider-lazy app with injectable service boundaries."""
+    """Create an app with injectable services and cached model instances."""
     resolved = services or AppServices()
+    resolved_model_registry = (
+        model_registry
+        if model_registry is not None
+        else ModelRegistry()
+        if services is None
+        else None
+    )
     registry_kwargs: dict[str, Any] = {"session_factory": resolved.session_factory}
     if clock is not None:
         registry_kwargs["clock"] = clock
@@ -100,8 +111,26 @@ def create_app(
         enforce_model_config=(services is None)
         if enforce_model_config is None
         else enforce_model_config,
+        model_registry=resolved_model_registry,
     )
-    app = FastAPI(title="Uni RAG Agent", docs_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        if warm_models and resolved_model_registry is not None:
+            try:
+                resolved_model_registry.warm(config_loader())
+            except Exception:
+                # Keep health and diagnostics available if startup config or
+                # an optional provider is unavailable.
+                pass
+        yield
+
+    app = FastAPI(
+        title="Uni RAG Agent",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_: Request, exc: ApiError) -> JSONResponse:

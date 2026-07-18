@@ -110,8 +110,8 @@ def _patch_retrieval(
     )
     monkeypatch.setattr(
         retrieval_core,
-        "semantic_search",
-        lambda *args, **kwargs: list(semantic_results),
+        "semantic_search_many",
+        lambda _config, queries, **kwargs: [list(semantic_results) for _ in queries],
     )
 
 

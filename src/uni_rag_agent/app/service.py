@@ -11,7 +11,9 @@ from time import monotonic
 from typing import Any
 
 from ..answering import AnswerResult, AnswerSession
+from ..answering.providers import build_answer_chat_model
 from ..config import Config, ConfigError
+from ..retrieval.planner import build_chat_model
 
 
 class AskCancelled(RuntimeError):
@@ -20,6 +22,66 @@ class AskCancelled(RuntimeError):
 
 class SessionCapacityError(RuntimeError):
     """Raised when all bounded session slots are currently active."""
+
+
+class ModelRegistry:
+    """Cache the configured planner and answer models for one app process."""
+
+    def __init__(
+        self,
+        *,
+        planner_builder: Callable[[Config], object] = build_chat_model,
+        answer_builder: Callable[[Config], object] = build_answer_chat_model,
+    ) -> None:
+        self._planner_builder = planner_builder
+        self._answer_builder = answer_builder
+        self._lock = RLock()
+        self._identity: tuple[object, ...] | None = None
+        self._planner: object | None = None
+        self._answer: object | None = None
+        self._planner_error: Exception | None = None
+        self._answer_error: Exception | None = None
+
+    def warm(self, config: Config) -> None:
+        """Construct each configured model at most once per configuration."""
+        with self._lock:
+            identity = (
+                config.llm_provider,
+                config.llm_model,
+                config.answer_llm_provider,
+                config.answer_llm_model,
+            )
+            if identity == self._identity:
+                return
+            self._identity = identity
+            self._planner = None
+            self._answer = None
+            self._planner_error = None
+            self._answer_error = None
+            if config.llm_provider and config.llm_model:
+                try:
+                    self._planner = self._planner_builder(config)
+                except Exception as exc:  # noqa: BLE001 - report on request
+                    self._planner_error = exc
+            if config.answer_llm_provider and config.answer_llm_model:
+                try:
+                    self._answer = self._answer_builder(config)
+                except Exception as exc:  # noqa: BLE001 - report on request
+                    self._answer_error = exc
+
+    def planner(self, config: Config) -> object | None:
+        self.warm(config)
+        with self._lock:
+            if self._planner_error is not None:
+                raise self._planner_error
+            return self._planner
+
+    def answer(self, config: Config) -> object | None:
+        self.warm(config)
+        with self._lock:
+            if self._answer_error is not None:
+                raise self._answer_error
+            return self._answer
 
 
 class PersistenceGate:
@@ -148,6 +210,7 @@ class AskOrchestrator:
         registry: SessionRegistry,
         session_factory: Callable[[Config], AnswerSession] = AnswerSession,
         enforce_model_config: bool = False,
+        model_registry: ModelRegistry | None = None,
     ) -> None:
         self._build_evidence = build_evidence
         self._generate_answer = generate_answer
@@ -155,6 +218,7 @@ class AskOrchestrator:
         self._registry = registry
         self._session_factory = session_factory
         self._enforce_model_config = enforce_model_config
+        self._model_registry = model_registry
 
     def ask(
         self,
@@ -185,10 +249,16 @@ class AskOrchestrator:
         gate: PersistenceGate,
     ) -> tuple[AnswerResult, Any]:
         context = session.conversation_context
+        planner_model = (
+            self._model_registry.planner(config)
+            if self._model_registry is not None
+            else None
+        )
         evidence_result = self._build_evidence(
             config,
             query,
             conversation_context=context,
+            chat_model=planner_model,
         )
         gate.record_evidence(
             evidence_result.search_run_id,
@@ -202,10 +272,16 @@ class AskOrchestrator:
             raise ConfigError(
                 "Non-empty HTTP evidence requires answer provider/model configuration"
             )
+        answer_model = (
+            self._model_registry.answer(config)
+            if self._model_registry is not None and evidence_result.packet.evidence
+            else None
+        )
         answer = self._generate_answer(
             evidence_result.packet,
             conversation_context=context,
             config=config,
+            chat_model=answer_model,
         )
 
         answer_id = self._store_answer(

@@ -59,7 +59,7 @@ that are reconciled through SQLite mappings. The complete executable schema is
 | Indexing | `indexing/{eligibility,keyword,vector,profiles,embedding_providers}/` | FTS5 projection/search, reviewed embedding construction, Chroma reconciliation/search |
 | Retrieval | `retrieval/{planner,metadata,rrf,core,evidence,evidence_persistence,evidence_models}.py` | Query-plan validation, backend orchestration, RRF provenance, persistence and coverage |
 | Answering | `answering/{core,persistence,session,audit,providers}.py` | Packet-only generation, citation/rendering validation, append-only traces, planner-only memory |
-| Web | `app/{api,service}.py`, `app/static/` | Provider-lazy FastAPI routes, bounded sessions, timeout-safe ask orchestration, UI |
+| Web | `app/{api,service}.py`, `app/static/` | FastAPI routes, process-scoped planner/answer models, bounded sessions, timeout-safe ask orchestration, UI |
 | Evaluation | `evaluation/{core,models}.py` | Fixture state preparation/validation, deterministic scoring, safe JSON/Markdown reports |
 
 Focused tests mirror these boundaries under `tests/`; use

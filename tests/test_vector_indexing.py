@@ -21,6 +21,7 @@ from uni_rag_agent.indexing import (
     physical_collection_name,
     resolve_embedding_profile,
     semantic_search,
+    semantic_search_many,
     sync_vector_index,
 )
 from uni_rag_agent.indexing.embedding_providers import factory as factory_module
@@ -1052,6 +1053,94 @@ def test_sync_reports_no_eligible_chunks(
 # --------------------------------------------------------------------------- #
 # Semantic search (test embeddings)
 # --------------------------------------------------------------------------- #
+
+
+def test_semantic_search_many_batches_queries_and_chroma_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path, embedding_model="BAAI/bge-m3")
+    profile = resolve_embedding_profile(config, error=SemanticSearchError)
+    dimension = 3
+    physical = vector_module._physical_name("document_index", profile, dimension)
+
+    class FakeEmbeddings:
+        def __init__(self) -> None:
+            self.calls: list[list[str]] = []
+
+        def embed_queries(self, queries: list[str]) -> list[list[float]]:
+            self.calls.append(queries)
+            return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+
+    class FakeCollection:
+        def __init__(self) -> None:
+            self.query_calls = 0
+
+        def query(self, **kwargs: object) -> dict[str, object]:
+            self.query_calls += 1
+            assert len(kwargs["query_embeddings"]) == 2
+            return {
+                "ids": [["chunk:1"], ["chunk:2"]],
+                "distances": [[0.1], [0.2]],
+                "metadatas": [[{"chunk_id": 1}], [{"chunk_id": 2}]],
+            }
+
+    embeddings = FakeEmbeddings()
+    collection = FakeCollection()
+    context = SimpleNamespace(
+        built=SimpleNamespace(
+            embeddings=embeddings,
+            profile=profile,
+            dimension=dimension,
+        ),
+        collections={physical: collection},
+        counts={physical: 2},
+    )
+    monkeypatch.setattr(
+        vector_module,
+        "_build_semantic_context",
+        lambda *args, **kwargs: context,
+    )
+    rows = {
+        1: {
+            "chunk_id": 1,
+            "file_id": 1,
+            "course": "Information Retrieval",
+            "file_path": "notes.md",
+            "source_type": "document",
+            "location_type": None,
+            "location_value": None,
+            "text": "first",
+        },
+        2: {
+            "chunk_id": 2,
+            "file_id": 1,
+            "course": "Information Retrieval",
+            "file_path": "notes.md",
+            "source_type": "document",
+            "location_type": None,
+            "location_value": None,
+            "text": "second",
+        },
+    }
+    monkeypatch.setattr(
+        vector_module,
+        "_hydrate_candidates",
+        lambda _config, *, candidates, **kwargs: [
+            rows[chunk_id] for chunk_id in candidates
+        ],
+    )
+
+    result_sets = semantic_search_many(
+        config,
+        ["first query", "second query"],
+        indexes=["document_index"],
+        top_k=1,
+    )
+
+    assert [results[0].chunk_id for results in result_sets] == [1, 2]
+    assert embeddings.calls == [["first query", "second query"]]
+    assert collection.query_calls == 1
 
 
 def test_semantic_search_returns_sqlite_joined_results(

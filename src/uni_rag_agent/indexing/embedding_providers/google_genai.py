@@ -98,6 +98,40 @@ class GoogleGenAIEmbeddings(Embeddings):
                 )
             ) from exc
 
+    def embed_queries(self, texts: Sequence[str]) -> list[list[float]]:
+        """Embed retrieval queries in one Gemini batch request."""
+        values = list(texts)
+        if not values:
+            return []
+        try:
+            result = retry_transient(
+                lambda: self.client.embed_documents(  # type: ignore[attr-defined]
+                    values,
+                    task_type=QUERY_TASK,
+                    output_dimensionality=self.dimension,
+                ),
+                provider="Google GenAI",
+            )
+            return validate_vectors(
+                result,
+                expected_count=len(values),
+                expected_dimension=self.dimension,
+                context="Google GenAI query embedding response",
+            )
+        except EmbeddingValidationError as exc:
+            raise RuntimeError(
+                "Google GenAI returned an invalid query embedding response."
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(
+                sanitize_provider_error(
+                    exc,
+                    "Google GenAI",
+                    operation="query embedding",
+                    model=self.model,
+                )
+            ) from exc
+
 
 def build_embeddings(
     config: Config,

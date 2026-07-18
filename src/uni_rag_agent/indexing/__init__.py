@@ -35,12 +35,13 @@ from .profiles import (
 
 if TYPE_CHECKING:
     from .embedding_providers.factory import BuiltEmbeddingModel, build_embedding_model
-    from .vector import semantic_search, sync_vector_index
+    from .vector import semantic_search, semantic_search_many, sync_vector_index
 
 _LAZY_EXPORTS = {
     "BuiltEmbeddingModel": "embedding_providers.factory",
     "build_embedding_model": "embedding_providers.factory",
     "semantic_search": "vector",
+    "semantic_search_many": "vector",
     "sync_vector_index": "vector",
 }
 
@@ -63,6 +64,7 @@ __all__ = [
     "physical_collection_name",
     "resolve_embedding_profile",
     "semantic_search",
+    "semantic_search_many",
     "sync_keyword_index",
     "sync_vector_index",
 ]

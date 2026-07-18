@@ -46,6 +46,17 @@ class NebiusEmbeddings(Embeddings):
             operation="query embedding",
         )[0]
 
+    def embed_queries(self, texts: Sequence[str]) -> list[list[float]]:
+        """Embed retrieval queries in one OpenAI-compatible request."""
+        values = [f"{QUERY_INSTRUCTION}\nQuery:{text}" for text in texts]
+        if not values:
+            return []
+        return self._embed(
+            values,
+            input_value=values,
+            operation="query embedding",
+        )
+
     def _embed(
         self,
         expected_inputs: list[str],

@@ -170,19 +170,23 @@ only.
 
 ## Application and evaluation
 
-### DEC-036/017 — Thin provider-lazy local web app
+### DEC-036/017 — Thin local web app with process-scoped models
 
 **Decision:** FastAPI serves a package-owned UI and only answer/inspection
-routes. Omitted session ids are stateless; supplied ids use a bounded in-process
-planner-only LRU (20 sessions, two-hour inactivity TTL). Ask timeout defaults to
-120 seconds and cannot append a late answer after timeout.
+routes. Configured planner and answer models are constructed during application
+startup and reused across requests. Omitted session ids are stateless; supplied
+ids use a bounded in-process planner-only LRU (20 sessions, two-hour inactivity
+TTL). Ask timeout defaults to 120 seconds and cannot append a late answer after
+timeout.
 
 **Why:** The web layer should present existing services without turning browser
 requests into ingestion or source mutation.
 
-**Constraints/consequences:** `/health` is liveness-only; `/config` and errors
-are sanitized. Ingestion, indexing, evaluation, upload, and reset remain CLI
-operations. Sessions disappear on process restart.
+**Constraints/consequences:** `/health` is liveness-only and does not invoke a
+provider; startup construction failures are surfaced through sanitized ask
+errors. Planner and answer configurations remain separate. Ingestion, indexing,
+evaluation, upload, and reset remain CLI operations. Cached models and sessions
+disappear on process restart.
 
 ### DEC-037/038 — Isolated, safe evaluation
 

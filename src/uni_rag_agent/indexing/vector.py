@@ -34,7 +34,7 @@ from .eligibility import (
     validate_logical_index,
 )
 from .embedding_providers.common import EmbeddingValidationError, validate_vectors
-from .embedding_providers.factory import build_embedding_model
+from .embedding_providers.factory import BuiltEmbeddingModel, build_embedding_model
 from .models import SemanticSearchError, VectorIndexError, VectorIndexResult
 from .profiles import EmbeddingProfile, physical_collection_name
 
@@ -69,6 +69,13 @@ class _Candidate:
     distance: float
     physical_collection: str
     vector_id: str
+
+
+@dataclass
+class _SemanticContext:
+    built: BuiltEmbeddingModel
+    collections: dict[str, object]
+    counts: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -195,73 +202,93 @@ def semantic_search(
     *,
     courses: Sequence[str] | None = None,
 ) -> list[RetrievalResult]:
-    """Run semantic vector search over the selected model's collections.
+    """Run one semantic query using the multi-query request seam."""
+    return semantic_search_many(
+        config,
+        (query,),
+        course=course,
+        indexes=indexes,
+        top_k=top_k,
+        model=model,
+        courses=courses,
+    )[0]
 
-    Mirrors ``keyword_search(config, query, ...)``. Queries the selected
-    physical ChromaDB collections, then joins candidate ids back to SQLite in
-    read-only mode and reapplies the current-file-only, course, and logical
-    index filters. Returns ``[]`` when nothing matches. Does not persist
-    ``search_runs`` or ``search_results``.
-    """
+
+def semantic_search_many(
+    config: Config,
+    queries: Sequence[str],
+    course: str | None = None,
+    indexes: Sequence[str] | None = None,
+    top_k: int | None = None,
+    model: str | None = None,
+    *,
+    courses: Sequence[str] | None = None,
+) -> list[list[RetrievalResult]]:
+    """Search all semantic queries with one embedding/Chroma request context."""
     limit = top_k if top_k is not None else config.semantic_top_k
     if limit <= 0:
         raise SemanticSearchError("top_k must be greater than zero")
 
-    query_text = query.strip()
-    if not query_text:
+    query_texts = tuple(query.strip() for query in queries)
+    if any(not query_text for query_text in query_texts):
         raise SemanticSearchError("Semantic query must not be empty.")
+    if not query_texts:
+        return []
     if course is not None and courses is not None:
         raise SemanticSearchError("Specify either course or courses, not both")
     if courses is not None and not courses:
-        return []
+        return [[] for _ in query_texts]
     if courses is None and course is not None:
         courses = (course,)
 
     source_types = source_types_for_indexes(indexes, error=SemanticSearchError)
     if source_types == ():
-        return []
+        return [[] for _ in query_texts]
     selected = _selected_logical_indexes_for_search(source_types)
-
-    built = build_embedding_model(config, model, error=SemanticSearchError)
-    profile = built.profile
-    dimension = built.dimension
-
-    storage = check_storage(config)
-    if not storage.ok:
-        details = "; ".join(storage.diagnostics) or "storage is not ready"
-        raise SemanticSearchError(f"Semantic search storage check failed: {details}")
 
     try:
         canonical_courses = _canonical_course_names(config, courses)
         if courses is not None and not canonical_courses:
-            return []
+            return [[] for _ in query_texts]
+
+        context = _build_semantic_context(
+            config,
+            model=model,
+            selected=selected,
+        )
         try:
-            query_vector = validate_vectors(
-                [built.embeddings.embed_query(query_text)],
-                expected_count=1,
-                expected_dimension=dimension,
+            query_vectors = validate_vectors(
+                _embed_query_batch(context.built.embeddings, query_texts),
+                expected_count=len(query_texts),
+                expected_dimension=context.built.dimension,
                 context="embedding provider query response",
-            )[0]
+            )
         except EmbeddingValidationError as exc:
             raise SemanticSearchError(str(exc)) from exc
-        client = _chroma_client(config, error=SemanticSearchError)
-        candidates = _query_candidates(
-            client,
+
+        candidate_sets = _query_candidates_many(
+            context,
             selected=selected,
-            profile=profile,
-            dimension=dimension,
-            query_vector=query_vector,
+            query_vectors=query_vectors,
             limit=limit,
             courses=canonical_courses,
         )
-        if not candidates:
-            return []
-        rows = _hydrate_candidates(
-            config,
-            candidates=candidates,
-            source_types=[source_type for _, source_type in selected],
-            courses=canonical_courses,
-        )
+        if not any(candidate_sets):
+            return [[] for _ in query_texts]
+
+        results: list[list[RetrievalResult]] = []
+        for candidates in candidate_sets:
+            if not candidates:
+                results.append([])
+                continue
+            rows = _hydrate_candidates(
+                config,
+                candidates=candidates,
+                source_types=[source_type for _, source_type in selected],
+                courses=canonical_courses,
+            )
+            results.append(_semantic_results(candidates, rows, limit=limit))
+        return results
     except SemanticSearchError:
         raise
     except sqlite3.OperationalError as exc:
@@ -273,6 +300,51 @@ def semantic_search(
     except Exception as exc:  # noqa: BLE001 - surface ChromaDB failures clearly
         raise SemanticSearchError(f"Semantic search failed: {exc}") from exc
 
+
+def _build_semantic_context(
+    config: Config,
+    *,
+    model: str | None,
+    selected: Sequence[tuple[str, str]],
+) -> _SemanticContext:
+    built = build_embedding_model(config, model, error=SemanticSearchError)
+    storage = check_storage(config)
+    if not storage.ok:
+        details = "; ".join(storage.diagnostics) or "storage is not ready"
+        raise SemanticSearchError(f"Semantic search storage check failed: {details}")
+
+    client = _chroma_client(config, error=SemanticSearchError)
+    existing = _existing_collection_names(client)
+    collections: dict[str, object] = {}
+    counts: dict[str, int] = {}
+    for logical_index, _source_type in selected:
+        physical = _physical_name(logical_index, built.profile, built.dimension)
+        if physical not in existing:
+            continue
+        collection = client.get_collection(name=physical)  # type: ignore[attr-defined]
+        count = int(collection.count())  # type: ignore[attr-defined]
+        if count > 0:
+            collections[physical] = collection
+            counts[physical] = count
+    return _SemanticContext(built=built, collections=collections, counts=counts)
+
+
+def _embed_query_batch(embeddings: object, queries: Sequence[str]) -> object:
+    batch_method = getattr(embeddings, "embed_queries", None)
+    if callable(batch_method):
+        return batch_method(list(queries))
+    embed_query = getattr(embeddings, "embed_query", None)
+    if not callable(embed_query):
+        raise SemanticSearchError("Embedding provider has no query method")
+    return [embed_query(query) for query in queries]
+
+
+def _semantic_results(
+    candidates: dict[int, _Candidate],
+    rows: Sequence[sqlite3.Row],
+    *,
+    limit: int,
+) -> list[RetrievalResult]:
     ranked = sorted(
         rows,
         key=lambda row: (
@@ -585,32 +657,31 @@ def _embeddings_total(
     return int(row[0])
 
 
-def _query_candidates(
-    client: object,
+def _query_candidates_many(
+    context: _SemanticContext,
     *,
     selected: Sequence[tuple[str, str]],
-    profile: EmbeddingProfile,
-    dimension: int,
-    query_vector: Sequence[float],
+    query_vectors: Sequence[Sequence[float]],
     limit: int,
     courses: Sequence[str] | None,
-) -> dict[int, _Candidate]:
-    existing = _existing_collection_names(client)
-    candidates: dict[int, _Candidate] = {}
+) -> list[dict[int, _Candidate]]:
+    candidates_by_query: list[dict[int, _Candidate]] = [{} for _ in query_vectors]
     for logical_index, _source_type in selected:
-        physical = _physical_name(logical_index, profile, dimension)
-        if physical not in existing:
+        physical = _physical_name(
+            logical_index,
+            context.built.profile,
+            context.built.dimension,
+        )
+        collection = context.collections.get(physical)
+        if collection is None:
             continue
-        collection = client.get_collection(name=physical)  # type: ignore[attr-defined]
-        count = collection.count()
-        if count == 0:
-            continue
+        count = context.counts[physical]
         # The collection stores the exact canonical course name as metadata.
         # Restricting Chroma first keeps the final top-K meaningful for course
         # queries; SQLite reapplies the same filter while hydrating.
         fetch_k = min(count, max(limit * 4, limit))
         query_kwargs: dict[str, object] = {
-            "query_embeddings": [list(query_vector)],
+            "query_embeddings": [list(vector) for vector in query_vectors],
             "n_results": fetch_k,
             "include": ["distances", "metadatas"],
         }
@@ -619,28 +690,30 @@ def _query_candidates(
         result = collection.query(  # type: ignore[attr-defined]
             **query_kwargs,
         )
-        hits = list(_iter_query_hits(result))
-        if courses is not None and not hits:
-            # Chroma's filtered HNSW query can occasionally exhaust its search
-            # frontier before reaching a sparse metadata partition. Fall back
-            # to exact local scoring of that partition so a course filter is
-            # always applied before final top-K truncation.
-            hits = _course_filter_fallback_hits(
-                collection,
-                courses=courses,
-                query_vector=query_vector,
-                limit=limit,
-            )
-        for chunk_id, distance, vector_id in hits:
-            current = candidates.get(chunk_id)
-            if current is None or distance < current.distance:
-                candidates[chunk_id] = _Candidate(
-                    chunk_id=chunk_id,
-                    distance=distance,
-                    physical_collection=physical,
-                    vector_id=vector_id,
+        for query_index, query_vector in enumerate(query_vectors):
+            hits = list(_iter_query_hits(result, query_index=query_index))
+            if courses is not None and not hits:
+                # Chroma's filtered HNSW query can occasionally exhaust its
+                # search frontier before reaching a sparse metadata partition.
+                # Fall back to exact local scoring so the course filter is
+                # applied before final top-K truncation.
+                hits = _course_filter_fallback_hits(
+                    collection,
+                    courses=courses,
+                    query_vector=query_vector,
+                    limit=limit,
                 )
-    return candidates
+            candidates = candidates_by_query[query_index]
+            for chunk_id, distance, vector_id in hits:
+                current = candidates.get(chunk_id)
+                if current is None or distance < current.distance:
+                    candidates[chunk_id] = _Candidate(
+                        chunk_id=chunk_id,
+                        distance=distance,
+                        physical_collection=physical,
+                        vector_id=vector_id,
+                    )
+    return candidates_by_query
 
 
 def _course_filter_fallback_hits(
@@ -696,10 +769,14 @@ def _cosine_distance(
     return 1.0 - (dot_product / (query_norm * embedding_norm))
 
 
-def _iter_query_hits(result: object) -> Iterator[tuple[int, float, str]]:
-    ids = _first_or_empty(result, "ids")
-    distances = _first_or_empty(result, "distances")
-    metadatas = _first_or_empty(result, "metadatas")
+def _iter_query_hits(
+    result: object,
+    *,
+    query_index: int = 0,
+) -> Iterator[tuple[int, float, str]]:
+    ids = _query_values(result, "ids", query_index)
+    distances = _query_values(result, "distances", query_index)
+    metadatas = _query_values(result, "metadatas", query_index)
     for vector_id, distance, metadata in zip(ids, distances, metadatas):
         md = metadata or {}
         chunk_id = md.get("chunk_id")
@@ -713,12 +790,15 @@ def _iter_query_hits(result: object) -> Iterator[tuple[int, float, str]]:
             continue
 
 
-def _first_or_empty(result: object, key: str) -> list[object]:
+def _query_values(result: object, key: str, query_index: int) -> list[object]:
     value = result.get(key) if isinstance(result, dict) else None
     if not value:
         return []
-    first = value[0]
-    return list(first) if first else []
+    try:
+        selected = value[query_index]
+    except (IndexError, TypeError):
+        return []
+    return list(selected) if selected else []
 
 
 def _hydrate_candidates(

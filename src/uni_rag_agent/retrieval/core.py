@@ -11,7 +11,7 @@ from uni_rag_agent.config import Config, validate_config
 from uni_rag_agent.indexing import (
     SemanticSearchError,
     keyword_search_terms,
-    semantic_search,
+    semantic_search_many,
 )
 from uni_rag_agent.indexing.models import KeywordSearchError
 from uni_rag_agent.indexing.profiles import resolve_embedding_profile
@@ -167,16 +167,21 @@ def _execute_retrieval(
         if recorder is not None:
             recorder.record_result_set(result_sets[-1])
 
-        for semantic_index, semantic_query in enumerate(
-            query_plan.semantic_queries, start=1
-        ):
-            semantic_results = semantic_search(
-                config,
-                semantic_query,
-                courses=query_plan.candidate_courses,
-                indexes=query_plan.candidate_indexes,
-                model=profile.model_name,
+        semantic_result_sets = semantic_search_many(
+            config,
+            query_plan.semantic_queries,
+            courses=query_plan.candidate_courses,
+            indexes=query_plan.candidate_indexes,
+            model=profile.model_name,
+        )
+        if len(semantic_result_sets) != len(query_plan.semantic_queries):
+            raise SemanticSearchError(
+                "Semantic search returned an unexpected number of result sets."
             )
+        for semantic_index, (semantic_query, semantic_results) in enumerate(
+            zip(query_plan.semantic_queries, semantic_result_sets),
+            start=1,
+        ):
             result_sets.append(
                 RetrievalResultSet(
                     result_set_id=f"semantic:{semantic_index}",
