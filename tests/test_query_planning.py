@@ -157,10 +157,6 @@ def test_plan_query_accepts_valid_unsupported_plan_without_search_scope(
         (json.dumps(_supported_payload(keyword_terms=[""])), "must be nonblank"),
         (json.dumps(_supported_payload(needs_python="false")), "must be boolean"),
         (
-            json.dumps(_supported_payload(plan_confidence=0.59)),
-            "below query_plan_min_confidence",
-        ),
-        (
             json.dumps(_supported_payload(plan_confidence=1.1)),
             "must be between 0 and 1",
         ),
@@ -175,6 +171,36 @@ def test_plan_query_rejects_invalid_structured_output(
             "Explain BM25",
             chat_model=FakeChat(payload),
         )
+
+
+def test_plan_query_downgrades_low_confidence_plan_to_unsupported(
+    tmp_path: Path,
+) -> None:
+    config = _planning_config(tmp_path)
+    chat = FakeChat(json.dumps(_supported_payload(plan_confidence=0.59)))
+
+    plan = plan_query(config, "Explain BM25", chat_model=chat)
+
+    assert plan.query_type == "unknown_or_unsupported"
+    assert plan.candidate_courses == ()
+    assert plan.candidate_indexes == ()
+    assert plan.keyword_terms == ()
+    assert plan.semantic_queries == ()
+    assert plan.plan_confidence == 0.59
+    assert "0.59" in plan.plan_reason
+    assert "0.60" in plan.plan_reason
+    assert "course-grounded concept explanation" in plan.plan_reason
+
+
+def test_plan_query_broadens_slides_only_index_scope_with_documents(
+    tmp_path: Path,
+) -> None:
+    config = _planning_config(tmp_path)
+    chat = FakeChat(json.dumps(_supported_payload(candidate_indexes=["slides_index"])))
+
+    plan = plan_query(config, "Explain BM25", chat_model=chat)
+
+    assert plan.candidate_indexes == ("slides_index", "document_index")
 
 
 def test_plan_query_requires_configuration_and_propagates_provider_failure(

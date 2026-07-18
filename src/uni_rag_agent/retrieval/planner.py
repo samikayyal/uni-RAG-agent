@@ -144,13 +144,29 @@ def _parse_query_plan(
     confidence = payload["plan_confidence"]
     if type(confidence) not in {int, float} or not 0.0 <= float(confidence) <= 1.0:
         raise QueryPlanningError("LLM plan_confidence must be between 0 and 1.")
-    if float(confidence) < config.query_plan_min_confidence:
-        raise QueryPlanningError(
-            "LLM plan_confidence is below query_plan_min_confidence."
-        )
     reason = payload["plan_reason"]
     if not isinstance(reason, str) or not reason.strip():
         raise QueryPlanningError("LLM plan_reason must be a nonblank string.")
+    if float(confidence) < config.query_plan_min_confidence:
+        # A low-confidence plan is a normal retrieval outcome, not a provider
+        # failure: downgrade it to an unsupported no-scope plan so the ask
+        # pipeline returns an honest insufficient-evidence answer instead of
+        # surfacing a 502 provider_error.
+        return QueryPlan(
+            query_type="unknown_or_unsupported",
+            candidate_courses=(),
+            candidate_indexes=(),
+            keyword_terms=(),
+            semantic_queries=(),
+            needs_file_inspection=False,
+            needs_python=False,
+            plan_confidence=float(confidence),
+            plan_reason=(
+                f"Query-plan confidence {float(confidence):.2f} is below the "
+                f"required minimum {config.query_plan_min_confidence:.2f}: "
+                f"{reason.strip()}"
+            ),
+        )
 
     if query_type == "unknown_or_unsupported":
         if canonical_courses or indexes or keyword_terms or semantic_queries:
@@ -166,6 +182,12 @@ def _parse_query_plan(
         raise QueryPlanningError(
             "Supported query plans require course, index, keyword, and semantic scopes."
         )
+
+    if "slides_index" in indexes and "document_index" not in indexes:
+        # Slide decks are frequently ingested with source_type=document (e.g.
+        # PDF exports), so a slides_index-only scope silently excludes them
+        # and yields false insufficient-evidence results.
+        indexes = (*indexes, "document_index")
 
     return QueryPlan(
         query_type=query_type,
