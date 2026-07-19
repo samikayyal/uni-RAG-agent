@@ -210,7 +210,49 @@ def test_generate_answer_renders_stable_citation_and_structured_reference(
     assert any("Markdown syntax" in rule for rule in prompt["rules"])
     assert any("smallest allowed evidence-id set" in rule for rule in prompt["rules"])
     assert any("directly support" in rule for rule in prompt["rules"])
+    assert prompt["schema"]["limitations"] == []
+    assert any("limitations field is required" in rule for rule in prompt["rules"])
+    assert any("exact evidence citation_id" in rule for rule in prompt["rules"])
     assert validate_answer_citations(result, packet)
+
+
+def test_missing_limitations_field_is_treated_as_empty_list(tmp_path: Path) -> None:
+    packet = _packet(tmp_path)
+    payload = {
+        "answer_paragraphs": [{"text": "Grounded answer", "citation_ids": ["E1"]}]
+    }
+
+    result = generate_answer(
+        packet,
+        chat_model=_Chat(payload),
+        config=replace(make_config(tmp_path), answer_max_retries=0),
+    )
+
+    assert result.citations[0].citation_id == "E1"
+    assert result.limitations == ()
+
+
+def test_invalid_bare_citation_id_is_retried_with_specific_diagnostic(
+    tmp_path: Path,
+) -> None:
+    packet = _packet(tmp_path)
+    chat = _Chat(
+        _valid_payload(citation_ids=("3",)),
+        _valid_payload(),
+    )
+
+    result = generate_answer(
+        packet,
+        chat_model=chat,
+        config=replace(make_config(tmp_path), answer_max_retries=1),
+    )
+
+    assert result.citations[0].citation_id == "E1"
+    assert len(chat.prompts) == 2
+    retry_prompt = json.loads(chat.prompts[1])
+    assert retry_prompt["validation_errors"] == [
+        "paragraph 1 contains unknown citation id: 3"
+    ]
 
 
 def test_outer_markdown_fence_is_removed_before_strict_json_parsing(

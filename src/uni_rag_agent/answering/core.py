@@ -128,7 +128,7 @@ def generate_answer(
                 f"Answer LLM invocation failed: {type(exc).__name__}: {exc}"
             ) from exc
         try:
-            payload = _decode_response(response)
+            payload = _normalize_model_payload(_decode_response(response))
             paragraphs = _normalize_paragraph_markdown_fences(
                 parse_model_answer(payload)
             )
@@ -191,6 +191,7 @@ def validate_answer_citations(
         return CitationValidationResult(False, ("packet must be an EvidencePacket",))
     if isinstance(answer, Mapping):
         try:
+            answer = _normalize_model_payload(answer)
             paragraphs = _normalize_paragraph_markdown_fences(
                 parse_model_answer(answer)
             )
@@ -279,6 +280,8 @@ def _strip_markdown_decoration(line: str) -> str:
 
 
 def _decode_response(response: object) -> Mapping[str, object]:
+    if isinstance(response, Mapping):
+        return response
     content: Any = getattr(response, "content", response)
     if isinstance(content, list):
         content = "".join(
@@ -294,6 +297,20 @@ def _decode_response(response: object) -> Mapping[str, object]:
         raise AnswerModelError("answer model output must be one JSON object") from exc
     if not isinstance(payload, Mapping):
         raise AnswerModelError("answer model output must be one JSON object")
+    return payload
+
+
+def _normalize_model_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
+    """Apply harmless provider compatibility before strict validation.
+
+    Some Gemini responses omit ``limitations`` when there are no additional
+    model-supplied limitations, despite the prompt describing the field as an
+    empty list in that case. Treating that omission as ``[]`` preserves the
+    answer contract without accepting extra fields or weakening citation
+    validation.
+    """
+    if set(payload) == {"answer_paragraphs"}:
+        return {**payload, "limitations": []}
     return payload
 
 
@@ -444,7 +461,7 @@ def _answer_prompt(
                         "citation_ids": ["E1"],
                     }
                 ],
-                "limitations": ["optional nonblank limitation"],
+                "limitations": [],
             },
             "query": packet.query,
             "evidence": evidence,
@@ -455,7 +472,8 @@ def _answer_prompt(
                 "Answer only from supplied evidence, not memory.",
                 "Write concise Markdown syntax in short, claim-focused paragraphs.",
                 "Each paragraph must cite the smallest allowed evidence-id set that directly supports its claims; omit related or redundant evidence.",
-                "Use canonical E<n> or supplied chunk:<id> citation ids.",
+                "The limitations field is required; return [] when none applies.",
+                "Use exact evidence citation_id values (E<n> such as E3), never bare numbers.",
                 "Do not render References, Limitations, paths, links, citation markers, or fences.",
                 "Return exactly the schema fields as one JSON object.",
             ],

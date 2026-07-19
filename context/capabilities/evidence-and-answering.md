@@ -21,6 +21,10 @@ limitations. A whole response or individual paragraph text wrapped entirely in
 a lowercase `markdown` code fence is deterministically unwrapped with an
 anchored regular expression. Other response wrappers stay invalid, while
 non-matching fences inside paragraph content remain ordinary Markdown content.
+For provider compatibility, a response containing only
+`answer_paragraphs` is normalized to an empty `limitations` list; extra fields
+remain invalid and citation validation remains strict. The prompt explicitly
+requires the field and exact packet citation IDs to reduce malformed retries.
 Empty evidence or a budget that fits no item yields a deterministic no-provider
 answer. `store_answer()` reloads and validates the packet before appending to
 `answers`; prompts, conversations, keys, and invalid raw output are never
