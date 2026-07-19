@@ -12,8 +12,12 @@ compatibility forms — notably Arabic Presentation Forms emitted by PDF
 extraction — match normally-typed queries. Query terms are NFKC-normalized
 symmetrically at search time. `keyword_search()` supports plain-text terms,
 exact course filters, logical-index filters, and bounded results; direct
-search is read-only. Search projections return course-relative file paths
-(`files.relative_path`), never absolute host paths.
+search is read-only. Planner-supplied keyword phrases are NFKC-normalized,
+tokenized, deduplicated, and joined with OR for recall instead of being forced
+to match as exact multi-word FTS phrases. Individual planner terms with no word
+or number tokens are ignored; the search fails only when no usable token remains
+across all terms. Search projections return
+course-relative file paths (`files.relative_path`), never absolute host paths.
 
 `sync_vector_index()` resolves one reviewed embedding profile, maps source types
 to logical Chroma indexes, reconciles stale vectors/mappings, embeds missing
@@ -53,8 +57,8 @@ Profiles are `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
 - Source: `src/uni_rag_agent/search_contracts.py` and
   `src/uni_rag_agent/indexing/{eligibility,keyword,vector,profiles}.py`
   and `indexing/embedding_providers/`.
-- Tests: `tests/test_keyword_indexing.py`, `tests/test_vector_indexing.py`,
-  `tests/test_embedding_providers.py`.
+- Tests: `tests/test_keyword_indexing.py`, `tests/test_hybrid_retrieval.py`,
+  `tests/test_vector_indexing.py`, `tests/test_embedding_providers.py`.
 - Notebooks: `notebooks/keyword_index_eda.ipynb` and
   `notebooks/vector_index_eda.ipynb` (read-only index EDA).
 - SQLite: FTS5 `chunk_fts` and `embeddings`; Chroma persistence under

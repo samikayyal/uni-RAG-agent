@@ -284,6 +284,42 @@ def test_ask_returns_ids_structured_references_and_coverage(tmp_path: Path) -> N
     assert payload["coverage"]["searched_courses"] == ["Information Retrieval"]
 
 
+def test_answer_projection_separates_body_and_failure_status(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    rendered = AnswerResult(
+        answer_text=(
+            "First paragraph. [E1]\nSecond paragraph. [E1]\n\n"
+            "References:\n- [E1] Information Retrieval - lecture.pdf - page 4\n\n"
+            "Limitations:\n- Narrow evidence."
+        ),
+        citations=(_citation(),),
+        limitations=("Narrow evidence.",),
+    )
+    client = TestClient(
+        create_app(config_loader=lambda: config, services=_services(answer=rendered))
+    )
+
+    answered = client.post("/api/ask", json={"query": "question"}).json()
+    assert answered["answer_body"] == "First paragraph. [E1]\nSecond paragraph. [E1]"
+    assert answered["answer_status"] == "answered"
+
+    refused = _answer(cited=False)
+    refused = replace(
+        refused,
+        limitations=(
+            "Answer validation failed after 2 attempt(s); "
+            "no model answer was accepted.",
+        ),
+    )
+    failure = TestClient(
+        create_app(
+            config_loader=lambda: config,
+            services=_services(answer=refused),
+        )
+    ).post("/api/ask", json={"query": "question"})
+    assert failure.json()["answer_status"] == "validation_failed"
+
+
 def test_insufficient_evidence_is_a_successful_ask(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     response = TestClient(
@@ -445,6 +481,36 @@ def test_same_session_reuses_only_complete_planner_context(tmp_path: Path) -> No
         {"role": "user", "content": "first"},
         {"role": "assistant", "content": _answer().answer_text},
     )
+
+
+def test_session_status_distinguishes_live_expired_and_unknown_context(
+    tmp_path: Path,
+) -> None:
+    now = [0.0]
+    registry = SessionRegistry(ttl_seconds=10, clock=lambda: now[0])
+    client = TestClient(
+        create_app(
+            config_loader=lambda: make_config(tmp_path),
+            services=_services(),
+            session_registry=registry,
+        )
+    )
+
+    assert client.get("/api/sessions/study").json() == {
+        "session_id": "study",
+        "live": False,
+    }
+    assert (
+        client.post(
+            "/api/ask", json={"query": "first", "session_id": "study"}
+        ).status_code
+        == 200
+    )
+    now[0] = 9.0
+    assert client.get("/api/sessions/study").json()["live"] is True
+
+    now[0] = 11.0
+    assert client.get("/api/sessions/study").json()["live"] is False
 
 
 def test_session_registry_enforces_20_entry_lru_and_two_hour_ttl(

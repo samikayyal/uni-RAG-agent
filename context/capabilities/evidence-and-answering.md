@@ -19,7 +19,9 @@ evidence as limitations. Empty evidence or a budget that fits no item yields a
 deterministic no-provider answer. `store_answer()` reloads and validates the
 packet before appending to `answers`; prompts, conversations, keys, and invalid
 raw output are never persisted. `AnswerSession` keeps bounded complete turns
-for the planner only. `ask` composes build plus answer.
+for the planner only. `answer_body()` owns the rendered prose/tail boundary,
+and `answer_status()` owns deterministic outcome classification for both fresh
+and rehydrated answers. `ask` composes build plus answer.
 
 ## Public entry points
 
@@ -29,7 +31,7 @@ for the planner only. `ask` composes build plus answer.
 - `uv run -m uni_rag_agent ask "query" --model <profile> [--json]`
 - Python: `build_evidence`, `load_evidence_packet`,
   `explain_search_coverage`, `generate_answer`, `store_answer`, `load_answer`,
-  and `AnswerSession`.
+  `answer_body`, `answer_status`, and `AnswerSession`.
 
 ## Source, tests, and artifacts
 

@@ -14,12 +14,16 @@ omitted `session_id` is stateless. A valid supplied id uses an in-process
 planner-only session registry with at most 20 least-recently-used sessions, a
 two-hour inactivity TTL, and per-session serialization. The default ask timeout
 is 120 seconds; evidence stored before timeout remains inspectable, and no late
-answer is appended.
+answer is appended. The browser reloads the active session's latest persisted
+answer on startup and checks server-side session liveness before describing it
+as continuing. Expired process context is detached from the stored answer, and
+missing persisted answers prune their stale client-history entries.
 
 ## Public entry points
 
 - `uv run -m uni_rag_agent app serve [--host 127.0.0.1] [--port 8000]`.
 - Routes: `GET /health`, `GET /config`, `POST /api/ask`,
+  `GET /api/sessions/{session_id}`,
   `GET /api/search-runs/{search_run_id}/coverage`,
   `GET /api/evidence-packets/{evidence_packet_id}`, and
   `GET /api/answers/{answer_id}`. `/` serves the UI and `/static` serves its
@@ -44,6 +48,14 @@ answer is appended.
 - Answer, citation, reference, and evidence-packet projections carry
   course-relative file paths; absolute host paths are not exposed (packets
   persisted before this change retain their original absolute paths).
+- Answer projections expose structured `answer_body` and `answer_status` fields
+  for the UI while retaining the canonical rendered `answer_text`. The UI shows
+  references and limitations once, preserves single-newline paragraphs, uses
+  automatic bidirectional text direction, and visually distinguishes validation
+  failures and insufficient-evidence outcomes. Coverage and packet weaknesses
+  are shown only when they are not already present in structured limitations.
+- While startup session liveness is unknown, the ask control remains busy and
+  submission is rejected rather than silently forking a new session.
 - Planner and answer settings remain separate; each configured model is cached
   once per active configuration and shared by stateless and session requests.
 - Errors are stable safe JSON: missing resources 404, invalid config 503,

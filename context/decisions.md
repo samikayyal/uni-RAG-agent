@@ -108,8 +108,8 @@ payloads and arbitrary serialized objects are not loaded into retrieval.
 planner once, validate a `QueryPlan`, run metadata/keyword/semantic backends with
 hard plan filters, and merge ranked results with unweighted RRF. A valid
 unsupported plan is an empty successful run; invalid plans or backend/provider
-failures are fatal. Two deterministic plan adjustments are part of validation
-(2026-07-18, motivated by manual-QA findings BUG-04/BUG-05):
+failures are fatal. Three deterministic plan adjustments are part of validation
+(2026-07-18/19, motivated by manual-QA findings BUG-04/BUG-05 and packet 47):
 
 1. *Slides broadening:* a plan scoping to `slides_index` without
    `document_index` has `document_index` appended before execution, because
@@ -123,12 +123,19 @@ failures are fatal. Two deterministic plan adjustments are part of validation
    `plan_reason`, instead of raising `QueryPlanningError`. Low confidence is a
    retrieval outcome (honest insufficient-evidence answer), not a provider
    failure.
+3. *Keyword phrase expansion:* planner-supplied keyword terms are normalized,
+   tokenized, deduplicated, and OR-matched in FTS5. A multi-word planning term
+   is not treated as an exact phrase because that produced systematic zero-hit
+   keyword result sets even when relevant chunks contained one or more of its
+   informative tokens. Tokenless individual terms are skipped; only an entirely
+   tokenless term set fails validation.
 
 **Why:** Structured intent and auditable backend provenance are more stable than
-duplicated routing rules or an opaque reranker. The two adjustments keep hard
-filtering while preventing the two systematic false negatives observed in
-testing: false insufficient-evidence for document-typed decks, and 502
-provider errors for out-of-scope questions.
+duplicated routing rules or an opaque reranker. These adjustments keep hard
+filtering while preventing systematic false negatives observed in testing:
+false insufficient-evidence for document-typed decks, 502 provider errors for
+out-of-scope questions, and empty keyword sets caused by strict multi-word
+phrases.
 
 **Constraints/consequences:** Planner settings remain separate from answer
 settings. `retrieve` never writes search/evidence rows; use `evidence build`
@@ -203,7 +210,10 @@ requests into ingestion or source mutation.
 provider; startup construction failures are surfaced through sanitized ask
 errors. Planner and answer configurations remain separate. Ingestion, indexing,
 evaluation, upload, and reset remain CLI operations. Cached models and sessions
-disappear on process restart.
+disappear on process restart. The browser must verify process-session liveness
+before presenting persisted client history as an active continuing conversation;
+persisted answers may still be shown after context expiry, but are detached from
+the next ask.
 
 ### DEC-037/038 — Isolated, safe evaluation
 

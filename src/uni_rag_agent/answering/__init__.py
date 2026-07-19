@@ -1,6 +1,13 @@
 """Evidence-only answering and citation public API."""
 
-from .core import format_citation, generate_answer, validate_answer_citations
+from .core import (
+    answer_body,
+    answer_status,
+    format_citation,
+    generate_answer,
+    is_validation_refusal,
+    validate_answer_citations,
+)
 from .models import (
     AnswerCitation,
     AnswerError,
@@ -24,8 +31,11 @@ __all__ = [
     "AnswerValidationError",
     "AnswerSession",
     "CitationValidationResult",
+    "answer_body",
+    "answer_status",
     "format_citation",
     "generate_answer",
+    "is_validation_refusal",
     "load_answer",
     "store_answer",
     "validate_answer_citations",

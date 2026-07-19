@@ -72,6 +72,34 @@ def test_plural_keyword_courses_are_filtered_before_global_limit(
     assert keyword_search_terms(config, ["does-not-exist"], courses=[]) == []
 
 
+def test_planner_keyword_phrases_expand_to_token_level_recall(tmp_path: Path) -> None:
+    config = make_initialized_config(
+        tmp_path,
+        llm_provider="ollama",
+        llm_model="test-planner",
+    )
+    with connect_sqlite(config) as connection:
+        chunk_id = insert_minimal_chunk(
+            connection,
+            config,
+            course_name="Database",
+            filename="normalization.md",
+            text="Normalization decomposes relations into smaller relations.",
+        ).chunk_id
+        connection.commit()
+    sync_keyword_index(config)
+
+    results = keyword_search_terms(
+        config,
+        ["normalization drawbacks", "—", "...", "over-normalization"],
+        courses=["Database"],
+    )
+
+    assert [result.chunk_id for result in results] == [chunk_id]
+    with pytest.raises(KeywordSearchError, match="Keyword terms"):
+        keyword_search_terms(config, ["—", "..."])
+
+
 def test_metadata_search_returns_file_level_rows_and_excludes_historical_missing(
     tmp_path: Path,
 ) -> None:

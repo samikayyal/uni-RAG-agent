@@ -21,7 +21,9 @@ The implemented pipeline is complete through evaluation hardening:
 6. Strict packet-only answer generation, deterministic citations/references,
    append-only answer traces, bounded planner-only sessions, and `ask`.
 7. FastAPI/UI routes with startup-constructed process-scoped planner and answer
-   models plus timeout-safe persistence boundaries.
+   models, timeout-safe persistence boundaries, server-verified session resume,
+   stale-history reconciliation, deduplicated structured answer rendering,
+   visible failure states, and bidirectional answer text.
 8. Fixture-isolated evaluation preparation, deterministic scoring, atomic state
    activation, drift validation, and redacted JSON/Markdown reports.
 9. Cross-cutting maintenance hardening: one canonical logical-index taxonomy and

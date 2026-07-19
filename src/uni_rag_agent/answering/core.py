@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -37,7 +38,20 @@ _MARKER_RE = re.compile(r"\[E[1-9][0-9]*\]")
 _MARKDOWN_PREFIX_RE = re.compile(
     r"^(?:>\s*|#{1,6}\s*|[-+*]\s+|\d+[.)]\s+)", re.IGNORECASE
 )
-_RENDERED_SECTION_RE = re.compile(r"^(?:references|limitations)\s*:", re.IGNORECASE)
+_VALIDATION_FAILURE_TEMPLATE = (
+    "Answer validation failed after {attempts} attempt(s); "
+    "no model answer was accepted."
+)
+_REFERENCES_HEADING = "References:"
+_LIMITATIONS_HEADING = "Limitations:"
+_REFERENCES_BOUNDARY = f"\n\n{_REFERENCES_HEADING}\n"
+_LIMITATIONS_BOUNDARY = f"\n\n{_LIMITATIONS_HEADING}\n"
+_RENDERED_SECTION_RE = re.compile(
+    rf"^(?:{re.escape(_REFERENCES_HEADING[:-1])}|"
+    rf"{re.escape(_LIMITATIONS_HEADING[:-1])})\s*:",
+    re.IGNORECASE,
+)
+_LOGGER = logging.getLogger(__name__)
 _MARKDOWN_WRAPPERS = (
     ("**", "**"),
     ("__", "__"),
@@ -135,6 +149,13 @@ def generate_answer(
             )
         except (AnswerModelError, TypeError, ValueError, json.JSONDecodeError) as exc:
             validation_errors = (str(exc) or "invalid answer model output",)
+            bounded_error = _bounded_validation_errors(validation_errors)
+            _LOGGER.warning(
+                "Answer validation rejected attempt %d/%d: %s",
+                attempt + 1,
+                retries + 1,
+                bounded_error[0] if bounded_error else "invalid answer model output",
+            )
             if attempt < retries:
                 continue
             return _safe_validation_refusal(
@@ -187,6 +208,37 @@ def format_citation(value: EvidenceItem | AnswerCitation) -> str:
     if isinstance(value, EvidenceItem):
         return f"{value.course} - {value.file} - {value.location.label}"
     raise TypeError("format_citation requires EvidenceItem or AnswerCitation")
+
+
+def answer_body(answer_text: str) -> str:
+    """Return rendered answer prose without structured tail sections."""
+    boundaries = [
+        position
+        for marker in (_REFERENCES_BOUNDARY, _LIMITATIONS_BOUNDARY)
+        if (position := answer_text.find(marker)) >= 0
+    ]
+    return answer_text[: min(boundaries)].strip() if boundaries else answer_text.strip()
+
+
+def is_validation_refusal(limitations: Sequence[str]) -> bool:
+    """Classify the deterministic validation-refusal limitation."""
+    prefix, suffix = _VALIDATION_FAILURE_TEMPLATE.split("{attempts}")
+    for value in limitations:
+        if not value.startswith(prefix) or not value.endswith(suffix):
+            continue
+        attempts = value[len(prefix) : len(value) - len(suffix)]
+        if attempts.isdigit() and int(attempts) > 0:
+            return True
+    return False
+
+
+def answer_status(answer: AnswerResult) -> str:
+    """Classify a fresh or rehydrated answer without leaking copy rules."""
+    if answer.citations:
+        return "answered"
+    if is_validation_refusal(answer.limitations):
+        return "validation_failed"
+    return "insufficient_evidence"
 
 
 def _contains_rendered_section(text: str) -> bool:
@@ -426,14 +478,14 @@ def _render_answer(
         lines.append(f"{paragraph.text.strip()} {' '.join(markers)}".strip())
     if ordered_refs:
         lines.append("")
-        lines.append("References:")
+        lines.append(_REFERENCES_HEADING)
         lines.extend(
             f"- [{citation.citation_id}] {format_citation(citation)}"
             for citation in ordered_refs
         )
     if limitations:
         lines.append("")
-        lines.append("Limitations:")
+        lines.append(_LIMITATIONS_HEADING)
         lines.extend(f"- {limitation}" for limitation in limitations)
     return "\n".join(lines)
 
@@ -522,7 +574,7 @@ def _safe_validation_refusal(
         (
             *packet.weaknesses,
             *prompt_limitations,
-            f"Answer validation failed after {attempts} attempt(s); no model answer was accepted.",
+            _VALIDATION_FAILURE_TEMPLATE.format(attempts=attempts),
         )
     )
     del errors  # Diagnostics stay in telemetry, never in persisted answer text.
@@ -538,13 +590,14 @@ def _safe_validation_refusal(
 def _render_plain_answer(paragraph: str, limitations: Sequence[str]) -> str:
     lines = [paragraph]
     if limitations:
-        lines.extend(("", "Limitations:", *(f"- {value}" for value in limitations)))
+        lines.extend(
+            ("", _LIMITATIONS_HEADING, *(f"- {value}" for value in limitations))
+        )
     return "\n".join(lines)
 
 
 def _paragraphs_from_rendered(answer_text: str) -> tuple[AnswerParagraph, ...]:
-    body = answer_text.split("\n\nReferences:", 1)[0]
-    body = body.split("\n\nLimitations:", 1)[0]
+    body = answer_body(answer_text)
     paragraphs: list[AnswerParagraph] = []
     for line in body.splitlines():
         markers = tuple(marker[1:-1] for marker in _MARKER_RE.findall(line))

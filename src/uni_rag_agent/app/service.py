@@ -179,6 +179,12 @@ class SessionRegistry:
             self._entries.move_to_end(session_id)
             return entry
 
+    def has_live_session(self, session_id: str) -> bool:
+        """Return whether planner context still exists without extending its TTL."""
+        with self._lock:
+            self._purge_expired(self._clock())
+            return session_id in self._entries
+
     def _purge_expired(self, now: float) -> None:
         expired = [
             session_id

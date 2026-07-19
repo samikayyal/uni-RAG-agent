@@ -9,9 +9,11 @@ index validation uses the taxonomy derived from `search_contracts.py`. A valid
 `unknown_or_unsupported` plan intentionally runs no backends. For supported
 plans, `retrieve()` executes deterministic metadata, FTS5 keyword, and Chroma
 semantic searches with hard planned filters and merges their provenance using
-unweighted Reciprocal Rank Fusion. All planned semantic queries pass through
-one `semantic_search_many()` request context, while each query still produces
-its own ordered result set and audit identity. Zero hits become coverage
+unweighted Reciprocal Rank Fusion. Multi-word planner keyword terms expand to
+deduplicated token-level OR matches rather than strict FTS phrases. All planned
+semantic queries pass through one `semantic_search_many()` request context,
+while each query still produces its own ordered result set and audit identity.
+Zero hits become coverage
 weaknesses; a backend/provider failure is fatal. Metadata may return file-level
 rows with no chunk id, but cannot become evidence text by itself.
 

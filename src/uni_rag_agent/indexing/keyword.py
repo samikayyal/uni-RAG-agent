@@ -110,24 +110,22 @@ def keyword_search_terms(
     indexes: Sequence[str] | None = None,
     top_k: int | None = None,
 ) -> list[RetrievalResult]:
-    """Search routed terms, retaining whitespace-containing phrases."""
+    """Search routed terms with token-level OR recall for planner phrases."""
     if courses is not None and not courses:
         return []
-    normalized_terms = tuple(
-        _normalize_fts_text(_strip_outer_quotes(term.strip()))
+    tokens = [
+        token
         for term in terms
         if term.strip()
-    )
-    if not normalized_terms:
+        for token in _query_tokens(_strip_outer_quotes(term.strip()))
+    ]
+    if not tokens:
         raise KeywordSearchError(
-            "Keyword query must contain at least one word or number."
+            "Keyword terms must contain at least one word or number."
         )
-    match_query = " OR ".join(
-        f'"{term.replace(chr(34), chr(34) * 2)}"' for term in normalized_terms
-    )
     return _keyword_search(
         config,
-        match_query=match_query,
+        match_query=_tokens_to_fts_query(tokens),
         courses=courses,
         indexes=indexes,
         top_k=top_k,
@@ -204,6 +202,15 @@ def _keyword_search(
 
 def keyword_query_terms(query: str) -> tuple[str, ...]:
     """Return the deduplicated plain-text terms used by keyword search."""
+    tokens = _query_tokens(query)
+    if not tokens:
+        raise KeywordSearchError(
+            "Keyword query must contain at least one word or number."
+        )
+    return tokens
+
+
+def _query_tokens(query: str) -> tuple[str, ...]:
     tokens: list[str] = []
     seen: set[str] = set()
     for match in _TOKEN_RE.finditer(unicodedata.normalize("NFKC", query)):
@@ -212,16 +219,25 @@ def keyword_query_terms(query: str) -> tuple[str, ...]:
         if normalized not in seen:
             seen.add(normalized)
             tokens.append(token)
-    if not tokens:
-        raise KeywordSearchError(
-            "Keyword query must contain at least one word or number."
-        )
     return tuple(tokens)
 
 
 def _plain_text_to_fts_query(query: str) -> str:
-    tokens = keyword_query_terms(query)
-    return " OR ".join(f'"{token}"' for token in tokens)
+    return _tokens_to_fts_query(keyword_query_terms(query))
+
+
+def _tokens_to_fts_query(tokens: Sequence[str]) -> str:
+    normalized_tokens: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        normalized = _normalize_fts_text(token)
+        key = normalized.casefold()
+        if key not in seen:
+            seen.add(key)
+            normalized_tokens.append(normalized)
+    return " OR ".join(
+        f'"{token.replace(chr(34), chr(34) * 2)}"' for token in normalized_tokens
+    )
 
 
 def _build_search_sql(

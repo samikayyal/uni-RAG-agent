@@ -15,6 +15,8 @@ from uni_rag_agent.answering import (
     AnswerParagraph,
     AnswerResult,
     AnswerSession,
+    answer_body,
+    answer_status,
     generate_answer,
     load_answer,
     store_answer,
@@ -273,6 +275,23 @@ def test_loaded_answer_can_be_revalidated_from_rendered_markers(tmp_path: Path) 
     assert validation.citations[0].citation_id == "E1"
 
 
+def test_answer_body_and_status_share_the_answering_render_contract(
+    tmp_path: Path,
+) -> None:
+    packet = _packet(tmp_path)
+    answered = generate_answer(packet, chat_model=_Chat(_valid_payload()))
+    refused = generate_answer(
+        packet,
+        chat_model=_Chat(_valid_payload(citation_ids=())),
+        config=replace(make_config(tmp_path), answer_max_retries=0),
+    )
+
+    assert answer_body(answered.answer_text) == "Grounded answer [E1]"
+    assert answer_status(answered) == "answered"
+    assert answer_body(refused.answer_text).startswith("I cannot provide")
+    assert answer_status(refused) == "validation_failed"
+
+
 def test_retry_count_and_zero_retry(tmp_path: Path) -> None:
     packet = _packet(tmp_path)
     invalid = {
@@ -304,6 +323,27 @@ def test_retry_count_and_zero_retry(tmp_path: Path) -> None:
     )
     assert len(zero_chat.prompts) == 1
     assert not result.citations
+
+
+def test_validation_rejections_log_only_bounded_diagnostics(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    packet = _packet(tmp_path)
+    invalid = {
+        "answer_paragraphs": [{"text": "private raw model prose", "citation_ids": []}],
+        "limitations": [],
+    }
+
+    with caplog.at_level("WARNING", logger="uni_rag_agent.answering.core"):
+        generate_answer(
+            packet,
+            chat_model=_Chat(invalid),
+            config=replace(make_config(tmp_path), answer_max_retries=0),
+        )
+
+    assert "paragraph 1 must cite at least one evidence item" in caplog.text
+    assert "private raw model prose" not in caplog.text
 
 
 def test_prompt_budget_omits_complete_items_and_preserves_packet_ids(

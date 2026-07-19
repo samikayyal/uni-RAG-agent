@@ -19,11 +19,13 @@ let packetLoadedFor = null;
 let sessions = loadSessions();
 let activeSessionId = localStorage.getItem(ACTIVE_KEY);
 if (activeSessionId && !findSession(activeSessionId)) activeSessionId = null;
+let activeSessionLive = activeSessionId ? null : false;
 
 detailsToggle.checked = localStorage.getItem(DETAILS_KEY) === "1";
 applyDetailsVisibility();
 renderSessionState();
 renderHistory();
+restoreActiveSession();
 
 detailsToggle.addEventListener("change", () => {
   localStorage.setItem(DETAILS_KEY, detailsToggle.checked ? "1" : "0");
@@ -32,10 +34,11 @@ detailsToggle.addEventListener("change", () => {
 
 newSessionButton.addEventListener("click", () => {
   activeSessionId = null;
+  activeSessionLive = false;
   current = null;
   packetLoadedFor = null;
   localStorage.removeItem(ACTIVE_KEY);
-  result.hidden = true;
+  clearResult();
   clearStatus();
   queryInput.value = "";
   renderSessionState();
@@ -45,10 +48,14 @@ newSessionButton.addEventListener("click", () => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (activeSessionLive === null) {
+    setStatus("Wait for the active-session check to finish before asking.", "working");
+    return;
+  }
   const query = queryInput.value.trim();
   if (!query) return;
   setBusy(true, "Searching your indexed materials…");
-  const sessionId = activeSessionId || generateSessionId();
+  const sessionId = activeSessionId && activeSessionLive ? activeSessionId : generateSessionId();
   try {
     current = await requestJson("/api/ask", {
       method: "POST",
@@ -57,11 +64,13 @@ form.addEventListener("submit", async (event) => {
     });
     packetLoadedFor = null;
     activeSessionId = sessionId;
+    activeSessionLive = true;
     localStorage.setItem(ACTIVE_KEY, sessionId);
     recordTurn(sessionId, query, current.answer_id);
     renderSessionState();
     renderHistory();
     renderAnswer(current, query);
+    queryInput.value = "";
     clearStatus();
     applyDetailsVisibility();
   } catch (error) {
@@ -115,7 +124,8 @@ function recordTurn(sessionId, query, answerId) {
 function renderSessionState() {
   const session = activeSessionId ? findSession(activeSessionId) : null;
   if (session) {
-    activeSessionLabel.textContent = `Continuing: ${truncate(session.title, 48)}`;
+    const prefix = activeSessionLive === true ? "Continuing" : "Checking session";
+    activeSessionLabel.textContent = `${prefix}: ${truncate(session.title, 48)}`;
     newSessionButton.hidden = false;
   } else {
     activeSessionLabel.textContent = "New session";
@@ -160,29 +170,103 @@ function renderHistory() {
 }
 
 async function resumeSession(session) {
+  clearResult();
   activeSessionId = session.id;
+  activeSessionLive = null;
   localStorage.setItem(ACTIVE_KEY, session.id);
   renderSessionState();
   renderHistory();
   const lastTurn = session.turns[session.turns.length - 1];
   if (!lastTurn?.answer_id) {
-    setStatus("Session resumed. Ask a follow-up question.", "working");
+    setBusy(true, "Checking whether the session is still active…");
+    try {
+      const state = await loadSessionState(session.id);
+      if (state?.live) {
+        activeSessionLive = true;
+        setStatus("Session resumed. Ask a follow-up question.", "working");
+      } else {
+        detachActiveSession();
+        setStatus("This session's server context has expired. Start a new session.", "error");
+      }
+    } finally {
+      setBusy(false);
+    }
+    renderSessionState();
+    renderHistory();
     queryInput.focus();
     return;
   }
   setBusy(true, "Loading the session's latest answer…");
+  const [stateResult, answerResult] = await Promise.allSettled([
+    requestJson(`/api/sessions/${session.id}`),
+    requestJson(`/api/answers/${lastTurn.answer_id}`),
+  ]);
   try {
-    current = await requestJson(`/api/answers/${lastTurn.answer_id}`);
+    if (answerResult.status === "rejected") {
+      throw answerResult.reason;
+    }
+    current = answerResult.value;
     packetLoadedFor = null;
     renderAnswer(current, lastTurn.query);
-    clearStatus();
+    if (stateResult.status === "fulfilled" && stateResult.value.live) {
+      activeSessionLive = true;
+      clearStatus();
+    } else {
+      detachActiveSession();
+      const message = stateResult.status === "rejected"
+        ? "The stored answer was loaded, but server session status could not be verified. Start a new session before asking another question."
+        : "The stored answer was loaded, but its server conversation context has expired. Start a new session before asking another question.";
+      setStatus(message, "error");
+    }
+    renderSessionState();
+    renderHistory();
     applyDetailsVisibility();
   } catch (error) {
-    setStatus(`Session resumed, but its stored answer could not be loaded: ${error.message}`, "error");
+    clearResult();
+    if (error.status === 404) {
+      removeSession(session.id);
+      setStatus("This local history entry no longer exists on the server, so it was removed.", "error");
+    } else {
+      detachActiveSession();
+      setStatus(`The session's stored answer could not be loaded: ${error.message}`, "error");
+    }
+    renderSessionState();
+    renderHistory();
   } finally {
     setBusy(false);
     queryInput.focus();
   }
+}
+
+async function restoreActiveSession() {
+  const session = activeSessionId ? findSession(activeSessionId) : null;
+  if (session) await resumeSession(session);
+}
+
+async function loadSessionState(sessionId) {
+  try {
+    return await requestJson(`/api/sessions/${sessionId}`);
+  } catch {
+    return null;
+  }
+}
+
+function detachActiveSession() {
+  activeSessionId = null;
+  activeSessionLive = false;
+  localStorage.removeItem(ACTIVE_KEY);
+}
+
+function removeSession(sessionId) {
+  sessions = sessions.filter((entry) => entry.id !== sessionId);
+  saveSessions();
+  if (activeSessionId === sessionId) detachActiveSession();
+}
+
+function clearResult() {
+  current = null;
+  packetLoadedFor = null;
+  result.hidden = true;
 }
 
 function truncate(text, max) {
@@ -228,7 +312,10 @@ async function requestJson(url, options = {}) {
   const response = await fetch(url, options);
   const body = await response.json();
   if (!response.ok) {
-    throw new Error(body?.error?.message || `Request failed (${response.status}).`);
+    const error = new Error(body?.error?.message || `Request failed (${response.status}).`);
+    error.status = response.status;
+    error.code = body?.error?.code;
+    throw error;
   }
   return body;
 }
@@ -237,14 +324,26 @@ async function requestJson(url, options = {}) {
 
 function renderAnswer(payload, queryText) {
   result.hidden = false;
-  document.querySelector("#asked-query").textContent = queryText || "";
+  const askedQuery = document.querySelector("#asked-query");
+  askedQuery.textContent = queryText || "";
+
+  const answerCard = document.querySelector("#answer-card");
+  const answerState = document.querySelector("#answer-state");
+  const answerStatus = payload.answer_status || "answered";
+  const isFailure = answerStatus !== "answered";
+  answerCard.classList.toggle("answer-failure", isFailure);
+  answerState.hidden = !isFailure;
+  answerState.textContent = answerStatus === "validation_failed"
+    ? "Answer generation failed validation"
+    : "Insufficient source evidence";
 
   const answerRoot = document.querySelector("#answer-text");
   answerRoot.replaceChildren();
-  const paragraphs = String(payload.answer_text || "").split(/\n{2,}/).filter((p) => p.trim());
+  const paragraphs = String(payload.answer_body).split(/\n+/).filter((p) => p.trim());
   (paragraphs.length ? paragraphs : ["No answer text was returned."]).forEach((text) => {
     const p = document.createElement("p");
     p.textContent = text.trim();
+    p.dir = "auto";
     answerRoot.append(p);
   });
 
@@ -269,6 +368,7 @@ function renderSources(references) {
   references.forEach((item) => {
     const chip = document.createElement("span");
     chip.className = "source-chip";
+    chip.dir = "auto";
     chip.title = `${item.course} · ${item.file_path} · ${item.location_label}`;
     const id = document.createElement("b");
     id.textContent = item.citation_id;
@@ -301,6 +401,7 @@ function renderCitations(citations) {
 }
 
 function renderLimitations(limitations) {
+  limitations = uniqueStrings(limitations);
   if (!limitations.length) {
     setPanel("#d-limitations", emptyMessage("No limitations reported."));
     return;
@@ -309,7 +410,11 @@ function renderLimitations(limitations) {
 }
 
 function renderCoverage(coverage) {
-  setPanel("#d-coverage", definitionGrid(coverage));
+  const projected = { ...coverage };
+  const unshownWeaknesses = additionalWeaknesses(projected.weaknesses || []);
+  delete projected.weaknesses;
+  if (unshownWeaknesses.length) projected.additional_weaknesses = unshownWeaknesses;
+  setPanel("#d-coverage", definitionGrid(projected));
 }
 
 function renderPlan(packet) {
@@ -331,8 +436,9 @@ function renderEvidencePacket(packet) {
   const fragment = document.createDocumentFragment();
   const items = packet.evidence || [];
 
-  if (packet.weaknesses?.length) {
-    fragment.append(subheading("Weaknesses"), stringList(packet.weaknesses));
+  const unshownWeaknesses = additionalWeaknesses(packet.weaknesses || []);
+  if (unshownWeaknesses.length) {
+    fragment.append(subheading("Additional weaknesses"), stringList(unshownWeaknesses));
   }
   if (packet.answer_constraints?.length) {
     fragment.append(subheading("Answer constraints"), stringList(packet.answer_constraints));
@@ -458,6 +564,16 @@ function stringList(items) {
     ul.append(li);
   });
   return ul;
+}
+
+function uniqueStrings(items) {
+  return [...new Set((items || []).map((item) => String(item).trim()).filter(Boolean))];
+}
+
+function additionalWeaknesses(weaknesses) {
+  const displayedLimitations = new Set(uniqueStrings(current?.limitations || []));
+  return uniqueStrings(weaknesses)
+    .filter((weakness) => !displayedLimitations.has(weakness));
 }
 
 function badge(text, variant) {

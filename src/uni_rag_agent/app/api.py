@@ -19,6 +19,8 @@ from ..answering import (
     AnswerGenerationError,
     AnswerResult,
     AnswerSession,
+    answer_body,
+    answer_status,
     generate_answer,
     load_answer,
     store_answer,
@@ -44,6 +46,7 @@ from .service import (
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PositiveId = Annotated[int, ApiPath(gt=0)]
+SessionId = Annotated[str, ApiPath(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 
 
 @dataclass(frozen=True)
@@ -223,6 +226,13 @@ def create_app(
             raise _domain_error(exc, lookup=False, trace_ids=gate.trace_ids) from exc
         return _public_answer(answer, coverage)
 
+    @app.get("/api/sessions/{session_id}")
+    async def session_status(session_id: SessionId) -> dict[str, object]:
+        return {
+            "session_id": session_id,
+            "live": await asyncio.to_thread(registry.has_live_session, session_id),
+        }
+
     @app.get("/api/search-runs/{search_run_id}/coverage")
     async def coverage(search_run_id: PositiveId) -> dict[str, object]:
         config = _load_config(config_loader)
@@ -339,6 +349,8 @@ def _public_answer(answer: AnswerResult, coverage: Any) -> dict[str, object]:
         "search_run_id": answer.search_run_id,
         "evidence_packet_id": answer.evidence_packet_id,
         "answer_text": answer.answer_text,
+        "answer_body": answer_body(answer.answer_text),
+        "answer_status": answer_status(answer),
         "citations": [item.as_safe_dict() for item in answer.citations],
         "references": references,
         "limitations": list(answer.limitations),
