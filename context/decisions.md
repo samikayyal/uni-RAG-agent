@@ -217,7 +217,11 @@ evaluation, upload, and reset remain CLI operations. Cached models and sessions
 disappear on process restart. The browser must verify process-session liveness
 before presenting persisted client history as an active continuing conversation;
 persisted answers may still be shown after context expiry, but are detached from
-the next ask.
+the next ask. A browser-generated active request id may expose only transient
+phase/elapsed telemetry and a cancellation action. Cancellation must use the
+same persistence gate as timeout so an in-flight provider call can unwind
+without appending an answer; this transient telemetry is not retained as
+history, and the generic busy message remains valid when telemetry is absent.
 
 ### DEC-037/038 — Isolated, safe evaluation
 

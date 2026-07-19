@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 
@@ -69,6 +69,7 @@ def build_evidence(
     model: str | None = None,
     *,
     chat_model: object | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> EvidenceBuildResult:
     """Run the mandatory planner/retriever and persist one evidence packet."""
     recorder = _SearchRunRecorder(config)
@@ -80,6 +81,7 @@ def build_evidence(
             model=model,
             chat_model=chat_model,
             recorder=recorder,
+            progress_callback=progress_callback,
         )
     except Exception as exc:  # noqa: BLE001 - retain persisted run identity
         run_id = recorder.search_run_id if recorder.search_run_id > 0 else None

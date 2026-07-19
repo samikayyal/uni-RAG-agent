@@ -25,7 +25,8 @@ The implemented pipeline is complete through evaluation hardening:
 7. FastAPI/UI routes with startup-constructed process-scoped planner and answer
    models, timeout-safe persistence boundaries, server-verified session resume,
    stale-history reconciliation, deduplicated structured answer rendering,
-   visible failure states, and bidirectional answer text.
+   visible failure states, bidirectional answer text, active ask phase/elapsed
+   feedback, and safe cancellation that prevents late answer persistence.
 8. Fixture-isolated evaluation preparation, deterministic scoring, atomic state
    activation, drift validation, and redacted JSON/Markdown reports.
 9. Cross-cutting maintenance hardening: one canonical logical-index taxonomy and

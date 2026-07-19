@@ -185,6 +185,12 @@ textarea::placeholder { color: var(--muted); opacity: .8; }
   margin-top: 6px;
 }
 
+.ask-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .active-session {
   display: flex;
   align-items: center;
@@ -219,6 +225,8 @@ textarea::placeholder { color: var(--muted); opacity: .8; }
 }
 .ghost:hover { background: var(--accent-soft); border-color: var(--accent); }
 .ghost:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ghost.cancel { color: var(--error-ink); }
+.ghost.cancel:hover { background: var(--error-bg); border-color: var(--error-ink); }
 
 #ask-button {
   flex: none;

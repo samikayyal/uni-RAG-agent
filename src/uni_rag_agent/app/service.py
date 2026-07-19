@@ -85,31 +85,54 @@ class ModelRegistry:
 
 
 class PersistenceGate:
-    """Make timeout cancellation atomic with answer persistence."""
+    """Make request cancellation atomic with answer persistence."""
 
     def __init__(self) -> None:
         self._lock = Lock()
         self._cancelled = False
+        self._cancel_reason: str | None = None
         self._committed = False
         self._search_run_id: int | None = None
         self._evidence_packet_id: int | None = None
+        self._phase: str | None = None
+        self._started_at = monotonic()
 
     @property
     def trace_ids(self) -> tuple[int | None, int | None]:
         with self._lock:
             return self._search_run_id, self._evidence_packet_id
 
+    @property
+    def cancel_reason(self) -> str | None:
+        with self._lock:
+            return self._cancel_reason
+
+    def progress(self) -> dict[str, object]:
+        """Return non-sensitive in-memory request progress for the web UI."""
+        with self._lock:
+            return {
+                "phase": self._phase,
+                "elapsed_seconds": monotonic() - self._started_at,
+                "cancelled": self._cancelled,
+            }
+
+    def set_phase(self, phase: str) -> None:
+        with self._lock:
+            if not self._cancelled:
+                self._phase = phase
+
     def record_evidence(self, search_run_id: int, evidence_packet_id: int) -> None:
         with self._lock:
             self._search_run_id = search_run_id
             self._evidence_packet_id = evidence_packet_id
 
-    def cancel(self) -> bool:
+    def cancel(self, reason: str = "cancelled") -> bool:
         """Cancel before commit, returning false when commit already completed."""
         with self._lock:
             if self._committed:
                 return False
             self._cancelled = True
+            self._cancel_reason = reason
             return True
 
     def commit(self, action: Callable[[], None]) -> None:
@@ -119,6 +142,36 @@ class PersistenceGate:
                 raise AskCancelled("ask request timed out before answer persistence")
             action()
             self._committed = True
+
+
+class ActiveAskRegistry:
+    """Expose active request progress and cancellation without retaining history."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._gates: dict[str, PersistenceGate] = {}
+
+    def register(self, request_id: str, gate: PersistenceGate) -> bool:
+        with self._lock:
+            if request_id in self._gates:
+                return False
+            self._gates[request_id] = gate
+            return True
+
+    def complete(self, request_id: str, gate: PersistenceGate) -> None:
+        with self._lock:
+            if self._gates.get(request_id) is gate:
+                del self._gates[request_id]
+
+    def progress(self, request_id: str) -> dict[str, object] | None:
+        with self._lock:
+            gate = self._gates.get(request_id)
+        return gate.progress() if gate is not None else None
+
+    def cancel(self, request_id: str) -> bool | None:
+        with self._lock:
+            gate = self._gates.get(request_id)
+        return gate.cancel() if gate is not None else None
 
 
 @dataclass
@@ -265,6 +318,7 @@ class AskOrchestrator:
             query,
             conversation_context=context,
             chat_model=planner_model,
+            progress_callback=gate.set_phase,
         )
         gate.record_evidence(
             evidence_result.search_run_id,
@@ -283,6 +337,7 @@ class AskOrchestrator:
             if self._model_registry is not None and evidence_result.packet.evidence
             else None
         )
+        gate.set_phase("answer_generation")
         answer = self._generate_answer(
             evidence_result.packet,
             conversation_context=context,

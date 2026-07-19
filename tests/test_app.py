@@ -417,6 +417,70 @@ def test_timeout_returns_504_and_never_persists_late_answer(tmp_path: Path) -> N
     assert stored == []
 
 
+def test_active_ask_reports_phase_and_cancel_prevents_late_persistence(
+    tmp_path: Path,
+) -> None:
+    config = replace(make_config(tmp_path), ask_timeout_seconds=2)
+    answer_started = Event()
+    release_answer = Event()
+    stored: list[bool] = []
+    phases: list[str] = []
+    base_services = _services()
+
+    def staged_build(*args, progress_callback=None, **kwargs):
+        assert progress_callback is not None
+        for phase in ("planning", "keyword_search", "semantic_search"):
+            phases.append(phase)
+            progress_callback(phase)
+        return base_services.build_evidence(*args, **kwargs)
+
+    def delayed_answer(*args, **kwargs):
+        answer_started.set()
+        assert release_answer.wait(timeout=2)
+        return _answer()
+
+    services = replace(
+        base_services,
+        build_evidence=staged_build,
+        generate_answer=delayed_answer,
+        store_answer=lambda *args, commit_guard, **kwargs: (
+            commit_guard(lambda: stored.append(True)) or 33
+        ),
+    )
+    client = TestClient(create_app(config_loader=lambda: config, services=services))
+    response: list[object] = []
+    request_id = "progress-cancel-test"
+
+    worker = Thread(
+        target=lambda: response.append(
+            client.post(
+                "/api/ask",
+                json={"query": "slow question", "request_id": request_id},
+            )
+        )
+    )
+    worker.start()
+    assert answer_started.wait(timeout=1)
+
+    progress = client.get(f"/api/asks/{request_id}/progress")
+    assert progress.status_code == 200
+    assert progress.json()["phase"] == "answer_generation"
+    assert progress.json()["elapsed_seconds"] >= 0
+    assert phases == ["planning", "keyword_search", "semantic_search"]
+
+    cancelled = client.post(f"/api/asks/{request_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json() == {"request_id": request_id, "cancelled": True}
+
+    release_answer.set()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert response[0].status_code == 499
+    assert response[0].json()["error"]["code"] == "ask_cancelled"
+    assert stored == []
+    assert client.get(f"/api/asks/{request_id}/progress").status_code == 404
+
+
 def test_answer_provider_failure_reports_persisted_packet_without_storing_answer(
     tmp_path: Path,
 ) -> None:
@@ -648,4 +712,5 @@ def test_static_ui_loads_as_question_answering_screen() -> None:
     assert response.status_code == 200
     assert "Ask your university materials" in response.text
     assert "ask-form" in response.text
+    assert "cancel-request" in response.text
     assert "ingestion" not in response.text.lower()

@@ -36,6 +36,7 @@ from ..retrieval import (
 )
 from ..storage import StorageError
 from .service import (
+    ActiveAskRegistry,
     AskCancelled,
     AskOrchestrator,
     ModelRegistry,
@@ -47,6 +48,7 @@ from .service import (
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PositiveId = Annotated[int, ApiPath(gt=0)]
 SessionId = Annotated[str, ApiPath(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
+RequestId = Annotated[str, ApiPath(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,10 @@ class AskRequest(BaseModel):
         default=None,
         pattern=r"^[A-Za-z0-9_-]{1,128}$",
     )
+    request_id: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9_-]{1,128}$",
+    )
 
 
 class ApiError(RuntimeError):
@@ -86,6 +92,7 @@ def create_app(
     session_registry: SessionRegistry | None = None,
     enforce_model_config: bool | None = None,
     model_registry: ModelRegistry | None = None,
+    ask_registry: ActiveAskRegistry | None = None,
     warm_models: bool = True,
 ) -> FastAPI:
     """Create an app with injectable services and cached model instances."""
@@ -116,6 +123,7 @@ def create_app(
         else enforce_model_config,
         model_registry=resolved_model_registry,
     )
+    active_asks = ask_registry or ActiveAskRegistry()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -184,6 +192,14 @@ def create_app(
     async def ask(payload: AskRequest) -> dict[str, object]:
         config = _load_config(config_loader)
         gate = PersistenceGate()
+        if payload.request_id is not None and not active_asks.register(
+            payload.request_id, gate
+        ):
+            raise ApiError(
+                409,
+                "request_in_progress",
+                "An ask request with this request id is already active.",
+            )
         task = asyncio.create_task(
             asyncio.to_thread(
                 orchestrator.ask,
@@ -193,13 +209,17 @@ def create_app(
                 gate,
             )
         )
+        if payload.request_id is not None:
+            task.add_done_callback(
+                lambda _: active_asks.complete(payload.request_id or "", gate)
+            )
         try:
             answer, coverage = await asyncio.wait_for(
                 asyncio.shield(task),
                 timeout=config.ask_timeout_seconds,
             )
         except TimeoutError:
-            if await asyncio.to_thread(gate.cancel):
+            if await asyncio.to_thread(gate.cancel, "timeout"):
                 task.add_done_callback(_consume_task_exception)
                 _, packet_id = gate.trace_ids
                 message = "The ask request exceeded its configured timeout."
@@ -215,6 +235,8 @@ def create_app(
                 )
             answer, coverage = await task
         except AskCancelled:
+            if gate.cancel_reason == "cancelled":
+                raise ApiError(499, "ask_cancelled", "The ask request was cancelled.")
             raise ApiError(504, "ask_timeout", "The ask request timed out.")
         except SessionCapacityError:
             raise ApiError(
@@ -225,6 +247,20 @@ def create_app(
         except Exception as exc:
             raise _domain_error(exc, lookup=False, trace_ids=gate.trace_ids) from exc
         return _public_answer(answer, coverage)
+
+    @app.get("/api/asks/{request_id}/progress")
+    async def ask_progress(request_id: RequestId) -> dict[str, object]:
+        progress = active_asks.progress(request_id)
+        if progress is None:
+            raise ApiError(404, "not_found", "The requested resource does not exist.")
+        return {"request_id": request_id, **progress}
+
+    @app.post("/api/asks/{request_id}/cancel")
+    async def cancel_ask(request_id: RequestId) -> dict[str, object]:
+        cancelled = active_asks.cancel(request_id)
+        if cancelled is None:
+            raise ApiError(404, "not_found", "The requested resource does not exist.")
+        return {"request_id": request_id, "cancelled": cancelled}
 
     @app.get("/api/sessions/{session_id}")
     async def session_status(session_id: SessionId) -> dict[str, object]:

@@ -139,6 +139,29 @@ def test_invalid_evidence_budget_fails_clearly(tmp_path: Path, value: str) -> No
         load_config(repo_root=tmp_path, env_file=env_file)
 
 
+def test_evidence_build_reports_planning_and_search_phases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_initialized_config(
+        tmp_path,
+        embedding_model="BAAI/bge-m3",
+        llm_provider="ollama",
+        llm_model="test-planner",
+    )
+    _patch_retrieval(monkeypatch, _plan())
+    phases: list[str] = []
+
+    build_evidence(
+        config,
+        "Explain BM25",
+        model="BAAI/bge-m3",
+        progress_callback=phases.append,
+    )
+
+    assert phases == ["planning", "keyword_search", "semantic_search"]
+
+
 def test_legacy_router_column_migrates_without_changing_rows(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     ensure_data_dirs(config)

@@ -17,20 +17,27 @@ is 120 seconds; evidence stored before timeout remains inspectable, and no late
 answer is appended. The browser reloads the active session's latest persisted
 answer on startup and checks server-side session liveness before describing it
 as continuing. Expired process context is detached from the stored answer, and
-missing persisted answers prune their stale client-history entries.
+missing persisted answers prune their stale client-history entries. While an
+ask is active, the browser displays elapsed time and the live planning, keyword
+search, semantic-search, or answer-generation phase when that telemetry is
+available; it retains the generic search message when it is not. The user can
+cancel the active ask, which abandons the response and prevents a late answer
+write while in-flight provider work unwinds.
 
 ## Public entry points
 
 - `uv run -m uni_rag_agent app serve [--host 127.0.0.1] [--port 8000]`.
 - Routes: `GET /health`, `GET /config`, `POST /api/ask`,
+  `GET /api/asks/{request_id}/progress`,
+  `POST /api/asks/{request_id}/cancel`,
   `GET /api/sessions/{session_id}`,
   `GET /api/search-runs/{search_run_id}/coverage`,
   `GET /api/evidence-packets/{evidence_packet_id}`, and
   `GET /api/answers/{answer_id}`. `/` serves the UI and `/static` serves its
   assets.
 - `POST /api/ask` accepts a nonempty query (up to 10,000 characters) and an
-  optional alphanumeric/underscore/hyphen session id. Provider/model overrides
-  are not accepted through HTTP.
+  optional alphanumeric/underscore/hyphen session id and client-generated
+  request id. Provider/model overrides are not accepted through HTTP.
 
 ## Source, tests, and artifacts
 
@@ -63,7 +70,9 @@ missing persisted answers prune their stale client-history entries.
   failures 500. Successful insufficient-evidence answers remain 200.
 - A timed-out/cancelled request cannot append an answer after the response;
   `PersistenceGate` protects the final write while preserving an evidence packet
-  already committed.
+  already committed. Active-request progress is transient, contains only a
+  phase, elapsed seconds, and cancellation state, and disappears when work
+  finishes; it is not persisted or exposed as session history.
 
 Binding decisions: [DEC-036/017](../decisions.md#dec-036017--thin-local-web-app-with-process-scoped-models),
 [DEC-035/020](../decisions.md#dec-035020--strict-packet-only-answers-and-citations),

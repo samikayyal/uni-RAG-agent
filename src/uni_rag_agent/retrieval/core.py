@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -89,6 +89,7 @@ def _execute_retrieval(
     *,
     chat_model: object | None = None,
     recorder: _SearchRunRecorder | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> _RetrievalExecution:
     """Execute planner, backends, and RRF with an optional persistence seam."""
     normalized_query = normalize_query(query)
@@ -99,6 +100,7 @@ def _execute_retrieval(
         details = "; ".join(storage.diagnostics) or "storage is not ready"
         raise StorageError(f"Retrieval storage check failed: {details}")
 
+    _report_progress(progress_callback, "planning")
     query_plan = plan_query(
         config,
         query,
@@ -150,6 +152,7 @@ def _execute_retrieval(
         if recorder is not None:
             recorder.record_result_set(result_sets[-1])
 
+        _report_progress(progress_callback, "keyword_search")
         keyword_results = keyword_search_terms(
             config,
             query_plan.keyword_terms,
@@ -167,6 +170,7 @@ def _execute_retrieval(
         if recorder is not None:
             recorder.record_result_set(result_sets[-1])
 
+        _report_progress(progress_callback, "semantic_search")
         semantic_result_sets = semantic_search_many(
             config,
             query_plan.semantic_queries,
@@ -265,6 +269,15 @@ def _mark_recorder_failed(
         # Preserve the original retrieval/storage failure. The recorder owns
         # its own best-effort diagnostics and must not mask it.
         return
+
+
+def _report_progress(
+    progress_callback: Callable[[str], None] | None,
+    phase: str,
+) -> None:
+    """Report an optional UI-only phase without affecting retrieval behavior."""
+    if progress_callback is not None:
+        progress_callback(phase)
 
 
 def _recorder_search_run_id(recorder: _SearchRunRecorder | None) -> int | None:

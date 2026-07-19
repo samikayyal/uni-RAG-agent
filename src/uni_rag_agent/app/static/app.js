@@ -9,6 +9,7 @@ const historySection = document.querySelector("#history");
 const historyList = document.querySelector("#history-list");
 const activeSessionLabel = document.querySelector("#active-session-label");
 const newSessionButton = document.querySelector("#new-session");
+const cancelRequestButton = document.querySelector("#cancel-request");
 
 const SESSIONS_KEY = "uni-rag-sessions";
 const ACTIVE_KEY = "uni-rag-active-session";
@@ -20,6 +21,7 @@ let sessions = loadSessions();
 let activeSessionId = localStorage.getItem(ACTIVE_KEY);
 if (activeSessionId && !findSession(activeSessionId)) activeSessionId = null;
 let activeSessionLive = activeSessionId ? null : false;
+let activeRequest = null;
 
 detailsToggle.checked = localStorage.getItem(DETAILS_KEY) === "1";
 applyDetailsVisibility();
@@ -54,13 +56,26 @@ form.addEventListener("submit", async (event) => {
   }
   const query = queryInput.value.trim();
   if (!query) return;
+  const requestId = generateRequestId();
+  const controller = new AbortController();
+  const request = {
+    requestId,
+    controller,
+    cancelled: false,
+    progressTimer: null,
+    elapsedTimer: null,
+    startedAt: Date.now(),
+  };
+  activeRequest = request;
   setBusy(true, "Searching your indexed materials…");
+  startRequestFeedback(request);
   const sessionId = activeSessionId && activeSessionLive ? activeSessionId : generateSessionId();
   try {
     current = await requestJson("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, session_id: sessionId }),
+      body: JSON.stringify({ query, session_id: sessionId, request_id: requestId }),
+      signal: controller.signal,
     });
     packetLoadedFor = null;
     activeSessionId = sessionId;
@@ -74,9 +89,33 @@ form.addEventListener("submit", async (event) => {
     clearStatus();
     applyDetailsVisibility();
   } catch (error) {
-    setStatus(error.message, "error");
+    if (!request.cancelled) setStatus(error.message, "error");
   } finally {
+    stopRequestFeedback(request);
+    if (activeRequest === request) activeRequest = null;
     setBusy(false);
+  }
+});
+
+cancelRequestButton.addEventListener("click", async () => {
+  const request = activeRequest;
+  if (!request) return;
+  cancelRequestButton.disabled = true;
+  try {
+    const result = await requestJson(`/api/asks/${request.requestId}/cancel`, {
+      method: "POST",
+    });
+    if (result.cancelled) {
+      request.cancelled = true;
+      setStatus("Request cancelled. Any in-flight work will finish without saving an answer.", "working");
+      request.controller.abort();
+    } else {
+      setStatus("The request completed before it could be cancelled.", "working");
+    }
+  } catch (error) {
+    setStatus(`Could not cancel the request: ${error.message}`, "error");
+  } finally {
+    if (activeRequest === request && !request.cancelled) cancelRequestButton.disabled = false;
   }
 });
 
@@ -107,6 +146,10 @@ function findSession(id) {
 
 function generateSessionId() {
   return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function generateRequestId() {
+  return `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function recordTurn(sessionId, query, answerId) {
@@ -318,6 +361,47 @@ async function requestJson(url, options = {}) {
     throw error;
   }
   return body;
+}
+
+function startRequestFeedback(request) {
+  cancelRequestButton.hidden = false;
+  cancelRequestButton.disabled = false;
+  renderRequestFeedback(request);
+  request.elapsedTimer = window.setInterval(() => renderRequestFeedback(request), 1000);
+  request.progressTimer = window.setInterval(async () => {
+    try {
+      const progress = await requestJson(`/api/asks/${request.requestId}/progress`);
+      if (activeRequest === request && !request.cancelled) {
+        request.progress = progress;
+        renderRequestFeedback(request);
+      }
+    } catch {
+      // Preserve the generic status when a server cannot provide telemetry.
+    }
+  }, 1000);
+}
+
+function stopRequestFeedback(request) {
+  window.clearInterval(request.elapsedTimer);
+  window.clearInterval(request.progressTimer);
+  if (activeRequest === request) cancelRequestButton.hidden = true;
+}
+
+function renderRequestFeedback(request) {
+  if (activeRequest !== request || request.cancelled) return;
+  const elapsed = request.progress?.elapsed_seconds ?? (Date.now() - request.startedAt) / 1000;
+  const phaseLabels = {
+    planning: "Planning the search",
+    keyword_search: "Running keyword search",
+    semantic_search: "Running semantic search",
+    answer_generation: "Generating the answer",
+  };
+  const message = phaseLabels[request.progress?.phase] || "Searching your indexed materials…";
+  setStatus(`${message} (${formatElapsed(elapsed)})`, "working");
+}
+
+function formatElapsed(seconds) {
+  return `${Math.max(0, Math.floor(Number(seconds) || 0))}s`;
 }
 
 /* ---------- simple view ---------- */
@@ -635,6 +719,10 @@ function setBusy(busy, message = "") {
   askButton.disabled = busy;
   askButton.classList.toggle("busy", busy);
   askButton.querySelector(".button-label").textContent = busy ? "Working…" : "Ask";
+  if (!busy) {
+    cancelRequestButton.hidden = true;
+    cancelRequestButton.disabled = false;
+  }
   if (message) setStatus(message, "working");
 }
 
