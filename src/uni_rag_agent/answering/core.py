@@ -35,6 +35,10 @@ from .providers import build_answer_chat_model
 build_chat_model = build_answer_chat_model
 
 _MARKER_RE = re.compile(r"\[E[1-9][0-9]*\]")
+_OUTER_MARKDOWN_FENCE_RE = re.compile(
+    r"\A[ \t\r\n]*```markdown[ \t]*\r?\n(?P<body>.*?)\r?\n```[ \t]*[ \t\r\n]*\Z",
+    re.DOTALL,
+)
 _MARKDOWN_PREFIX_RE = re.compile(
     r"^(?:>\s*|#{1,6}\s*|[-+*]\s+|\d+[.)]\s+)", re.IGNORECASE
 )
@@ -125,7 +129,9 @@ def generate_answer(
             ) from exc
         try:
             payload = _decode_response(response)
-            paragraphs = parse_model_answer(payload)
+            paragraphs = _normalize_paragraph_markdown_fences(
+                parse_model_answer(payload)
+            )
             model_limitations = parse_model_limitations(payload)
             validation = _validate_paragraphs(
                 paragraphs,
@@ -185,7 +191,9 @@ def validate_answer_citations(
         return CitationValidationResult(False, ("packet must be an EvidencePacket",))
     if isinstance(answer, Mapping):
         try:
-            paragraphs = parse_model_answer(answer)
+            paragraphs = _normalize_paragraph_markdown_fences(
+                parse_model_answer(answer)
+            )
         except Exception as exc:  # noqa: BLE001 - diagnostics are returned
             return CitationValidationResult(False, (str(exc),))
     elif isinstance(answer, AnswerResult):
@@ -279,6 +287,7 @@ def _decode_response(response: object) -> Mapping[str, object]:
         )
     if not isinstance(content, str):
         raise AnswerModelError("answer model output must be a JSON object")
+    content = _unwrap_outer_markdown_fence(content)
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as exc:
@@ -286,6 +295,23 @@ def _decode_response(response: object) -> Mapping[str, object]:
     if not isinstance(payload, Mapping):
         raise AnswerModelError("answer model output must be one JSON object")
     return payload
+
+
+def _normalize_paragraph_markdown_fences(
+    paragraphs: Sequence[AnswerParagraph],
+) -> tuple[AnswerParagraph, ...]:
+    return tuple(
+        AnswerParagraph(
+            text=_unwrap_outer_markdown_fence(paragraph.text),
+            citation_ids=paragraph.citation_ids,
+        )
+        for paragraph in paragraphs
+    )
+
+
+def _unwrap_outer_markdown_fence(value: str) -> str:
+    fence_match = _OUTER_MARKDOWN_FENCE_RE.fullmatch(value)
+    return fence_match.group("body") if fence_match is not None else value
 
 
 def _validate_paragraphs(
@@ -426,11 +452,12 @@ def _answer_prompt(
             "packet_weaknesses": list(packet.weaknesses),
             "answer_constraints": list(packet.answer_constraints),
             "rules": [
-                "Use only supplied evidence; do not use memory.",
-                "Every paragraph must cite one or more allowed citation ids.",
-                "Citation ids may use canonical E<n> or the supplied chunk:<id> alias.",
-                "Do not render References, Limitations, paths, Markdown links, or citation markers.",
-                "Return exactly the schema fields and no markdown fences.",
+                "Answer only from supplied evidence, not memory.",
+                "Write concise Markdown syntax in short, claim-focused paragraphs.",
+                "Each paragraph must cite the smallest allowed evidence-id set that directly supports its claims; omit related or redundant evidence.",
+                "Use canonical E<n> or supplied chunk:<id> citation ids.",
+                "Do not render References, Limitations, paths, links, citation markers, or fences.",
+                "Return exactly the schema fields as one JSON object.",
             ],
         },
         ensure_ascii=False,

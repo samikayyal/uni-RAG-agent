@@ -189,8 +189,12 @@ identifiers.
 required only for non-empty packets. Prompt size is bounded (16,000 token
 default); empty/budget-exhausted packets bypass the provider. Invalid output is
 retried according to configuration then becomes a safe no-citation refusal;
-provider failure creates no answer row. Session context is bounded and planner-
-only.
+provider failure creates no answer row. Answer paragraphs use Markdown syntax,
+remain short and claim-focused, and request only the smallest directly supporting
+citation set. A whole-response lowercase `markdown` fence is removed by an
+anchored deterministic normalization before strict JSON parsing, and the same
+normalization applies independently to each paragraph text field. Other response
+wrappers remain invalid. Session context is bounded and planner-only.
 
 ## Application and evaluation
 

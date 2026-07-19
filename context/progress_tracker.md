@@ -18,8 +18,10 @@ The implemented pipeline is complete through evaluation hardening:
 5. Mandatory LLM query planning, metadata/keyword/semantic orchestration, RRF
    provenance, non-persisting `retrieve` execution with CLI run telemetry, and
    persisted evidence packets and coverage.
-6. Strict packet-only answer generation, deterministic citations/references,
-   append-only answer traces, bounded planner-only sessions, and `ask`.
+6. Strict packet-only Markdown answer generation with short claim-focused
+   paragraphs, minimal direct citations, deterministic response/paragraph fence
+   normalization, deterministic citations/references, append-only answer traces,
+   bounded planner-only sessions, and `ask`.
 7. FastAPI/UI routes with startup-constructed process-scoped planner and answer
    models, timeout-safe persistence boundaries, server-verified session resume,
    stale-history reconciliation, deduplicated structured answer rendering,

@@ -13,15 +13,21 @@ rows remain coverage/audit records. `load_evidence_packet()` and
 
 `generate_answer()` receives only a packet and separate answer-model settings.
 The model must return one JSON object with `answer_paragraphs` and
-`limitations`. Application validation maps packet positions to stable `[E1]`
-markers and references, rejects citation/lookalike prose, and reports omitted
-evidence as limitations. Empty evidence or a budget that fits no item yields a
-deterministic no-provider answer. `store_answer()` reloads and validates the
-packet before appending to `answers`; prompts, conversations, keys, and invalid
-raw output are never persisted. `AnswerSession` keeps bounded complete turns
-for the planner only. `answer_body()` owns the rendered prose/tail boundary,
-and `answer_status()` owns deterministic outcome classification for both fresh
-and rehydrated answers. `ask` composes build plus answer.
+`limitations`. Paragraph text uses Markdown syntax and is prompted toward
+short, claim-focused paragraphs with the smallest directly supporting citation
+set. Application validation maps packet positions to stable `[E1]` markers and
+references, rejects citation/lookalike prose, and reports omitted evidence as
+limitations. A whole response or individual paragraph text wrapped entirely in
+a lowercase `markdown` code fence is deterministically unwrapped with an
+anchored regular expression. Other response wrappers stay invalid, while
+non-matching fences inside paragraph content remain ordinary Markdown content.
+Empty evidence or a budget that fits no item yields a deterministic no-provider
+answer. `store_answer()` reloads and validates the packet before appending to
+`answers`; prompts, conversations, keys, and invalid raw output are never
+persisted. `AnswerSession` keeps bounded complete turns for the planner only.
+`answer_body()` owns the rendered prose/tail boundary, and `answer_status()`
+owns deterministic outcome classification for both fresh and rehydrated
+answers. `ask` composes build plus answer.
 
 ## Public entry points
 

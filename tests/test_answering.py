@@ -206,7 +206,104 @@ def test_generate_answer_renders_stable_citation_and_structured_reference(
     assert result.citations[0].evidence_index == 1
     assert result.limitations == ("weak packet",)
     assert "secret context" not in chat.prompts[0]
+    prompt = json.loads(chat.prompts[0])
+    assert any("Markdown syntax" in rule for rule in prompt["rules"])
+    assert any("smallest allowed evidence-id set" in rule for rule in prompt["rules"])
+    assert any("directly support" in rule for rule in prompt["rules"])
     assert validate_answer_citations(result, packet)
+
+
+def test_outer_markdown_fence_is_removed_before_strict_json_parsing(
+    tmp_path: Path,
+) -> None:
+    packet = _packet(tmp_path)
+    payload = _valid_payload(
+        text="## Overview\n\n**MapReduce** processes data in parallel."
+    )
+
+    class MarkdownFencedChat:
+        model_name = "markdown-fenced-answer"
+
+        def invoke(self, prompt: str) -> object:
+            del prompt
+            body = json.dumps(payload)
+            return SimpleNamespace(content=f" \r\n```markdown\r\n{body}\r\n```\r\n")
+
+    result = generate_answer(packet, chat_model=MarkdownFencedChat())
+
+    assert result.paragraphs[0].text.startswith("## Overview")
+    assert "**MapReduce** processes data in parallel. [E1]" in result.answer_text
+    assert result.citations[0].citation_id == "E1"
+
+
+def test_outer_markdown_fence_is_removed_from_paragraph_text(
+    tmp_path: Path,
+) -> None:
+    packet = _packet(tmp_path)
+    result = generate_answer(
+        packet,
+        chat_model=_Chat(
+            _valid_payload(
+                text="\r\n```markdown\r\n## Overview\r\n\r\n**Grounded answer.**\r\n```\r\n"
+            )
+        ),
+    )
+
+    assert result.paragraphs[0].text == ("## Overview\r\n\r\n**Grounded answer.**")
+    assert result.answer_text.startswith("## Overview\r\n\r\n**Grounded answer.** [E1]")
+    assert "```markdown" not in result.answer_text
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "```json\ncode\n```",
+        "prefix\n```markdown\ncontent\n```",
+        "```markdown\ncontent\n```\nsuffix",
+    ),
+)
+def test_only_an_outer_markdown_fence_is_removed_from_paragraph_text(
+    tmp_path: Path,
+    text: str,
+) -> None:
+    packet = _packet(tmp_path)
+    result = generate_answer(
+        packet,
+        chat_model=_Chat(_valid_payload(text=text)),
+    )
+
+    assert result.paragraphs[0].text == text
+
+
+@pytest.mark.parametrize(
+    "raw_content",
+    (
+        "```json\n{}\n```",
+        "prefix\n```markdown\n{}\n```",
+        "```markdown\n{}\n```\nsuffix",
+    ),
+)
+def test_only_an_outer_markdown_fence_is_removed(
+    tmp_path: Path,
+    raw_content: str,
+) -> None:
+    packet = _packet(tmp_path)
+
+    class NonMatchingFenceChat:
+        model_name = "nonmatching-fence-answer"
+
+        def invoke(self, prompt: str) -> object:
+            del prompt
+            return SimpleNamespace(content=raw_content)
+
+    result = generate_answer(
+        packet,
+        chat_model=NonMatchingFenceChat(),
+        config=replace(make_config(tmp_path), answer_max_retries=0),
+    )
+
+    assert not result.citations
+    assert "validation failed" in result.limitations[-1].lower()
 
 
 def test_chunk_alias_is_accepted_and_canonicalized(tmp_path: Path) -> None:
