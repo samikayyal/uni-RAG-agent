@@ -586,3 +586,44 @@ def test_courses_root_listing_failure_records_failed_run(
     assert row["files_seen"] == 0
     assert row["files_failed"] == 0
     assert "Could not list Courses root" in row["error"]
+
+
+def test_root_files_join_the_synthetic_general_resources_course(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    (config.courses_root / "companies.xlsx").write_bytes(b"xlsx")
+    course_dir = config.courses_root / "Course A"
+    course_dir.mkdir()
+    (course_dir / "notes.md").write_text("notes", encoding="utf-8")
+
+    result = inventory_courses(config)
+
+    assert result.status == "completed"
+    with closing(connect_sqlite(config)) as connection:
+        course_row = connection.execute(
+            "SELECT id, name, path, file_count FROM courses WHERE name = ?",
+            (inventory_core.GENERAL_COURSE_NAME,),
+        ).fetchone()
+        file_row = connection.execute(
+            "SELECT course_id FROM files WHERE filename = 'companies.xlsx'"
+        ).fetchone()
+
+    assert course_row["id"] == inventory_core.GENERAL_COURSE_ID
+    assert course_row["path"] == str(config.courses_root)
+    assert course_row["file_count"] == 1
+    assert file_row["course_id"] == inventory_core.GENERAL_COURSE_ID
+    by_name = {summary.name: summary for summary in result.by_course}
+    assert by_name[inventory_core.GENERAL_COURSE_NAME].file_count == 1
+
+
+def test_a_course_directory_with_the_reserved_general_name_fails_loudly(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    reserved_dir = config.courses_root / inventory_core.GENERAL_COURSE_NAME
+    reserved_dir.mkdir()
+    (reserved_dir / "notes.md").write_text("notes", encoding="utf-8")
+
+    with pytest.raises(InventoryError, match="reserved synthetic course"):
+        inventory_courses(config)

@@ -84,6 +84,7 @@ class _ReconciliationResult:
 
     mappings_removed: int = 0
     vectors_removed: int = 0
+    metadata_updated: int = 0
 
 
 def sync_vector_index(
@@ -112,6 +113,7 @@ def sync_vector_index(
         rows_removed = 0
         mappings_removed = 0
         vectors_removed = 0
+        metadata_updated = 0
         vectors_indexed = 0
         by_source_type: dict[str, int] = {}
         physical_names: list[str] = []
@@ -135,9 +137,13 @@ def sync_vector_index(
                     chroma_collection=chroma_collection,
                     source_type=source_type,
                     physical=physical,
+                    logical_index=logical_index,
+                    model_name=profile.model_name,
+                    dimension=dimension,
                 )
                 mappings_removed += reconciliation.mappings_removed
                 vectors_removed += reconciliation.vectors_removed
+                metadata_updated += reconciliation.metadata_updated
                 indexed = _embed_missing_chunks(
                     connection,
                     chroma_collection=chroma_collection,
@@ -174,6 +180,7 @@ def sync_vector_index(
         model_name=profile.model_name,
         mappings_removed=mappings_removed,
         vectors_removed=vectors_removed,
+        metadata_updated=metadata_updated,
     )
     return VectorIndexResult(
         rebuild=rebuild,
@@ -507,7 +514,7 @@ def _missing_chunk_rows(
             chunks.text AS text,
             chunks.file_id AS file_id,
             chunks.source_type AS source_type,
-            files.path AS file_path,
+            files.relative_path AS file_path,
             courses.name AS course
         FROM chunks
         JOIN files ON files.id = chunks.file_id
@@ -532,13 +539,18 @@ def _reconcile_collection(
     chroma_collection: object,
     source_type: str,
     physical: str,
+    logical_index: str,
+    model_name: str,
+    dimension: int,
 ) -> _ReconciliationResult:
     """Remove stale state and make missing vectors eligible for re-embedding.
 
     SQLite is authoritative: rows must describe current, non-empty chunks in
     this logical collection. Chroma-only ids are deleted; SQLite mappings whose
     vector disappeared are removed so the normal missing-chunk path restores
-    them in the same sync.
+    them in the same sync. Vectors whose stored course/path filter metadata
+    drifted from SQLite (e.g. a file reassigned to another course by a later
+    inventory run) get their metadata updated in place without re-embedding.
     """
     all_rows = connection.execute(
         """
@@ -591,11 +603,96 @@ def _reconcile_collection(
             (VECTOR_BACKEND, physical, *missing_vector_ids),
         )
 
+    metadata_updated = _reconcile_vector_metadata(
+        connection,
+        chroma_collection=chroma_collection,
+        source_type=source_type,
+        physical=physical,
+        logical_index=logical_index,
+        model_name=model_name,
+        dimension=dimension,
+        present_vector_ids=expected_vector_ids & actual_vector_ids,
+    )
+
     connection.commit()
     return _ReconciliationResult(
         mappings_removed=len(stale_mapping_ids) + len(missing_vector_ids),
         vectors_removed=len(stale_vector_ids),
+        metadata_updated=metadata_updated,
     )
+
+
+def _reconcile_vector_metadata(
+    connection: sqlite3.Connection,
+    *,
+    chroma_collection: object,
+    source_type: str,
+    physical: str,
+    logical_index: str,
+    model_name: str,
+    dimension: int,
+    present_vector_ids: set[str],
+) -> int:
+    """Upsert Chroma filter metadata that drifted from authoritative SQLite."""
+    if not present_vector_ids:
+        return 0
+    current_where = current_chunk_where_sql((source_type,), require_non_empty_text=True)
+    rows = connection.execute(
+        f"""
+        SELECT
+            embeddings.vector_id AS vector_id,
+            chunks.id AS chunk_id,
+            chunks.file_id AS file_id,
+            chunks.source_type AS source_type,
+            files.relative_path AS file_path,
+            courses.name AS course
+        FROM embeddings
+        JOIN chunks ON chunks.id = embeddings.chunk_id
+        JOIN files ON files.id = chunks.file_id
+        LEFT JOIN courses ON courses.id = files.course_id
+        WHERE embeddings.vector_backend = ?
+          AND embeddings.vector_collection = ?
+          AND {current_where}
+        """,
+        (VECTOR_BACKEND, physical, source_type),
+    ).fetchall()
+    expected_by_vector_id = {
+        str(row["vector_id"]): _chunk_metadata(
+            row, logical_index, model_name, dimension
+        )
+        for row in rows
+        if str(row["vector_id"]) in present_vector_ids
+    }
+    if not expected_by_vector_id:
+        return 0
+
+    drifted_ids: list[str] = []
+    drifted_metadatas: list[dict[str, object]] = []
+    ordered_ids = sorted(expected_by_vector_id)
+    for start in range(0, len(ordered_ids), _VECTOR_ID_BATCH):
+        batch_ids = ordered_ids[start : start + _VECTOR_ID_BATCH]
+        result = chroma_collection.get(  # type: ignore[attr-defined]
+            ids=batch_ids, include=["metadatas"]
+        )
+        ids = result.get("ids", []) if isinstance(result, dict) else []
+        metadatas = result.get("metadatas", []) if isinstance(result, dict) else []
+        for vector_id, actual in zip(ids, metadatas or []):
+            expected = expected_by_vector_id.get(str(vector_id))
+            if expected is None:
+                continue
+            actual_map = actual if isinstance(actual, dict) else {}
+            if (
+                actual_map.get("course") != expected["course"]
+                or actual_map.get("file_path") != expected["file_path"]
+            ):
+                drifted_ids.append(str(vector_id))
+                drifted_metadatas.append(expected)
+    for start in range(0, len(drifted_ids), _VECTOR_ID_BATCH):
+        chroma_collection.update(  # type: ignore[attr-defined]
+            ids=drifted_ids[start : start + _VECTOR_ID_BATCH],
+            metadatas=drifted_metadatas[start : start + _VECTOR_ID_BATCH],
+        )
+    return len(drifted_ids)
 
 
 def _chunk_metadata(
@@ -828,7 +925,7 @@ def _hydrate_candidates(
                     chunks.id AS chunk_id,
                     files.id AS file_id,
                     courses.name AS course,
-                    files.path AS file_path,
+                    files.relative_path AS file_path,
                     chunks.source_type AS source_type,
                     chunks.location_type AS location_type,
                     chunks.location_value AS location_value,
@@ -902,6 +999,7 @@ def _sync_diagnostics(
     model_name: str,
     mappings_removed: int,
     vectors_removed: int,
+    metadata_updated: int = 0,
 ) -> list[str]:
     diagnostics: list[str] = []
     if mappings_removed or vectors_removed:
@@ -909,6 +1007,11 @@ def _sync_diagnostics(
             "Reconciled vector storage: removed "
             f"{vectors_removed} stale Chroma vector(s) and "
             f"{mappings_removed} SQLite mapping row(s)."
+        )
+    if metadata_updated:
+        diagnostics.append(
+            f"Updated drifted course/path filter metadata on {metadata_updated} "
+            "existing Chroma vector(s)."
         )
     if chunks_seen == 0:
         diagnostics.append("No eligible indexed chunks found for vector indexing.")

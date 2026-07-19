@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable
 
 from ._textutils import _count_tokens, _json_dumps
@@ -16,7 +17,10 @@ def finalize_chunks(
 ) -> tuple[ChunkRecord, ...]:
     chunks: list[ChunkRecord] = []
     for raw_chunk in raw_chunks:
-        text = raw_chunk.text.strip()
+        # NFKC folds compatibility forms (notably Arabic Presentation Forms
+        # emitted by PDF extraction) into canonical code points so keyword/FTS
+        # matching works against normally-typed queries.
+        text = unicodedata.normalize("NFKC", raw_chunk.text).strip()
         if not text:
             continue
         pieces = _split_text_by_tokens(text, max_tokens)
@@ -52,7 +56,11 @@ def finalize_chunks(
                     chunk_uid=f"file-{file_record.id}-chunk-{chunk_index}",
                     source_type=raw_chunk.source_type,
                     chunk_index=chunk_index,
-                    title=raw_chunk.title,
+                    title=(
+                        unicodedata.normalize("NFKC", raw_chunk.title)
+                        if raw_chunk.title is not None
+                        else None
+                    ),
                     text=piece,
                     token_count=_count_tokens(piece),
                     location_type=location_type,

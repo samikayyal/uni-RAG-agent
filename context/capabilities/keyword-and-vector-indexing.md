@@ -6,13 +6,22 @@
 `indexing/eligibility.py` helpers reuse its derived eligible source types and
 inverse lookups, so only chunks joined to `files.index_status = 'indexed'` and
 one of six eligible source types are indexed. `sync_keyword_index()` rebuilds
-SQLite FTS5 `chunk_fts` (unicode61) from that set. `keyword_search()` supports
-plain-text terms, exact course filters, logical-index filters, and bounded
-results; direct search is read-only.
+SQLite FTS5 `chunk_fts` (unicode61) from that set, applying NFKC normalization
+to chunk text and titles in Python (SQLite has no NFKC function) so
+compatibility forms — notably Arabic Presentation Forms emitted by PDF
+extraction — match normally-typed queries. Query terms are NFKC-normalized
+symmetrically at search time. `keyword_search()` supports plain-text terms,
+exact course filters, logical-index filters, and bounded results; direct
+search is read-only. Search projections return course-relative file paths
+(`files.relative_path`), never absolute host paths.
 
 `sync_vector_index()` resolves one reviewed embedding profile, maps source types
 to logical Chroma indexes, reconciles stale vectors/mappings, embeds missing
-chunks in bounded batches, and records SQLite `embeddings` mappings. Collections
+chunks in bounded batches, and records SQLite `embeddings` mappings.
+Reconciliation also compares each existing vector's stored course/path filter
+metadata against authoritative SQLite and updates drifted entries in place
+(no re-embedding), so files reassigned to another course by a later inventory
+run become semantically reachable after a normal incremental sync. Collections
 are cosine, physical, model-namespaced identities. `semantic_search_many()`
 reuses one embedding provider, one Chroma client, and one set of collection
 handles for all queries in a retrieval request. Hosted providers batch query

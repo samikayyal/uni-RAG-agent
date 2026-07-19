@@ -12,6 +12,14 @@ artifacts, and unknown extensions are metadata-only with a reason. Hashes are
 recomputed when file metadata indicates change. Files absent from a later run
 are soft-marked `skipped` rather than removed.
 
+Files directly in the `Courses` root (outside any course directory) are
+assigned to a synthetic course named `General Resources` (reserved id `-1`,
+fallback `999` if `-1` is taken) so course-scoped retrieval can reach them;
+previously they carried `course_id NULL` and were unreachable. The synthetic
+row's identity is its *path* (the Courses root itself), not the name; the name
+`General Resources` is reserved, and an inventory run fails with a clear
+diagnostic if a real course directory uses it.
+
 ## Public entry points
 
 - `uv run -m uni_rag_agent inventory run`

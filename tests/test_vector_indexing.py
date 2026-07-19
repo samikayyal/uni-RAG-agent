@@ -1511,3 +1511,65 @@ def _subprocess_shim_pythonpath() -> str:
     shim = REPO_ROOT / "tests" / "subprocess_shim"
     existing = os.environ.get("PYTHONPATH")
     return os.pathsep.join(part for part in (str(shim), existing) if part)
+
+
+def test_sync_updates_drifted_course_metadata_for_reassigned_files(
+    tmp_path: Path,
+    patch_huggingface_loader: None,
+) -> None:
+    """A course-less file vectorized before inventory assigns it a course must
+    become reachable under that course after a normal incremental sync."""
+    from tests.sqlite_helpers import TEST_TIMESTAMP
+
+    config = make_config(tmp_path)
+    with initialized_connection(config) as connection:
+        stored = insert_minimal_chunk(
+            connection,
+            config,
+            course_name=None,
+            filename="companies.md",
+            text="practical training companies",
+        )
+        connection.commit()
+    sync_vector_index(config)
+
+    with closing(connect_sqlite(config)) as connection:
+        course_id = connection.execute(
+            """
+            INSERT INTO courses (
+                name, path, file_count, total_bytes, created_at, updated_at
+            )
+            VALUES (?, ?, 1, 1, ?, ?)
+            """,
+            (
+                "General Resources",
+                str(config.courses_root),
+                TEST_TIMESTAMP,
+                TEST_TIMESTAMP,
+            ),
+        ).lastrowid
+        connection.execute(
+            "UPDATE files SET course_id = ? WHERE id = ?",
+            (course_id, stored.file_id),
+        )
+        connection.commit()
+
+    # Stale Chroma metadata still carries course="", so the course-scoped
+    # query cannot reach the chunk yet.
+    assert (
+        semantic_search(config, "practical training", course="General Resources") == []
+    )
+
+    repaired = sync_vector_index(config)
+
+    assert repaired.vectors_indexed == 0
+    assert any("drifted course/path" in item for item in repaired.diagnostics)
+    assert [
+        result.chunk_id
+        for result in semantic_search(
+            config, "practical training", course="General Resources"
+        )
+    ] == [stored.chunk_id]
+
+    stable = sync_vector_index(config)
+    assert not any("drifted course/path" in item for item in stable.diagnostics)

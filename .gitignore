@@ -29,3 +29,4 @@ data/
 !/README.md
 
 .brooks-lint*
+manual_testing/

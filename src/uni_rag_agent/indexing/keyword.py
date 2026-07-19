@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import unicodedata
 from collections.abc import Sequence
 from contextlib import closing
 
@@ -51,7 +52,7 @@ def sync_keyword_index(config: Config, rebuild: bool = False) -> KeywordIndexRes
             rows_removed = _count_fts_rows(connection)
             chunks_seen = _count_current_eligible_chunks(connection)
             connection.execute("DELETE FROM chunk_fts")
-            connection.execute(_insert_keyword_rows_sql(), ELIGIBLE_SOURCE_TYPES)
+            _insert_keyword_rows(connection)
             rows_indexed = _count_fts_rows(connection)
             by_source_type = _count_fts_by_source_type(connection)
             connection.commit()
@@ -113,7 +114,9 @@ def keyword_search_terms(
     if courses is not None and not courses:
         return []
     normalized_terms = tuple(
-        _strip_outer_quotes(term.strip()) for term in terms if term.strip()
+        _normalize_fts_text(_strip_outer_quotes(term.strip()))
+        for term in terms
+        if term.strip()
     )
     if not normalized_terms:
         raise KeywordSearchError(
@@ -203,7 +206,7 @@ def keyword_query_terms(query: str) -> tuple[str, ...]:
     """Return the deduplicated plain-text terms used by keyword search."""
     tokens: list[str] = []
     seen: set[str] = set()
-    for match in _TOKEN_RE.finditer(query):
+    for match in _TOKEN_RE.finditer(unicodedata.normalize("NFKC", query)):
         token = match.group(0)
         normalized = token.casefold()
         if normalized not in seen:
@@ -245,7 +248,7 @@ def _build_search_sql(
             chunks.id AS chunk_id,
             files.id AS file_id,
             courses.name AS course,
-            files.path AS file_path,
+            files.relative_path AS file_path,
             chunks.source_type AS source_type,
             chunks.location_type AS location_type,
             chunks.location_value AS location_value,
@@ -329,23 +332,52 @@ def _count_fts_by_source_type(connection: sqlite3.Connection) -> dict[str, int]:
     return {str(row["source_type"]): int(row["count"]) for row in rows}
 
 
-def _insert_keyword_rows_sql() -> str:
+def _insert_keyword_rows(connection: sqlite3.Connection) -> None:
+    """Project eligible chunks into chunk_fts with NFKC-normalized text.
+
+    Normalization happens in Python because SQLite has no NFKC function.
+    Historical chunks extracted before extraction-time normalization (e.g.
+    Arabic Presentation-Forms PDF text) become keyword-searchable on rebuild.
+    """
     where_sql = current_chunk_where_sql(
         ELIGIBLE_SOURCE_TYPES,
         require_non_empty_text=True,
     )
-    return f"""
-    INSERT INTO chunk_fts (chunk_id, text, title, course_name, file_path, source_type)
-    SELECT
-        chunks.id,
-        chunks.text,
-        COALESCE(chunks.title, ''),
-        COALESCE(courses.name, ''),
-        files.path,
-        chunks.source_type
-    FROM chunks
-    JOIN files ON files.id = chunks.file_id
-    LEFT JOIN courses ON courses.id = files.course_id
-    WHERE {where_sql}
-    ORDER BY chunks.id
-    """
+    rows = connection.execute(
+        f"""
+        SELECT
+            chunks.id AS chunk_id,
+            chunks.text AS text,
+            COALESCE(chunks.title, '') AS title,
+            COALESCE(courses.name, '') AS course_name,
+            files.relative_path AS file_path,
+            chunks.source_type AS source_type
+        FROM chunks
+        JOIN files ON files.id = chunks.file_id
+        LEFT JOIN courses ON courses.id = files.course_id
+        WHERE {where_sql}
+        ORDER BY chunks.id
+        """,
+        ELIGIBLE_SOURCE_TYPES,
+    ).fetchall()
+    connection.executemany(
+        """
+        INSERT INTO chunk_fts (chunk_id, text, title, course_name, file_path, source_type)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            (
+                int(row["chunk_id"]),
+                _normalize_fts_text(str(row["text"])),
+                _normalize_fts_text(str(row["title"])),
+                str(row["course_name"]),
+                str(row["file_path"]),
+                str(row["source_type"]),
+            )
+            for row in rows
+        ),
+    )
+
+
+def _normalize_fts_text(text: str) -> str:
+    return unicodedata.normalize("NFKC", text)

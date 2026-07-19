@@ -35,6 +35,11 @@ from .models import (
 )
 
 MISSING_REASON = "missing from latest inventory run"
+# Files directly in the Courses root belong to no course directory. They are
+# assigned to a synthetic course so course-scoped retrieval can reach them.
+GENERAL_COURSE_ID = -1
+GENERAL_COURSE_FALLBACK_ID = 999
+GENERAL_COURSE_NAME = "General Resources"
 TRANSIENT_INVENTORY_FAILURE_PREFIXES = (
     "metadata read failed:",
     "hashing failed:",
@@ -109,6 +114,68 @@ def upsert_course(connection: sqlite3.Connection, course: CourseRecord) -> int:
     if row is None:
         raise InventoryError(f"Failed to upsert course: {course.name}")
     return int(row["id"])
+
+
+def upsert_general_course(
+    connection: sqlite3.Connection,
+    config: Config,
+    timestamp: str,
+) -> int:
+    """Ensure the synthetic course for Courses-root files exists.
+
+    Identity is the course *path* (the Courses root itself), never the
+    user-visible name: a real course directory can never have that path, so
+    the synthetic row cannot be confused with archive content. The reserved
+    id -1 keeps it visually distinct from real autoincremented course ids;
+    999 is the fallback when -1 is already taken by other data.
+    """
+    root_path = str(config.courses_root)
+    existing = connection.execute(
+        "SELECT id, name FROM courses WHERE path = ?",
+        (root_path,),
+    ).fetchone()
+    if existing is not None:
+        if str(existing["name"]) != GENERAL_COURSE_NAME:
+            raise InventoryError(
+                f"The courses row for the Courses root ({root_path}) is named "
+                f"{existing['name']!r} instead of the reserved "
+                f"'{GENERAL_COURSE_NAME}'; refusing to reuse it."
+            )
+        return int(existing["id"])
+    named = connection.execute(
+        "SELECT path FROM courses WHERE name = ?",
+        (GENERAL_COURSE_NAME,),
+    ).fetchone()
+    if named is not None:
+        raise InventoryError(
+            f"The course name '{GENERAL_COURSE_NAME}' is reserved for files in "
+            f"the Courses root, but an existing course row already uses it for "
+            f"{named['path']!r}. Rename that course directory."
+        )
+    for course_id in (GENERAL_COURSE_ID, GENERAL_COURSE_FALLBACK_ID):
+        try:
+            connection.execute(
+                """
+                INSERT INTO courses (
+                    id, name, path, file_count, total_bytes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 0, 0, ?, ?)
+                """,
+                (
+                    course_id,
+                    GENERAL_COURSE_NAME,
+                    str(config.courses_root),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            return course_id
+        except sqlite3.IntegrityError:
+            continue
+    raise InventoryError(
+        f"Could not create the synthetic course '{GENERAL_COURSE_NAME}' "
+        f"with id {GENERAL_COURSE_ID} or {GENERAL_COURSE_FALLBACK_ID}."
+    )
 
 
 def update_course_totals(
@@ -262,34 +329,66 @@ def _inventory_courses(
             config.courses_root, diagnostics
         )
 
-        for root_file in root_files:
-            file_record = _build_file_record(
-                connection=connection,
-                config=config,
-                path=root_file,
-                course_id=None,
+        if root_files:
+            general_course_id = upsert_general_course(connection, config, started_at)
+            seen_course_ids.add(general_course_id)
+            general_file_count = 0
+            general_total_bytes = 0
+            for root_file in root_files:
+                file_record = _build_file_record(
+                    connection=connection,
+                    config=config,
+                    path=root_file,
+                    course_id=general_course_id,
+                    timestamp=started_at,
+                    diagnostics=diagnostics,
+                )
+                upsert_file(connection, file_record)
+                seen_paths.add(file_record.path)
+                files_seen += 1
+                general_file_count += 1
+                bytes_seen += file_record.size_bytes
+                general_total_bytes += file_record.size_bytes
+                _add_file_counts(
+                    file_record,
+                    by_category=by_category,
+                    by_extension=by_extension,
+                    by_status=by_status,
+                    by_reason=by_reason,
+                )
+                if file_record.index_status == "pending":
+                    files_pending += 1
+                elif file_record.index_status == "metadata_only":
+                    files_metadata_only += 1
+                elif file_record.index_status == "failed":
+                    files_failed += 1
+            update_course_totals(
+                connection,
+                course_id=general_course_id,
+                file_count=general_file_count,
+                total_bytes=general_total_bytes,
                 timestamp=started_at,
-                diagnostics=diagnostics,
             )
-            upsert_file(connection, file_record)
-            seen_paths.add(file_record.path)
-            files_seen += 1
-            bytes_seen += file_record.size_bytes
-            _add_file_counts(
-                file_record,
-                by_category=by_category,
-                by_extension=by_extension,
-                by_status=by_status,
-                by_reason=by_reason,
+            by_course.append(
+                InventoryCourseSummary(
+                    course_id=general_course_id,
+                    name=GENERAL_COURSE_NAME,
+                    path=str(config.courses_root),
+                    file_count=general_file_count,
+                    total_bytes=general_total_bytes,
+                )
             )
-            if file_record.index_status == "pending":
-                files_pending += 1
-            elif file_record.index_status == "metadata_only":
-                files_metadata_only += 1
-            elif file_record.index_status == "failed":
-                files_failed += 1
 
         for course_path in course_dirs:
+            if course_path.name.casefold() == GENERAL_COURSE_NAME.casefold():
+                # upsert_course conflicts on name, so a real directory with the
+                # reserved name would silently hijack the synthetic root-files
+                # course. Fail loudly instead of merging distinct entities.
+                raise InventoryError(
+                    f"Course directory {course_path.name!r} collides with the "
+                    f"reserved synthetic course '{GENERAL_COURSE_NAME}' used "
+                    "for Courses-root files. Rename the directory."
+                )
             course_id = upsert_course(
                 connection,
                 CourseRecord(

@@ -241,7 +241,7 @@ def _hydrate_candidate(
             chunks.location_type AS location_type,
             chunks.location_value AS location_value,
             files.id AS file_id,
-            files.path AS file_path,
+            files.relative_path AS file_path,
             files.index_status AS index_status,
             files.reason_not_indexed AS reason_not_indexed,
             courses.name AS course

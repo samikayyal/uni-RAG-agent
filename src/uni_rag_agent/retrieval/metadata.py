@@ -182,7 +182,7 @@ def metadata_search(
                 chunk_id=None,
                 file_id=int(row["id"]),
                 course=row["course"],
-                file_path=str(row["path"]),
+                file_path=str(row["relative_path"]),
                 source_type=None,
                 location_type=None,
                 location_value=None,

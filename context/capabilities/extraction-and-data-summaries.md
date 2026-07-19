@@ -6,9 +6,12 @@
 `slides`, `notebook`, `code`, `transcript`) with grouped format extractors.
 PDF, PPTX, DOCX, text/Markdown, notebooks, Python/R/C++/MATLAB, and VTT
 inputs produce source-aware chunks. Python code is parsed structurally where
-possible; notebook outputs are bounded. Chunks are split at the shared
-whitespace-token limit and carry `source_type`, title, token count, and a
-location. Legacy `.doc`/`.ppt` and no-text files fail per file; other failures
+possible; notebook outputs are bounded. Chunk text and titles are
+NFKC-normalized in `finalize_chunks()` (folding compatibility forms such as
+Arabic Presentation Forms from PDF extraction into canonical code points so
+keyword search matches normally-typed queries), then chunks are split at the
+shared whitespace-token limit and carry `source_type`, title, token count, and
+a location. Legacy `.doc`/`.ppt` and no-text files fail per file; other failures
 are recorded without aborting unrelated files. Re-extraction replaces prior
 chunks for the file.
 

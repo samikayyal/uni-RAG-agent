@@ -41,6 +41,9 @@ answer is appended.
 - `/health` is provider/storage-independent and returns `{"status":"ok"}`.
   `/config` reports non-secret operational settings and path-existence flags,
   never credentials or absolute local paths.
+- Answer, citation, reference, and evidence-packet projections carry
+  course-relative file paths; absolute host paths are not exposed (packets
+  persisted before this change retain their original absolute paths).
 - Planner and answer settings remain separate; each configured model is cached
   once per active configuration and shared by stateless and session requests.
 - Errors are stable safe JSON: missing resources 404, invalid config 503,

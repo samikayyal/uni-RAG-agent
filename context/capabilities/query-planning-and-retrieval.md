@@ -43,10 +43,17 @@ and `Courses/` source files; the CLI still writes JSONL run telemetry under
 - Planner configuration and the `llm` extra are required only when retrieval is
   executed; global `config check` may succeed with nullable model settings.
 - Planner output must be one JSON object satisfying the schema, canonical course
-  names, known logical indexes, supported query type, and configured confidence
-  threshold. Malformed/low-confidence/provider failures raise
-  `QueryPlanningError`.
-- Planned courses/indexes are hard filters. RRF preserves backend method,
+  names, known logical indexes, and supported query type. Malformed output and
+  provider failures raise `QueryPlanningError`. A plan whose confidence is below
+  the configured threshold does not raise: it is downgraded to an
+  `unknown_or_unsupported` plan with empty scopes and an explanatory
+  `plan_reason`, so the ask pipeline returns an honest insufficient-evidence
+  answer instead of a provider error.
+- Planned courses/indexes are hard filters, with one deliberate broadening: a
+  plan scoping to `slides_index` without `document_index` gets `document_index`
+  appended, because slide decks are frequently ingested with
+  `source_type=document` (e.g. PDF exports) and a slides-only scope would
+  silently exclude them. RRF preserves backend method,
   source rank, native score, semantic-query identity, and contribution fields;
   no reranker or score normalization is inserted.
 - One retrieval request constructs one embedding provider and Chroma client,

@@ -71,11 +71,14 @@ def _result(
     location_value: str | None = "1",
 ) -> RetrievalResult:
     del token_count
+    del config
+    # Hydration projects files.relative_path; insert_minimal_chunk stores the
+    # bare filename there, so candidates must carry the same relative value.
     return RetrievalResult(
         chunk_id=chunk_id,
         file_id=file_id,
         course=course,
-        file_path=str(config.courses_root / course / filename),
+        file_path=filename,
         source_type="document" if chunk_id is not None else None,
         location_type=location_type if chunk_id is not None else None,
         location_value=location_value if chunk_id is not None else None,
@@ -301,6 +304,10 @@ def test_supported_build_persists_raw_fused_and_authoritative_evidence(
         "keyword",
         "semantic",
     }
+    # Evidence and its persisted projection must carry course-relative paths;
+    # absolute host paths (drive letters, courses_root) are never exposed.
+    assert result.packet.evidence[0].file == "notes.md"
+    assert str(config.courses_root) not in canonical_json(result.packet)
     loaded = load_evidence_packet(config, search_run_id=result.search_run_id)
     assert loaded == result.packet
     assert canonical_json(loaded) == canonical_json(result.packet)

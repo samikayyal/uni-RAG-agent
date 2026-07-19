@@ -40,10 +40,11 @@ class _CaptureLogger:
 def run_cli(
     *args: str,
     env: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "uni_rag_agent", *args],
-        cwd=REPO_ROOT,
+        cwd=cwd or REPO_ROOT,
         env=clean_subprocess_env(env),
         text=True,
         capture_output=True,
@@ -384,8 +385,11 @@ def test_unknown_command_returns_nonzero_with_message() -> None:
     assert "unknown" in result.stderr
 
 
-def test_retrieve_requires_an_explicit_embedding_model() -> None:
-    result = run_cli("retrieve", "query text")
+def test_retrieve_requires_an_explicit_embedding_model(tmp_path: Path) -> None:
+    # An isolated cwd keeps the developer's real repo .env (embedding model,
+    # provider keys) out of the subprocess so no live retrieval can run.
+    (tmp_path / "Courses").mkdir()
+    result = run_cli("retrieve", "query text", cwd=tmp_path)
 
     assert result.returncode == 7
     assert "No embedding model selected" in result.stderr
@@ -393,10 +397,12 @@ def test_retrieve_requires_an_explicit_embedding_model() -> None:
 
 def test_run_cli_ignores_unrelated_host_configuration(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("UNI_RAG_EMBEDDING_MODEL", "BAAI/bge-m3")
+    (tmp_path / "Courses").mkdir()
 
-    result = run_cli("retrieve", "query text")
+    result = run_cli("retrieve", "query text", cwd=tmp_path)
 
     assert result.returncode == 7
     assert "No embedding model selected" in result.stderr

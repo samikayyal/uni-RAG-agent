@@ -51,6 +51,10 @@ for the planner only. `ask` composes build plus answer.
 - Each successful or valid unsupported run has at most one packet. Packet
   evidence must match current file/course/path/source/location and nonblank
   chunk text; packet JSON is immutable after creation.
+- Evidence items, citations, and references carry course-relative file paths
+  (`files.relative_path`); absolute host paths never enter packets, prompts, or
+  rendered answers. Packets persisted before this change retain their original
+  absolute paths.
 - Answer citations resolve to packet-authoritative positions or the explicit
   `chunk:<id>` compatibility alias and are revalidated at the append-only
   boundary. Invalid model output retries according to

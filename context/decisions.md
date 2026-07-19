@@ -108,10 +108,27 @@ payloads and arbitrary serialized objects are not loaded into retrieval.
 planner once, validate a `QueryPlan`, run metadata/keyword/semantic backends with
 hard plan filters, and merge ranked results with unweighted RRF. A valid
 unsupported plan is an empty successful run; invalid plans or backend/provider
-failures are fatal.
+failures are fatal. Two deterministic plan adjustments are part of validation
+(2026-07-18, motivated by manual-QA findings BUG-04/BUG-05):
+
+1. *Slides broadening:* a plan scoping to `slides_index` without
+   `document_index` has `document_index` appended before execution, because
+   slide decks are frequently ingested with `source_type=document` and a
+   slides-only scope silently excludes them. This is the only automatic scope
+   broadening; the adjusted plan is then applied as a hard filter and is what
+   persistence and coverage report.
+2. *Low-confidence downgrade:* a structurally valid plan whose
+   `plan_confidence` is below `query_plan_min_confidence` is downgraded to an
+   `unknown_or_unsupported` plan with empty scopes and an explanatory
+   `plan_reason`, instead of raising `QueryPlanningError`. Low confidence is a
+   retrieval outcome (honest insufficient-evidence answer), not a provider
+   failure.
 
 **Why:** Structured intent and auditable backend provenance are more stable than
-duplicated routing rules or an opaque reranker.
+duplicated routing rules or an opaque reranker. The two adjustments keep hard
+filtering while preventing the two systematic false negatives observed in
+testing: false insufficient-evidence for document-typed decks, and 502
+provider errors for out-of-scope questions.
 
 **Constraints/consequences:** Planner settings remain separate from answer
 settings. `retrieve` never writes search/evidence rows; use `evidence build`
