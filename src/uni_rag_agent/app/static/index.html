@@ -7,69 +7,86 @@
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
+    <nav class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">Uni RAG Agent</span>
+      </div>
+      <label class="toggle" for="details-toggle" title="Show everything recorded for this query">
+        <span class="toggle-label">Full details</span>
+        <input id="details-toggle" type="checkbox" role="switch" aria-label="Show full query details">
+        <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+      </label>
+    </nav>
+
     <main class="shell">
-      <header>
-        <p class="eyebrow">LOCAL COURSE ARCHIVE</p>
+      <header class="hero">
         <h1>Ask your university materials</h1>
-        <p class="subtitle">Answers stay tied to indexed evidence, citations, and explicit search coverage.</p>
+        <p class="subtitle">Every answer is grounded in your indexed course files and cites its evidence.</p>
       </header>
 
       <form id="ask-form" class="ask-panel">
-        <label for="query">Question</label>
-        <textarea id="query" name="query" maxlength="10000" required
-          placeholder="Explain MapReduce from my courses"></textarea>
-        <div class="form-row">
-          <div class="session-field">
-            <label for="session-id">Session ID <span>(optional)</span></label>
-            <input id="session-id" name="session_id" maxlength="128"
-              pattern="[A-Za-z0-9_-]{1,128}" placeholder="study-session">
+        <textarea id="query" name="query" maxlength="10000" rows="3" required
+          placeholder="e.g. Explain MapReduce from my courses" aria-label="Question"></textarea>
+        <div class="ask-row">
+          <div class="active-session">
+            <span class="session-dot" aria-hidden="true"></span>
+            <span id="active-session-label">New session</span>
+            <button type="button" id="new-session" class="ghost" hidden>Start new</button>
           </div>
-          <button id="ask-button" type="submit">Ask archive</button>
+          <button id="ask-button" type="submit">
+            <span class="button-label">Ask</span>
+          </button>
         </div>
-        <p class="hint">Leave the session blank for a stateless question.</p>
       </form>
 
-      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
 
-      <section id="result" class="result hidden" aria-live="polite">
-        <div class="result-heading">
-          <div>
-            <p class="eyebrow">GROUNDED RESPONSE</p>
-            <h2>Answer</h2>
-          </div>
-          <div id="trace-ids" class="trace-ids"></div>
-        </div>
-        <pre id="answer-text" class="answer-text"></pre>
+      <section id="result" hidden aria-live="polite">
+        <article class="answer-card">
+          <p class="asked-query" id="asked-query"></p>
+          <div id="answer-text" class="answer-text"></div>
+          <div id="sources" class="sources"></div>
+        </article>
 
-        <div class="grid two-columns">
-          <section class="card">
-            <h3>Citations and references</h3>
-            <div id="references" class="card-list"></div>
-          </section>
-          <section class="card">
-            <h3>Limitations</h3>
-            <ul id="limitations" class="plain-list"></ul>
-          </section>
-        </div>
+        <section id="details" class="details" hidden>
+          <h2 class="section-heading">Everything recorded for this query</h2>
 
-        <section class="card coverage-card">
-          <div class="card-heading">
-            <h3>Search coverage</h3>
-            <button id="refresh-coverage" class="secondary" type="button">Reload persisted coverage</button>
-          </div>
-          <div id="coverage" class="coverage-grid"></div>
+          <details class="panel" open>
+            <summary>Citations</summary>
+            <div id="d-citations" class="panel-body"></div>
+          </details>
+
+          <details class="panel" open>
+            <summary>Limitations</summary>
+            <div id="d-limitations" class="panel-body"></div>
+          </details>
+
+          <details class="panel">
+            <summary>Search coverage</summary>
+            <div id="d-coverage" class="panel-body"></div>
+          </details>
+
+          <details class="panel">
+            <summary>Query plan &amp; retrieval settings</summary>
+            <div id="d-plan" class="panel-body"><p class="empty">Loading persisted evidence packet…</p></div>
+          </details>
+
+          <details class="panel">
+            <summary>Evidence packet</summary>
+            <div id="d-evidence" class="panel-body"><p class="empty">Loading persisted evidence packet…</p></div>
+          </details>
+
+          <details class="panel">
+            <summary>Trace &amp; raw API</summary>
+            <div id="d-trace" class="panel-body"></div>
+          </details>
         </section>
+      </section>
 
-        <details class="card evidence-card">
-          <summary>Inspect persisted evidence packet</summary>
-          <div class="evidence-actions">
-            <button id="load-evidence" class="secondary" type="button">Load evidence</button>
-            <a id="answer-api-link" target="_blank" rel="noreferrer">Answer API</a>
-            <a id="coverage-api-link" target="_blank" rel="noreferrer">Coverage API</a>
-            <a id="evidence-api-link" target="_blank" rel="noreferrer">Evidence API</a>
-          </div>
-          <div id="evidence" class="evidence-list"></div>
-        </details>
+      <section id="history" class="history" hidden>
+        <h2 class="section-heading">Previous sessions</h2>
+        <div id="history-list"></div>
       </section>
     </main>
     <script src="/static/app.js" defer></script>
