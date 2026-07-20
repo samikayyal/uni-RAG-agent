@@ -315,12 +315,17 @@ def build_chat_model(config: Config) -> object:
         if config.llm_provider == "gemini":
             from langchain_google_genai import ChatGoogleGenerativeAI
 
-            return ChatGoogleGenerativeAI(
-                model=config.llm_model,
-                temperature=0.5,
-                api_key=config.google_api_key,
-                thinking_level="low",
-            )
+            from uni_rag_agent.gemini_failover import build_gemini_with_failover
+
+            def _build_gemini(api_key: str | None) -> object:
+                return ChatGoogleGenerativeAI(
+                    model=config.llm_model,
+                    temperature=0.5,
+                    api_key=api_key,
+                    thinking_level="low",
+                )
+
+            return build_gemini_with_failover(_build_gemini, config)
         from langchain_ollama import ChatOllama
 
         return ChatOllama(model=config.llm_model, temperature=0)

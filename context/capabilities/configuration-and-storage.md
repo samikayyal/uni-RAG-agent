@@ -13,8 +13,12 @@ schema, and reports table/FTS5/path health.
 Default paths are `Courses/`, `data/uni_rag.sqlite`,
 `data/indexes/vector/`, and `data/runs/`; all can be overridden by the
 corresponding `UNI_RAG_*` path variables. Secrets (`GOOGLE_API_KEY`,
-`NEBIUS_API_KEY`) are construction inputs only and are suppressed from safe
-output and telemetry.
+`GOOGLE_API_KEY_2`, `NEBIUS_API_KEY`) are construction inputs only and are
+suppressed from safe output and telemetry. When `GOOGLE_API_KEY_2` is set,
+planner and answer Gemini chat models rotate between the keys on
+resource-exhausted/quota errors (sticky wraparound rotation, per process);
+an error surfaces only when every key fails within one invocation
+(`src/uni_rag_agent/gemini_failover.py`; `tests/test_gemini_failover.py`).
 
 ## Public entry points
 

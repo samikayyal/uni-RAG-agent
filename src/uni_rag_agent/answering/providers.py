@@ -27,12 +27,17 @@ def build_answer_chat_model(config: Config) -> object:
         if provider == "gemini":
             from langchain_google_genai import ChatGoogleGenerativeAI
 
-            return ChatGoogleGenerativeAI(
-                model=model,
-                temperature=0,
-                api_key=config.google_api_key,
-                thinking_level="medium",
-            )
+            from ..gemini_failover import build_gemini_with_failover
+
+            def _build_gemini(api_key: str | None) -> object:
+                return ChatGoogleGenerativeAI(
+                    model=model,
+                    temperature=0,
+                    api_key=api_key,
+                    thinking_level="medium",
+                )
+
+            return build_gemini_with_failover(_build_gemini, config)
         if provider == "ollama":
             from langchain_ollama import ChatOllama
 

@@ -39,6 +39,7 @@ class Config:
     embedding_model: str | None
     ocr_enabled: bool
     google_api_key: str | None = field(default=None, repr=False)
+    google_api_key_2: str | None = field(default=None, repr=False)
     nebius_api_key: str | None = field(default=None, repr=False)
     metadata_top_k: int = 20
     semantic_query_limit: int = 3
@@ -151,6 +152,7 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
         embedding_model=_optional_str_from_env(env, "UNI_RAG_EMBEDDING_MODEL"),
         ocr_enabled=_bool_from_env(env, "UNI_RAG_OCR_ENABLED", False),
         google_api_key=_optional_str_from_env(env, "GOOGLE_API_KEY"),
+        google_api_key_2=_optional_str_from_env(env, "GOOGLE_API_KEY_2"),
         nebius_api_key=_optional_str_from_env(env, "NEBIUS_API_KEY"),
         metadata_top_k=_int_from_env(env, "UNI_RAG_METADATA_TOP_K", 20),
         semantic_query_limit=_int_from_env(env, "UNI_RAG_SEMANTIC_QUERY_LIMIT", 3),
