@@ -4227,7 +4227,7 @@ embeddings = [
     { name = "sentence-transformers" },
 ]
 embeddings-cloud = [
-    { name = "langchain-google-genai" },
+    { name = "google-genai" },
     { name = "openai" },
 ]
 llm = [
@@ -4247,10 +4247,10 @@ dev = [
 requires-dist = [
     { name = "chromadb", specifier = ">=0.5.0" },
     { name = "fastapi", specifier = ">=0.139.0" },
+    { name = "google-genai", marker = "extra == 'embeddings-cloud'", specifier = ">=2.11.0" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "langchain-anthropic", marker = "extra == 'llm'", specifier = ">=1.4.8" },
     { name = "langchain-core", specifier = ">=0.3.0" },
-    { name = "langchain-google-genai", marker = "extra == 'embeddings-cloud'", specifier = ">=4.2.7" },
     { name = "langchain-google-genai", marker = "extra == 'llm'", specifier = ">=4.2.7" },
     { name = "langchain-huggingface", marker = "extra == 'embeddings'", specifier = ">=0.1.0" },
     { name = "langchain-ollama", marker = "extra == 'llm'", specifier = ">=1.1.0" },

@@ -33,7 +33,7 @@ embeddings = [
 # Hosted embedding providers are lazy and are needed only when a hosted
 # profile is selected.
 embeddings-cloud = [
-    "langchain-google-genai>=4.2.7",
+    "google-genai>=2.11.0",
     "openai>=1.0.0",
 ]
 # LLM integrations are lazy; the `llm` extra is required only by `retrieve`.

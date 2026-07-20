@@ -47,12 +47,10 @@ from tests.support import (
 
 
 @pytest.fixture(autouse=True)
-def disable_gemini_request_delay_for_tests(
+def disable_gemini_batch_polling_for_tests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        google_genai_module, "GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS", 0.0
-    )
+    monkeypatch.setattr(google_genai_module, "GEMINI_BATCH_POLL_SECONDS", 0.0)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -81,20 +79,61 @@ class _GoogleHostedClient:
         self._recorder = recorder
         self.document_calls = 0
         self.query_calls = 0
+        self.batches = self._Batches(self)
+        self.models = self._Models(self)
 
-    def embed_documents(
-        self,
-        texts: list[str],
-        **kwargs: object,
-    ) -> list[list[float]]:
-        self.document_calls += 1
-        self._recorder.setdefault("google_document_kwargs", []).append(kwargs)  # type: ignore[union-attr]
-        return self._embeddings.embed_documents(list(texts))
+    class _Batches:
+        def __init__(self, owner: "_GoogleHostedClient") -> None:
+            self.owner = owner
 
-    def embed_query(self, text: str, **kwargs: object) -> list[float]:
-        self.query_calls += 1
-        self._recorder.setdefault("google_query_kwargs", []).append(kwargs)  # type: ignore[union-attr]
-        return self._embeddings.embed_query(text)
+        def create_embeddings(
+            self, *, model: str, src: dict[str, object]
+        ) -> SimpleNamespace:
+            self.owner.document_calls += 1
+            self.owner._recorder.setdefault("google_document_kwargs", []).append(  # type: ignore[union-attr]
+                {"model": model, "src": src}
+            )
+            contents = src["inlined_requests"]["contents"]  # type: ignore[index]
+            vectors = self.owner._embeddings.embed_documents(
+                [content["parts"][0]["text"] for content in contents]  # type: ignore[index]
+            )
+            return SimpleNamespace(
+                name="batches/test",
+                state=SimpleNamespace(name="JOB_STATE_SUCCEEDED"),
+                dest=SimpleNamespace(
+                    inlined_embed_content_responses=[
+                        SimpleNamespace(
+                            response=SimpleNamespace(
+                                embedding=SimpleNamespace(values=vector)
+                            )
+                        )
+                        for vector in vectors
+                    ]
+                ),
+            )
+
+    class _Models:
+        def __init__(self, owner: "_GoogleHostedClient") -> None:
+            self.owner = owner
+
+        def embed_content(
+            self,
+            *,
+            model: str,
+            contents: list[dict[str, object]],
+            config: dict[str, object],
+        ) -> SimpleNamespace:
+            self.owner.query_calls += 1
+            self.owner._recorder.setdefault("google_query_kwargs", []).append(  # type: ignore[union-attr]
+                {"model": model, "contents": contents, "config": config}
+            )
+            texts = [content["parts"][0]["text"] for content in contents]  # type: ignore[index]
+            return SimpleNamespace(
+                embeddings=[
+                    SimpleNamespace(values=vector)
+                    for vector in self.owner._embeddings.embed_documents(texts)
+                ]
+            )
 
 
 class _NebiusHostedClient:
@@ -150,7 +189,7 @@ def patch_hosted_provider_doubles(
     )
     monkeypatch.setattr(
         google_genai_module,
-        "_require_google_embeddings",
+        "_require_google_genai",
         lambda *_args, **_kwargs: google_constructor,
     )
     monkeypatch.setattr(
@@ -674,7 +713,7 @@ def test_gemini_alias_and_canonical_selection_share_one_physical_profile(
     assert rows[0]["embedding_model"] == "google/gemini-embedding-001"
 
 
-def test_exhausted_hosted_retries_preserve_completed_batches_for_resume(
+def test_failed_hosted_batch_preserves_completed_batches_for_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -701,17 +740,32 @@ def test_exhausted_hosted_retries_preserve_completed_batches_for_resume(
             self._embeddings = DeterministicTestEmbeddings(3072)
             self.fail_single = fail_single
             self.calls = 0
+            self.batches = self
 
-        def embed_documents(
-            self, texts: list[str], **_kwargs: object
-        ) -> list[list[float]]:
+        def create_embeddings(
+            self, *, src: dict[str, object], **_kwargs: object
+        ) -> SimpleNamespace:
+            contents = src["inlined_requests"]["contents"]  # type: ignore[index]
             self.calls += 1
-            if self.fail_single and len(texts) == 1:
+            if self.fail_single and len(contents) == 1:  # type: ignore[arg-type]
                 raise RateLimitError("secret-key must not surface")
-            return self._embeddings.embed_documents(texts)
-
-        def embed_query(self, text: str, **_kwargs: object) -> list[float]:
-            return self._embeddings.embed_query(text)
+            vectors = self._embeddings.embed_documents(
+                [content["parts"][0]["text"] for content in contents]  # type: ignore[index]
+            )
+            return SimpleNamespace(
+                name="batches/test",
+                state=SimpleNamespace(name="JOB_STATE_SUCCEEDED"),
+                dest=SimpleNamespace(
+                    inlined_embed_content_responses=[
+                        SimpleNamespace(
+                            response=SimpleNamespace(
+                                embedding=SimpleNamespace(values=vector)
+                            )
+                        )
+                        for vector in vectors
+                    ]
+                ),
+            )
 
     failing_client = FailingGoogleClient(fail_single=True)
     monkeypatch.setattr(
@@ -721,7 +775,7 @@ def test_exhausted_hosted_retries_preserve_completed_batches_for_resume(
     )
     monkeypatch.setattr(
         google_genai_module,
-        "_require_google_embeddings",
+        "_require_google_genai",
         lambda *_args, **_kwargs: lambda **_kwargs: failing_client,
     )
 
@@ -733,12 +787,12 @@ def test_exhausted_hosted_retries_preserve_completed_batches_for_resume(
     with closing(connect_sqlite(config)) as connection:
         committed = connection.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
     assert committed == 64
-    assert failing_client.calls == 4  # one successful batch plus three retries
+    assert failing_client.calls == 2  # one successful job plus one failed submission
 
     successful_client = FailingGoogleClient(fail_single=False)
     monkeypatch.setattr(
         google_genai_module,
-        "_require_google_embeddings",
+        "_require_google_genai",
         lambda *_args, **_kwargs: lambda **_kwargs: successful_client,
     )
     resumed = sync_vector_index(config, collection="document_index")

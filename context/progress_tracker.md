@@ -35,9 +35,9 @@ The implemented pipeline is complete through evaluation hardening:
 9. Cross-cutting maintenance hardening: one canonical logical-index taxonomy and
    a thin CLI composition root with separated command families, renderers, and
    telemetry adapters.
-10. Gemini embedding requests are paced at one second per attempt, including
-    transient retries, to reduce Free-tier request-rate failures while keeping
-    the existing provider retry and batch-commit behavior.
+10. Gemini document indexing uses the direct asynchronous Batch API with
+    inline requests and per-job polling; interactive query batches remain
+    synchronous so semantic search does not wait on a batch job.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

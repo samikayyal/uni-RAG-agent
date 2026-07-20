@@ -30,10 +30,10 @@ def _vectors(count: int, dimension: int, *, start: float = 1.0) -> list[list[flo
 
 
 @pytest.fixture(autouse=True)
-def disable_gemini_request_delay_for_tests(
+def disable_gemini_batch_polling_for_tests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(google_genai, "GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(google_genai, "GEMINI_BATCH_POLL_SECONDS", 0.0)
 
 
 def test_registry_preserves_local_profiles_and_adds_canonical_hosted_profiles() -> None:
@@ -97,7 +97,7 @@ def test_factory_and_registry_import_without_optional_provider_sdks() -> None:
 import sys
 import uni_rag_agent.indexing
 from uni_rag_agent.indexing.embedding_providers import factory
-assert 'langchain_google_genai' not in sys.modules
+assert 'google.genai' not in sys.modules
 assert 'langchain_huggingface' not in sys.modules
 assert 'openai' not in sys.modules
 assert factory.PROVIDER_MODULES['google_genai'] == '.google_genai'
@@ -234,31 +234,54 @@ def test_local_huggingface_query_batch_preserves_query_operation() -> None:
     assert query_calls == ["first", "second"]
 
 
-def test_google_constructor_tasks_dimension_and_no_probe(
+def test_google_constructor_uses_batch_api_and_no_probe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     constructor_calls: list[dict[str, object]] = []
-    method_calls: list[tuple[str, object, dict[str, object]]] = []
+    batch_calls: list[dict[str, object]] = []
+    query_calls: list[dict[str, object]] = []
 
-    class FakeGoogleEmbeddings:
+    class FakeBatches:
+        def create_embeddings(self, **kwargs: object) -> SimpleNamespace:
+            batch_calls.append(kwargs)
+            contents = kwargs["src"]["inlined_requests"]["contents"]  # type: ignore[index]
+            return SimpleNamespace(
+                name="batches/test",
+                state=SimpleNamespace(name="JOB_STATE_SUCCEEDED"),
+                dest=SimpleNamespace(
+                    inlined_embed_content_responses=[
+                        SimpleNamespace(
+                            response=SimpleNamespace(
+                                embedding=SimpleNamespace(values=vector)
+                            )
+                        )
+                        for vector in _vectors(len(contents), 3072)
+                    ]
+                ),
+            )
+
+    class FakeModels:
+        def embed_content(self, **kwargs: object) -> SimpleNamespace:
+            query_calls.append(kwargs)
+            contents = kwargs["contents"]
+            return SimpleNamespace(
+                embeddings=[
+                    SimpleNamespace(values=vector)
+                    for vector in _vectors(len(contents), 3072)
+                ]
+            )
+
+    class FakeGoogleClient:
         def __init__(self, **kwargs: object) -> None:
             constructor_calls.append(kwargs)
-
-        def embed_documents(
-            self, texts: list[str], **kwargs: object
-        ) -> list[list[float]]:
-            method_calls.append(("documents", texts, kwargs))
-            return _vectors(len(texts), 3072)
-
-        def embed_query(self, text: str, **kwargs: object) -> list[float]:
-            method_calls.append(("query", text, kwargs))
-            return _vectors(1, 3072)[0]
+            self.batches = FakeBatches()
+            self.models = FakeModels()
 
     monkeypatch.setattr(
         google_genai,
-        "_require_google_embeddings",
-        lambda *_a, **_k: FakeGoogleEmbeddings,
+        "_require_google_genai",
+        lambda *_a, **_k: FakeGoogleClient,
     )
     config = make_config(tmp_path, google_api_key="google-secret")
     built = build_embedding_model(config, "gemini-embedding-001")
@@ -267,65 +290,146 @@ def test_google_constructor_tasks_dimension_and_no_probe(
     assert built.dimension == 3072
     assert constructor_calls == [
         {
-            "model": "gemini-embedding-001",
-            "google_api_key": "google-secret",
+            "api_key": "google-secret",
             "vertexai": False,
-            "task_type": "RETRIEVAL_DOCUMENT",
-            "output_dimensionality": 3072,
         }
     ]
-    assert method_calls == []
-
-    assert len(built.embeddings.embed_documents(["doc one", "doc two"])) == 2  # type: ignore[attr-defined]
-    assert len(built.embeddings.embed_query("query")) == 3072  # type: ignore[attr-defined]
-    assert method_calls == [
-        (
-            "documents",
-            ["doc one", "doc two"],
-            {"task_type": "RETRIEVAL_DOCUMENT", "output_dimensionality": 3072},
-        ),
-        (
-            "query",
-            "query",
-            {"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 3072},
-        ),
+    assert built.embeddings.embed_documents(["doc one", "doc two"]) == _vectors(  # type: ignore[attr-defined]
+        2, 3072
+    )
+    assert built.embeddings.embed_query("query") == _vectors(1, 3072)[0]  # type: ignore[attr-defined]
+    assert built.embeddings.embed_queries(["first", "second"]) == _vectors(  # type: ignore[attr-defined]
+        2, 3072
+    )
+    assert batch_calls == [
+        {
+            "model": "gemini-embedding-001",
+            "src": {
+                "inlined_requests": {
+                    "contents": [
+                        {"parts": [{"text": "doc one"}]},
+                        {"parts": [{"text": "doc two"}]},
+                    ],
+                    "config": {
+                        "task_type": "RETRIEVAL_DOCUMENT",
+                        "output_dimensionality": 3072,
+                    },
+                }
+            },
+        }
+    ]
+    assert query_calls == [
+        {
+            "model": "gemini-embedding-001",
+            "contents": [{"parts": [{"text": "query"}]}],
+            "config": {
+                "task_type": "RETRIEVAL_QUERY",
+                "output_dimensionality": 3072,
+            },
+        },
+        {
+            "model": "gemini-embedding-001",
+            "contents": [
+                {"parts": [{"text": "first"}]},
+                {"parts": [{"text": "second"}]},
+            ],
+            "config": {
+                "task_type": "RETRIEVAL_QUERY",
+                "output_dimensionality": 3072,
+            },
+        },
     ]
 
 
-def test_google_embedding_paces_each_request_attempt(
+def test_google_embedding_polls_batch_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sleeps: list[float] = []
-    calls = 0
+    jobs = [
+        SimpleNamespace(
+            name="batches/test",
+            state=SimpleNamespace(name="JOB_STATE_QUEUED"),
+        ),
+        SimpleNamespace(
+            name="batches/test",
+            state=SimpleNamespace(name="JOB_STATE_SUCCEEDED"),
+            dest=SimpleNamespace(
+                inlined_embed_content_responses=[
+                    SimpleNamespace(
+                        response=SimpleNamespace(
+                            embedding=SimpleNamespace(values=[1.0, 1.0])
+                        )
+                    )
+                ]
+            ),
+        ),
+    ]
 
-    class FakeGoogleEmbeddings:
-        def embed_documents(
-            self, texts: list[str], **_kwargs: object
-        ) -> list[list[float]]:
-            nonlocal calls
-            calls += 1
-            return _vectors(len(texts), 2)
+    class FakeBatches:
+        def create_embeddings(self, **_kwargs: object) -> SimpleNamespace:
+            return jobs.pop(0)
 
-        def embed_query(self, _text: str, **_kwargs: object) -> list[float]:
-            nonlocal calls
-            calls += 1
-            return [1.0, 1.0]
+        def get(self, **_kwargs: object) -> SimpleNamespace:
+            return jobs.pop(0)
 
     monkeypatch.setattr(google_genai.time, "sleep", sleeps.append)
-    monkeypatch.setattr(google_genai, "GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS", 0.75)
+    monkeypatch.setattr(google_genai, "GEMINI_BATCH_POLL_SECONDS", 0.75)
 
     embeddings = google_genai.GoogleGenAIEmbeddings(
-        FakeGoogleEmbeddings(), model="gemini-embedding-001", dimension=2
+        SimpleNamespace(batches=FakeBatches()),
+        model="gemini-embedding-001",
+        dimension=2,
     )
 
     assert embeddings.embed_documents(["document"]) == [[1.0, 1.0]]
-    assert embeddings.embed_query("query") == [1.0, 1.0]
-    assert embeddings.embed_queries(["first", "second"]) == [
-        [1.0, 1.0],
-        [2.0, 2.0],
-    ]
-    assert calls == 3
-    assert sleeps == [0.75, 0.75, 0.75]
+    assert sleeps == [0.75]
+
+
+def test_google_embedding_does_not_retry_non_idempotent_batch_creation() -> None:
+    class RateLimitError(Exception):
+        status_code = 429
+
+    class FakeBatches:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def create_embeddings(self, **_kwargs: object) -> SimpleNamespace:
+            self.calls += 1
+            raise RateLimitError("secret-key must not surface")
+
+    batches = FakeBatches()
+    embeddings = google_genai.GoogleGenAIEmbeddings(
+        SimpleNamespace(batches=batches),
+        model="gemini-embedding-001",
+        dimension=2,
+    )
+
+    with pytest.raises(RuntimeError, match="rate limit") as exc_info:
+        embeddings.embed_documents(["document"])
+
+    assert batches.calls == 1
+    assert "secret-key" not in str(exc_info.value)
+
+
+def test_google_embedding_stops_polling_on_terminal_failure() -> None:
+    class FakeBatches:
+        def create_embeddings(self, **_kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(
+                name="batches/test",
+                state=SimpleNamespace(name="JOB_STATE_FAILED"),
+            )
+
+        def get(self, **_kwargs: object) -> SimpleNamespace:
+            raise AssertionError("terminal jobs must not be polled")
+
+    embeddings = google_genai.GoogleGenAIEmbeddings(
+        SimpleNamespace(batches=FakeBatches()),
+        model="gemini-embedding-001",
+        dimension=2,
+    )
+
+    with pytest.raises(RuntimeError, match="provider failure"):
+        embeddings.embed_documents(["document"])
 
 
 def test_nebius_constructor_request_shape_query_format_and_response_order(
@@ -493,21 +597,32 @@ def test_hosted_responses_validate_actual_dimensions_and_do_not_retry_malformed(
 ) -> None:
     calls = 0
 
-    class FakeGoogleEmbeddings:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-        def embed_documents(
-            self, _texts: list[str], **_kwargs: object
-        ) -> list[list[float]]:
+    class FakeBatches:
+        def create_embeddings(self, **_kwargs: object) -> SimpleNamespace:
             nonlocal calls
             calls += 1
-            return [[1.0]]
+            return SimpleNamespace(
+                name="batches/test",
+                state=SimpleNamespace(name="JOB_STATE_SUCCEEDED"),
+                dest=SimpleNamespace(
+                    inlined_embed_content_responses=[
+                        SimpleNamespace(
+                            response=SimpleNamespace(
+                                embedding=SimpleNamespace(values=[1.0])
+                            )
+                        )
+                    ]
+                ),
+            )
+
+    class FakeGoogleClient:
+        def __init__(self, **_kwargs: object) -> None:
+            self.batches = FakeBatches()
 
     monkeypatch.setattr(
         google_genai,
-        "_require_google_embeddings",
-        lambda *_a, **_k: FakeGoogleEmbeddings,
+        "_require_google_genai",
+        lambda *_a, **_k: FakeGoogleClient,
     )
     built = build_embedding_model(
         make_config(tmp_path, google_api_key="google-secret"),
@@ -544,7 +659,7 @@ def test_missing_hosted_extras_have_provider_specific_install_diagnostics(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "langchain_google_genai", None)
+    monkeypatch.setitem(sys.modules, "google.genai", None)
     config = make_config(tmp_path, google_api_key="google-secret")
     with pytest.raises(VectorIndexError, match="Google GenAI.*embeddings-cloud"):
         build_embedding_model(config, "google/gemini-embedding-001")
@@ -586,7 +701,7 @@ def test_cloud_extra_is_separate_from_local_and_llm_extras() -> None:
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     extras = project["project"]["optional-dependencies"]
     assert set(extras["embeddings-cloud"]) == {
-        "langchain-google-genai>=4.2.7",
+        "google-genai>=2.11.0",
         "openai>=1.0.0",
     }
     assert "langchain-huggingface>=0.1.0" in extras["embeddings"]

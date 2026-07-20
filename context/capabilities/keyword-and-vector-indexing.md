@@ -36,11 +36,13 @@ result list per input query. `semantic_search()` is the single-query wrapper.
 Both seams validate the exact SQLite mapping, reapply current-file/course/index
 filters, and do not persist search runs.
 
-Gemini embedding requests are paced with a one-second delay before every
-attempt, including transient retries, to stay below the reported Free-tier
-request rate with timing headroom. This does not bypass project-specific
-token-per-minute or requests-per-day quotas; active limits remain visible in
-Google AI Studio.
+Gemini document batches use the direct Gemini Batch API and wait for each
+inline job to finish before the batch is committed. Interactive query batches
+use the synchronous Gemini embedding endpoint so semantic search remains
+usable without an asynchronous-job delay. Neither path bypasses
+project-specific quotas; active limits remain visible in Google AI Studio.
+Batch-job creation is submitted once because that operation is non-idempotent;
+transient retries apply to the read-only polling calls.
 
 Profiles are `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
 `jinaai/jina-embeddings-v5-text-small`, `google/embeddinggemma-300m`,

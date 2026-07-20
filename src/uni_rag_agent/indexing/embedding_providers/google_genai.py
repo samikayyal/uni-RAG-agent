@@ -21,19 +21,22 @@ from .common import (
 DOCUMENT_TASK = "RETRIEVAL_DOCUMENT"
 QUERY_TASK = "RETRIEVAL_QUERY"
 
-# The reported Free-tier RPM for gemini-embedding-001 is 100, but the active
-# quota is project/model/account-specific. One second before each request keeps
-# this process below that RPM with some headroom for clock/timing variance.
-GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS = 1.0
+GEMINI_BATCH_POLL_SECONDS = 10.0
+
+_GEMINI_BATCH_SUCCEEDED = "JOB_STATE_SUCCEEDED"
+_GEMINI_BATCH_TERMINAL_STATES = frozenset(
+    {
+        _GEMINI_BATCH_SUCCEEDED,
+        "JOB_STATE_FAILED",
+        "JOB_STATE_CANCELLED",
+        "JOB_STATE_EXPIRED",
+        "JOB_STATE_PARTIALLY_SUCCEEDED",
+    }
+)
 
 
 class GoogleGenAIEmbeddings(Embeddings):
-    """Validated LangChain Gemini embeddings adapter.
-
-    The wrapped LangChain object performs direct Gemini Developer API calls.
-    This adapter supplies the document/query task explicitly and validates
-    every returned vector without making a separate dimension probe request.
-    """
+    """Validated Gemini adapter using batch jobs for document indexing."""
 
     def __init__(self, client: object, *, model: str, dimension: int) -> None:
         self.client = client
@@ -45,17 +48,45 @@ class GoogleGenAIEmbeddings(Embeddings):
         if not values:
             return []
         try:
-            time.sleep(GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS)
-            result = retry_transient(
-                lambda: self.client.embed_documents(  # type: ignore[attr-defined]
-                    values,
-                    task_type=DOCUMENT_TASK,
-                    output_dimensionality=self.dimension,
-                ),
-                provider="Google GenAI",
+            # Batch creation is not idempotent. Retrying an ambiguous failure can
+            # submit the same paid work twice, so only polling reads are retried.
+            job = self.client.batches.create_embeddings(  # type: ignore[attr-defined]
+                model=self.model,
+                src={
+                    "inlined_requests": {
+                        "contents": [{"parts": [{"text": text}]} for text in values],
+                        "config": {
+                            "task_type": DOCUMENT_TASK,
+                            "output_dimensionality": self.dimension,
+                        },
+                    }
+                },
             )
+            state = _batch_state_name(job)
+            while state not in _GEMINI_BATCH_TERMINAL_STATES:
+                time.sleep(GEMINI_BATCH_POLL_SECONDS)
+                job = retry_transient(
+                    lambda: self.client.batches.get(  # type: ignore[attr-defined]
+                        name=job.name
+                    ),
+                    provider="Google GenAI",
+                )
+                state = _batch_state_name(job)
+            if state != _GEMINI_BATCH_SUCCEEDED:
+                raise RuntimeError("Google GenAI batch job did not succeed")
+            responses = getattr(
+                getattr(job, "dest", None),
+                "inlined_embed_content_responses",
+                None,
+            )
+            vectors = [
+                item.response.embedding.values
+                for item in responses or []
+                if getattr(item, "response", None)
+                and getattr(item.response, "embedding", None)
+            ]
             return validate_vectors(
-                result,
+                vectors,
                 expected_count=len(values),
                 expected_dimension=self.dimension,
                 context="Google GenAI embedding response",
@@ -75,53 +106,28 @@ class GoogleGenAIEmbeddings(Embeddings):
             ) from exc
 
     def embed_query(self, text: str) -> list[float]:
-        try:
-            time.sleep(GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS)
-            result = retry_transient(
-                lambda: self.client.embed_query(  # type: ignore[attr-defined]
-                    text,
-                    task_type=QUERY_TASK,
-                    output_dimensionality=self.dimension,
-                ),
-                provider="Google GenAI",
-            )
-            return validate_vectors(
-                [result],
-                expected_count=1,
-                expected_dimension=self.dimension,
-                context="Google GenAI query embedding response",
-            )[0]
-        except EmbeddingValidationError as exc:
-            raise RuntimeError(
-                "Google GenAI returned an invalid query embedding response."
-            ) from exc
-        except Exception as exc:
-            raise RuntimeError(
-                sanitize_provider_error(
-                    exc,
-                    "Google GenAI",
-                    operation="query embedding",
-                    model=self.model,
-                )
-            ) from exc
+        return self.embed_queries([text])[0]
 
     def embed_queries(self, texts: Sequence[str]) -> list[list[float]]:
-        """Embed retrieval queries in one Gemini batch request."""
+        """Embed retrieval queries in one synchronous Gemini batch request."""
         values = list(texts)
         if not values:
             return []
         try:
-            time.sleep(GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS)
             result = retry_transient(
-                lambda: self.client.embed_documents(  # type: ignore[attr-defined]
-                    values,
-                    task_type=QUERY_TASK,
-                    output_dimensionality=self.dimension,
+                lambda: self.client.models.embed_content(  # type: ignore[attr-defined]
+                    model=self.model,
+                    contents=[{"parts": [{"text": text}]} for text in values],
+                    config={
+                        "task_type": QUERY_TASK,
+                        "output_dimensionality": self.dimension,
+                    },
                 ),
                 provider="Google GenAI",
             )
+            vectors = [embedding.values for embedding in result.embeddings or []]
             return validate_vectors(
-                result,
+                vectors,
                 expected_count=len(values),
                 expected_dimension=self.dimension,
                 context="Google GenAI query embedding response",
@@ -155,16 +161,10 @@ def build_embeddings(
             "Set it in the merged .env file or environment."
         )
 
-    constructor = _require_google_embeddings(profile, error=error)
+    constructor = _require_google_genai(profile, error=error)
     dimension = profile.dimension
     try:
-        client = constructor(
-            model=profile.effective_api_model_name,
-            google_api_key=api_key,
-            vertexai=False,
-            task_type=DOCUMENT_TASK,
-            output_dimensionality=dimension,
-        )
+        client = constructor(api_key=api_key, vertexai=False)
     except Exception as exc:  # pragma: no cover - provider construction boundary
         detail = sanitize_provider_error(
             exc,
@@ -194,25 +194,33 @@ def _google_api_key(config: Config) -> str | None:
     return value.strip() if value and value.strip() else None
 
 
-def _require_google_embeddings(
+def _batch_state_name(job: object) -> str:
+    """Return an SDK batch state without importing the optional SDK eagerly."""
+    state = getattr(job, "state", None)
+    name = getattr(state, "name", None)
+    if isinstance(name, str):
+        return name
+    if isinstance(state, str):
+        return state
+    raise EmbeddingValidationError("Google GenAI batch job has no valid state.")
+
+
+def _require_google_genai(
     profile: EmbeddingProfile,
     *,
     error: type[Exception],
 ) -> type[object]:
-    """Import ``GoogleGenerativeAIEmbeddings`` only for the hosted profile."""
+    """Import the Google GenAI client only for the hosted profile."""
     extra = profile.requires_extra or "embeddings-cloud"
     try:
-        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        from google import genai
     except ImportError as exc:
         raise error(
             "Google GenAI embedding provider requires the optional "
-            f"'{extra}' extra (langchain-google-genai). "
+            f"'{extra}' extra (google-genai). "
             f"Install it with: uv sync --extra {extra}"
         ) from exc
-    return GoogleGenerativeAIEmbeddings
+    return genai.Client
 
 
-# Additional descriptive name for test seams and callers that use the SDK
-# name rather than the provider name.
-_require_google_genai = _require_google_embeddings
 build_google_genai_embeddings = build_embeddings
