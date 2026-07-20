@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -713,4 +714,166 @@ def test_static_ui_loads_as_question_answering_screen() -> None:
     assert "Ask your university materials" in response.text
     assert "ask-form" in response.text
     assert "cancel-request" in response.text
+    assert "settings-dialog" in response.text
     assert "ingestion" not in response.text.lower()
+
+
+def test_settings_allowlist_is_one_list_across_store_api_and_ui() -> None:
+    """The store allowlist, Pydantic request model, and JS labels must agree.
+
+    The three layers each state the web-settable names; this guard turns any
+    drift (a 422 for a supported setting, or a setting invisible in the UI)
+    into a test failure instead of a runtime surprise.
+    """
+    from uni_rag_agent.app.api import SettingsUpdateRequest
+    from uni_rag_agent.app.settings import WEB_SETTING_NAMES
+
+    assert set(SettingsUpdateRequest.model_fields) == set(WEB_SETTING_NAMES)
+
+    app_js = (
+        Path(__file__).parents[1]
+        / "src"
+        / "uni_rag_agent"
+        / "app"
+        / "static"
+        / "app.js"
+    ).read_text(encoding="utf-8")
+    labels_block = re.search(r"const SETTING_LABELS = \{(.*?)\};", app_js, re.DOTALL)
+    assert labels_block is not None, "app.js no longer defines SETTING_LABELS"
+    label_names = set(re.findall(r"^\s*(\w+):", labels_block.group(1), re.MULTILINE))
+    assert label_names == set(WEB_SETTING_NAMES)
+
+
+def test_settings_view_reports_defaults_limits_and_profiles(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    response = TestClient(create_app(config_loader=lambda: config)).get("/api/settings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["overrides"] == {}
+    assert payload["settings"] == payload["defaults"]
+    assert payload["settings"]["keyword_top_k"] == 20
+    assert payload["settings"]["query_plan_min_confidence"] == 0.60
+    assert payload["limits"]["final_top_k"] == {"min": 1, "max": 50}
+    profile_names = [
+        profile["model_name"] for profile in payload["embedding_model_profiles"]
+    ]
+    assert "BAAI/bge-m3" in profile_names
+    assert "google/gemini-embedding-001" in profile_names
+    rendered = str(payload)
+    assert str(tmp_path) not in rendered
+    assert "api_key" not in rendered.lower()
+
+
+def test_settings_update_persists_and_applies_to_ask_configuration(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    seen_configs: list[object] = []
+    services = _services()
+
+    def capture_build(config_arg, *args, **kwargs):
+        seen_configs.append(config_arg)
+        return services.build_evidence(config_arg, *args, **kwargs)
+
+    client = TestClient(
+        create_app(
+            config_loader=lambda: config,
+            services=replace(services, build_evidence=capture_build),
+        )
+    )
+
+    updated = client.put(
+        "/api/settings",
+        json={"keyword_top_k": 33, "embedding_model": "gemini-embedding-001"},
+    )
+    assert updated.status_code == 200
+    payload = updated.json()
+    assert payload["overrides"]["keyword_top_k"] == 33
+    # The alias is canonicalized before it is stored or applied.
+    assert payload["overrides"]["embedding_model"] == "google/gemini-embedding-001"
+    assert payload["settings"]["keyword_top_k"] == 33
+    assert payload["defaults"]["keyword_top_k"] == 20
+    assert (tmp_path / "data" / "app_settings.json").is_file()
+
+    assert client.post("/api/ask", json={"query": "tuned"}).status_code == 200
+    assert seen_configs[0].keyword_top_k == 33
+    assert seen_configs[0].embedding_model == "google/gemini-embedding-001"
+    assert client.get("/config").json()["keyword_top_k"] == 33
+
+    restarted = TestClient(create_app(config_loader=lambda: config))
+    assert restarted.get("/api/settings").json()["settings"]["keyword_top_k"] == 33
+
+
+def test_settings_update_rejects_invalid_unknown_and_sensitive_fields(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config_loader=lambda: config))
+
+    out_of_bounds = client.put("/api/settings", json={"keyword_top_k": 0})
+    assert out_of_bounds.status_code == 422
+    assert out_of_bounds.json()["error"]["code"] == "settings_validation_error"
+    assert "keyword_top_k" in out_of_bounds.json()["error"]["message"]
+
+    unknown_model = client.put(
+        "/api/settings", json={"embedding_model": "made-up/model"}
+    )
+    assert unknown_model.status_code == 422
+    assert unknown_model.json()["error"]["code"] == "settings_validation_error"
+
+    for body in (
+        {"llm_model": "forbidden"},
+        {"answer_llm_provider": "forbidden"},
+        {"ask_timeout_seconds": 5},
+        {"log_level": "DEBUG"},
+        {"sqlite_path": "elsewhere.sqlite"},
+        {"ocr_enabled": True},
+        {"answer_max_retries": 9},
+    ):
+        response = client.put("/api/settings", json=body)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation_error"
+
+    # Nothing invalid was persisted.
+    assert client.get("/api/settings").json()["overrides"] == {}
+
+
+def test_settings_null_clears_one_override_and_keeps_others(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    client = TestClient(create_app(config_loader=lambda: config))
+
+    assert (
+        client.put(
+            "/api/settings", json={"keyword_top_k": 40, "final_top_k": 5}
+        ).status_code
+        == 200
+    )
+    cleared = client.put("/api/settings", json={"keyword_top_k": None})
+
+    assert cleared.status_code == 200
+    payload = cleared.json()
+    assert "keyword_top_k" not in payload["overrides"]
+    assert payload["settings"]["keyword_top_k"] == 20
+    assert payload["overrides"]["final_top_k"] == 5
+
+
+def test_settings_ignores_corrupted_or_tampered_settings_file(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    settings_path = tmp_path / "data" / "app_settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        '{"keyword_top_k": 9999, "llm_model": "injected", "final_top_k": 5, '
+        '"embedding_model": "made-up"}',
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(config_loader=lambda: config))
+
+    payload = client.get("/api/settings").json()
+    assert payload["overrides"] == {"final_top_k": 5}
+
+    settings_path.write_text("not json", encoding="utf-8")
+    assert client.get("/api/settings").json()["overrides"] == {}
+    assert client.get("/config").status_code == 200

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Sequence
 
 from langchain_core.embeddings import Embeddings
@@ -17,9 +18,13 @@ from .common import (
     validate_vectors,
 )
 
-
 DOCUMENT_TASK = "RETRIEVAL_DOCUMENT"
 QUERY_TASK = "RETRIEVAL_QUERY"
+
+# The reported Free-tier RPM for gemini-embedding-001 is 100, but the active
+# quota is project/model/account-specific. One second before each request keeps
+# this process below that RPM with some headroom for clock/timing variance.
+GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS = 1.0
 
 
 class GoogleGenAIEmbeddings(Embeddings):
@@ -40,6 +45,7 @@ class GoogleGenAIEmbeddings(Embeddings):
         if not values:
             return []
         try:
+            time.sleep(GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS)
             result = retry_transient(
                 lambda: self.client.embed_documents(  # type: ignore[attr-defined]
                     values,
@@ -70,6 +76,7 @@ class GoogleGenAIEmbeddings(Embeddings):
 
     def embed_query(self, text: str) -> list[float]:
         try:
+            time.sleep(GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS)
             result = retry_transient(
                 lambda: self.client.embed_query(  # type: ignore[attr-defined]
                     text,
@@ -104,6 +111,7 @@ class GoogleGenAIEmbeddings(Embeddings):
         if not values:
             return []
         try:
+            time.sleep(GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS)
             result = retry_transient(
                 lambda: self.client.embed_documents(  # type: ignore[attr-defined]
                     values,

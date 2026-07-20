@@ -36,6 +36,12 @@ result list per input query. `semantic_search()` is the single-query wrapper.
 Both seams validate the exact SQLite mapping, reapply current-file/course/index
 filters, and do not persist search runs.
 
+Gemini embedding requests are paced with a one-second delay before every
+attempt, including transient retries, to stay below the reported Free-tier
+request rate with timing headroom. This does not bypass project-specific
+token-per-minute or requests-per-day quotas; active limits remain visible in
+Google AI Studio.
+
 Profiles are `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
 `jinaai/jina-embeddings-v5-text-small`, `google/embeddinggemma-300m`,
 `google/gemini-embedding-001` (alias `gemini-embedding-001`), and

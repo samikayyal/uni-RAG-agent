@@ -223,6 +223,29 @@ same persistence gate as timeout so an in-flight provider call can unwind
 without appending an answer; this transient telemetry is not retained as
 history, and the generic busy message remains valid when telemetry is absent.
 
+### DEC-041 — Bounded web-adjustable retrieval settings
+
+**Decision:** The web app exposes `GET/PUT /api/settings` for an explicit
+allowlist of non-sensitive retrieval tuning values only: the embedding model
+(reviewed profiles, aliases canonicalized), `keyword_top_k`, `semantic_top_k`,
+`metadata_top_k`, `final_top_k`, `rrf_k`, `semantic_query_limit`,
+`query_plan_min_confidence`, `filename_fuzzy_threshold`,
+`path_fuzzy_threshold`, and `evidence_max_tokens`. Overrides persist in
+`data/app_settings.json` and layer on top of environment configuration for web
+requests only.
+
+**Why:** Retrieval tuning is safe to iterate from the browser; provider,
+credential, storage, and operational-guard settings are not.
+
+**Constraints/consequences:** LLM/answer provider-model pairs, API keys,
+storage paths, log level, OCR, `answer_max_retries`,
+`answer_prompt_max_tokens`, `answer_session_message_limit`, and
+`ask_timeout_seconds` are never web-settable; requests naming them are
+rejected. Every numeric value is bounds-checked before persistence, `null`
+clears one override, and invalid or unknown entries in the stored file are
+dropped on read instead of failing requests. The CLI ignores web overrides.
+DEC-036/017's ban on per-request provider/model overrides is unchanged.
+
 ### DEC-037/038 — Isolated, safe evaluation
 
 **Decision:** Fixture evaluation uses strict UTF-8 `evals/fixtures.json`, isolated

@@ -24,10 +24,23 @@ available; it retains the generic search message when it is not. The user can
 cancel the active ask, which abandons the response and prevents a late answer
 write while in-flight provider work unwinds.
 
+A Settings dialog lets the user adjust a bounded allowlist of retrieval tuning
+values: the embedding model (reviewed profiles only, aliases canonicalized),
+`keyword/semantic/metadata/final_top_k`, `rrf_k`, `semantic_query_limit`,
+`query_plan_min_confidence`, the filename/path fuzzy thresholds, and
+`evidence_max_tokens`. Overrides persist in `data/app_settings.json`, layer on
+top of environment configuration for web requests only (the CLI never reads
+them), and apply from the next ask. A blank/cleared field reverts to the
+environment default. A missing, corrupted, or hand-edited file never breaks the
+app: unknown names and invalid values are dropped on read. Provider/model
+selection, credentials, storage paths, log level, OCR, retry, prompt-budget,
+session-limit, and timeout settings are not web-settable.
+
 ## Public entry points
 
 - `uv run -m uni_rag_agent app serve [--host 127.0.0.1] [--port 8000]`.
-- Routes: `GET /health`, `GET /config`, `POST /api/ask`,
+- Routes: `GET /health`, `GET /config`, `GET/PUT /api/settings`,
+  `POST /api/ask`,
   `GET /api/asks/{request_id}/progress`,
   `POST /api/asks/{request_id}/cancel`,
   `GET /api/sessions/{session_id}`,
@@ -38,14 +51,20 @@ write while in-flight provider work unwinds.
 - `POST /api/ask` accepts a nonempty query (up to 10,000 characters) and an
   optional alphanumeric/underscore/hyphen session id and client-generated
   request id. Provider/model overrides are not accepted through HTTP.
+- `GET /api/settings` reports effective values, environment defaults, stored
+  overrides, numeric bounds, and the reviewed embedding profiles. `PUT
+  /api/settings` accepts a partial update of allowlisted settings only
+  (`null` clears one override); out-of-bounds or unknown-profile values are a
+  422 `settings_validation_error`, and any non-allowlisted field is rejected.
 
 ## Source, tests, and artifacts
 
-- Source: `src/uni_rag_agent/app/{api,service}.py` and `src/uni_rag_agent/app/static/`.
+- Source: `src/uni_rag_agent/app/{api,service,settings}.py` and
+  `src/uni_rag_agent/app/static/`.
 - Tests: `tests/test_app.py` (route projections, validation, sessions,
-  cancellation, timeout, and sanitized failures).
-- Artifacts: routes read/write through the evidence and answering stores; no new
-  tables or web-specific generated state.
+  cancellation, timeout, settings overrides, and sanitized failures).
+- Artifacts: routes read/write through the evidence and answering stores;
+  web settings overrides persist in `data/app_settings.json`.
 
 ## Invariants and failure boundaries
 
@@ -76,4 +95,5 @@ write while in-flight provider work unwinds.
 
 Binding decisions: [DEC-036/017](../decisions.md#dec-036017--thin-local-web-app-with-process-scoped-models),
 [DEC-035/020](../decisions.md#dec-035020--strict-packet-only-answers-and-citations),
-and [DEC-034](../decisions.md#dec-034--persisted-evidence-boundary).
+[DEC-034](../decisions.md#dec-034--persisted-evidence-boundary),
+and [DEC-041](../decisions.md#dec-041--bounded-web-adjustable-retrieval-settings).

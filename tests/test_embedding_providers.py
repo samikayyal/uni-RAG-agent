@@ -29,6 +29,13 @@ def _vectors(count: int, dimension: int, *, start: float = 1.0) -> list[list[flo
     return [[start + number] * dimension for number in range(count)]
 
 
+@pytest.fixture(autouse=True)
+def disable_gemini_request_delay_for_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(google_genai, "GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS", 0.0)
+
+
 def test_registry_preserves_local_profiles_and_adds_canonical_hosted_profiles() -> None:
     local_names = {
         "BAAI/bge-m3",
@@ -283,6 +290,42 @@ def test_google_constructor_tasks_dimension_and_no_probe(
             {"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 3072},
         ),
     ]
+
+
+def test_google_embedding_paces_each_request_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    calls = 0
+
+    class FakeGoogleEmbeddings:
+        def embed_documents(
+            self, texts: list[str], **_kwargs: object
+        ) -> list[list[float]]:
+            nonlocal calls
+            calls += 1
+            return _vectors(len(texts), 2)
+
+        def embed_query(self, _text: str, **_kwargs: object) -> list[float]:
+            nonlocal calls
+            calls += 1
+            return [1.0, 1.0]
+
+    monkeypatch.setattr(google_genai.time, "sleep", sleeps.append)
+    monkeypatch.setattr(google_genai, "GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS", 0.75)
+
+    embeddings = google_genai.GoogleGenAIEmbeddings(
+        FakeGoogleEmbeddings(), model="gemini-embedding-001", dimension=2
+    )
+
+    assert embeddings.embed_documents(["document"]) == [[1.0, 1.0]]
+    assert embeddings.embed_query("query") == [1.0, 1.0]
+    assert embeddings.embed_queries(["first", "second"]) == [
+        [1.0, 1.0],
+        [2.0, 2.0],
+    ]
+    assert calls == 3
+    assert sleeps == [0.75, 0.75, 0.75]
 
 
 def test_nebius_constructor_request_shape_query_format_and_response_order(

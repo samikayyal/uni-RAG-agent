@@ -10,6 +10,14 @@ const historyList = document.querySelector("#history-list");
 const activeSessionLabel = document.querySelector("#active-session-label");
 const newSessionButton = document.querySelector("#new-session");
 const cancelRequestButton = document.querySelector("#cancel-request");
+const settingsButton = document.querySelector("#settings-button");
+const settingsDialog = document.querySelector("#settings-dialog");
+const settingsForm = document.querySelector("#settings-form");
+const settingsFields = document.querySelector("#settings-fields");
+const settingsStatus = document.querySelector("#settings-status");
+const settingsSaveButton = document.querySelector("#settings-save");
+const settingsResetButton = document.querySelector("#settings-reset");
+const settingsCloseButton = document.querySelector("#settings-close");
 
 const SESSIONS_KEY = "uni-rag-sessions";
 const ACTIVE_KEY = "uni-rag-active-session";
@@ -124,6 +132,177 @@ queryInput.addEventListener("keydown", (event) => {
     form.requestSubmit();
   }
 });
+
+/* ---------- retrieval settings dialog ---------- */
+
+const SETTING_LABELS = {
+  embedding_model: "Embedding model",
+  keyword_top_k: "Keyword results (top k)",
+  semantic_top_k: "Semantic results (top k)",
+  metadata_top_k: "Metadata results (top k)",
+  final_top_k: "Final evidence items (top k)",
+  rrf_k: "RRF rank constant",
+  semantic_query_limit: "Semantic queries per ask",
+  filename_fuzzy_threshold: "Filename fuzzy threshold",
+  path_fuzzy_threshold: "Path fuzzy threshold",
+  evidence_max_tokens: "Evidence token budget",
+  query_plan_min_confidence: "Minimum plan confidence",
+};
+const FLOAT_SETTINGS = new Set(["query_plan_min_confidence"]);
+let settingsPayload = null;
+
+settingsButton.addEventListener("click", async () => {
+  settingsDialog.showModal();
+  clearSettingsStatus();
+  settingsFields.replaceChildren(emptyMessage("Loading current settings…"));
+  try {
+    settingsPayload = await requestJson("/api/settings");
+    renderSettingsForm(settingsPayload);
+  } catch (error) {
+    settingsFields.replaceChildren(
+      emptyMessage(`Could not load settings: ${error.message}`),
+    );
+  }
+});
+
+settingsCloseButton.addEventListener("click", () => settingsDialog.close());
+
+settingsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!settingsPayload) return;
+  const changes = {};
+  let invalid = null;
+  Object.keys(SETTING_LABELS).forEach((name) => {
+    const input = settingsForm.querySelector(`[name="${name}"]`);
+    if (!input) return;
+    const raw = input.value.trim();
+    if (raw === "") {
+      changes[name] = null;
+      return;
+    }
+    if (name === "embedding_model") {
+      changes[name] = raw;
+      return;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      invalid = invalid || `${SETTING_LABELS[name]} must be a number.`;
+      return;
+    }
+    changes[name] = value;
+  });
+  if (invalid) {
+    setSettingsStatus(invalid, "error");
+    return;
+  }
+  await submitSettings(changes, "Settings saved. They apply from your next question.");
+});
+
+settingsResetButton.addEventListener("click", async () => {
+  if (!settingsPayload) return;
+  const changes = {};
+  Object.keys(SETTING_LABELS).forEach((name) => {
+    changes[name] = null;
+  });
+  await submitSettings(changes, "All settings now follow the server configuration.");
+});
+
+async function submitSettings(changes, successMessage) {
+  settingsSaveButton.disabled = true;
+  settingsResetButton.disabled = true;
+  try {
+    settingsPayload = await requestJson("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    });
+    renderSettingsForm(settingsPayload);
+    setSettingsStatus(successMessage, "ok");
+  } catch (error) {
+    setSettingsStatus(error.message, "error");
+  } finally {
+    settingsSaveButton.disabled = false;
+    settingsResetButton.disabled = false;
+  }
+}
+
+function renderSettingsForm(payload) {
+  const fragment = document.createDocumentFragment();
+  fragment.append(buildEmbeddingModelField(payload));
+  Object.keys(SETTING_LABELS)
+    .filter((name) => name !== "embedding_model")
+    .forEach((name) => fragment.append(buildNumericField(payload, name)));
+  settingsFields.replaceChildren(fragment);
+}
+
+function buildEmbeddingModelField(payload) {
+  const field = settingsField("embedding_model");
+  const select = document.createElement("select");
+  select.name = "embedding_model";
+  select.id = "setting-embedding_model";
+  const fallback = document.createElement("option");
+  fallback.value = "";
+  const configured = payload.defaults.embedding_model;
+  fallback.textContent = configured
+    ? `Server default (${configured})`
+    : "Server default (not set)";
+  select.append(fallback);
+  (payload.embedding_model_profiles || []).forEach((profile) => {
+    const option = document.createElement("option");
+    option.value = profile.model_name;
+    option.textContent = `${profile.model_name} · ${profile.provider} · ${profile.dimension}d`;
+    select.append(option);
+  });
+  select.value = payload.overrides.embedding_model || "";
+  field.append(select);
+  return field;
+}
+
+function buildNumericField(payload, name) {
+  const field = settingsField(name);
+  const input = document.createElement("input");
+  input.type = "number";
+  input.name = name;
+  input.id = `setting-${name}`;
+  const limits = payload.limits?.[name];
+  if (limits) {
+    input.min = limits.min;
+    input.max = limits.max;
+  }
+  input.step = FLOAT_SETTINGS.has(name) ? "0.05" : "1";
+  input.placeholder = `default: ${formatValue(payload.defaults[name])}`;
+  const override = payload.overrides[name];
+  input.value = override === undefined || override === null ? "" : override;
+  field.append(input);
+  if (limits) {
+    const hint = document.createElement("small");
+    hint.className = "settings-hint";
+    hint.textContent = `${formatNumber(limits.min)}–${formatNumber(limits.max)}`;
+    field.append(hint);
+  }
+  return field;
+}
+
+function settingsField(name) {
+  const wrap = document.createElement("div");
+  wrap.className = "settings-field";
+  const label = document.createElement("label");
+  label.htmlFor = `setting-${name}`;
+  label.textContent = SETTING_LABELS[name];
+  wrap.append(label);
+  return wrap;
+}
+
+function setSettingsStatus(message, kind) {
+  settingsStatus.hidden = false;
+  settingsStatus.textContent = message;
+  settingsStatus.className = `settings-status ${kind || ""}`;
+}
+
+function clearSettingsStatus() {
+  settingsStatus.hidden = true;
+  settingsStatus.textContent = "";
+}
 
 /* ---------- session log (client-side; the server keeps no session listing) ---------- */
 

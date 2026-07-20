@@ -24,7 +24,6 @@ from uni_rag_agent.indexing import (
     semantic_search_many,
     sync_vector_index,
 )
-from uni_rag_agent.indexing.embedding_providers import factory as factory_module
 from uni_rag_agent.indexing.embedding_providers import (
     google_genai as google_genai_module,
 )
@@ -45,6 +44,16 @@ from tests.support import (
     initialized_connection,
     make_config as make_test_config,
 )
+
+
+@pytest.fixture(autouse=True)
+def disable_gemini_request_delay_for_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        google_genai_module, "GEMINI_EMBEDDING_REQUEST_DELAY_SECONDS", 0.0
+    )
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

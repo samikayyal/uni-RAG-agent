@@ -27,12 +27,17 @@ The implemented pipeline is complete through evaluation hardening:
    models, timeout-safe persistence boundaries, server-verified session resume,
    stale-history reconciliation, deduplicated structured answer rendering,
    visible failure states, bidirectional answer text, active ask phase/elapsed
-   feedback, and safe cancellation that prevents late answer persistence.
+   feedback, safe cancellation that prevents late answer persistence, and a
+   bounded web-settings surface (embedding profile and retrieval tuning
+   overrides persisted in `data/app_settings.json`, DEC-041).
 8. Fixture-isolated evaluation preparation, deterministic scoring, atomic state
    activation, drift validation, and redacted JSON/Markdown reports.
 9. Cross-cutting maintenance hardening: one canonical logical-index taxonomy and
    a thin CLI composition root with separated command families, renderers, and
    telemetry adapters.
+10. Gemini embedding requests are paced at one second per attempt, including
+    transient retries, to reduce Free-tier request-rate failures while keeping
+    the existing provider retry and batch-commit behavior.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

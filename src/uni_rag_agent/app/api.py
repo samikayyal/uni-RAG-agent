@@ -44,6 +44,7 @@ from .service import (
     SessionCapacityError,
     SessionRegistry,
 )
+from .settings import SettingsError, WebSettingsStore, describe_settings
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PositiveId = Annotated[int, ApiPath(gt=0)]
@@ -76,6 +77,28 @@ class AskRequest(BaseModel):
     )
 
 
+class SettingsUpdateRequest(BaseModel):
+    """Web-adjustable settings only; sensitive fields are rejected as extras.
+
+    A field set to ``null`` clears its override so the environment default
+    applies again; omitted fields are left unchanged.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    embedding_model: str | None = None
+    keyword_top_k: int | None = None
+    semantic_top_k: int | None = None
+    metadata_top_k: int | None = None
+    final_top_k: int | None = None
+    rrf_k: int | None = None
+    semantic_query_limit: int | None = None
+    filename_fuzzy_threshold: int | None = None
+    path_fuzzy_threshold: int | None = None
+    evidence_max_tokens: int | None = None
+    query_plan_min_confidence: float | None = None
+
+
 class ApiError(RuntimeError):
     def __init__(self, status_code: int, code: str, message: str) -> None:
         super().__init__(message)
@@ -94,9 +117,11 @@ def create_app(
     model_registry: ModelRegistry | None = None,
     ask_registry: ActiveAskRegistry | None = None,
     warm_models: bool = True,
+    settings_store: WebSettingsStore | None = None,
 ) -> FastAPI:
     """Create an app with injectable services and cached model instances."""
     resolved = services or AppServices()
+    web_settings = settings_store or WebSettingsStore()
     resolved_model_registry = (
         model_registry
         if model_registry is not None
@@ -179,18 +204,44 @@ def create_app(
     async def handle_unexpected_error(_: Request, __: Exception) -> JSONResponse:
         return _error_response(500, "internal_error", "An internal error occurred.")
 
+    def _base_config() -> Config:
+        return _load_config(config_loader)
+
+    def _effective_config() -> Config:
+        """Load env configuration with stored web settings layered on top.
+
+        Reads the merged .env and the settings-override file, so async
+        handlers always call it through ``asyncio.to_thread``.
+        """
+        return web_settings.apply(_base_config())
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/config")
     async def config_view() -> dict[str, object]:
-        config = _load_config(config_loader)
-        return _public_config(config)
+        return _public_config(await asyncio.to_thread(_effective_config))
+
+    @app.get("/api/settings")
+    async def settings_view() -> dict[str, object]:
+        config = await asyncio.to_thread(_base_config)
+        overrides = await asyncio.to_thread(web_settings.load_overrides, config)
+        return describe_settings(config, overrides)
+
+    @app.put("/api/settings")
+    async def settings_update(payload: SettingsUpdateRequest) -> dict[str, object]:
+        config = await asyncio.to_thread(_base_config)
+        changes = payload.model_dump(exclude_unset=True)
+        try:
+            overrides = await asyncio.to_thread(web_settings.update, config, changes)
+        except SettingsError as exc:
+            raise ApiError(422, "settings_validation_error", str(exc)) from exc
+        return describe_settings(config, overrides)
 
     @app.post("/api/ask")
     async def ask(payload: AskRequest) -> dict[str, object]:
-        config = _load_config(config_loader)
+        config = await asyncio.to_thread(_effective_config)
         gate = PersistenceGate()
         if payload.request_id is not None and not active_asks.register(
             payload.request_id, gate
@@ -271,7 +322,7 @@ def create_app(
 
     @app.get("/api/search-runs/{search_run_id}/coverage")
     async def coverage(search_run_id: PositiveId) -> dict[str, object]:
-        config = _load_config(config_loader)
+        config = await asyncio.to_thread(_effective_config)
         try:
             result = await asyncio.to_thread(
                 resolved.explain_search_coverage,
@@ -284,7 +335,7 @@ def create_app(
 
     @app.get("/api/evidence-packets/{evidence_packet_id}")
     async def evidence_packet(evidence_packet_id: PositiveId) -> dict[str, object]:
-        config = _load_config(config_loader)
+        config = await asyncio.to_thread(_effective_config)
         try:
             packet = await asyncio.to_thread(
                 resolved.load_evidence_packet,
@@ -297,7 +348,7 @@ def create_app(
 
     @app.get("/api/answers/{answer_id}")
     async def answer(answer_id: PositiveId) -> dict[str, object]:
-        config = _load_config(config_loader)
+        config = await asyncio.to_thread(_effective_config)
         try:
             loaded = await asyncio.to_thread(resolved.load_answer, config, answer_id)
             packet = await asyncio.to_thread(
