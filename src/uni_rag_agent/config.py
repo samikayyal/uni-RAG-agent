@@ -14,7 +14,7 @@ FALSE_VALUES = {"0", "false", "no", "off"}
 ALLOWED_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 ALLOWED_LLM_PROVIDERS = {"openai", "anthropic", "gemini", "ollama"}
 DEFAULT_ANSWER_PROMPT_MAX_TOKENS = 16_000
-DEFAULT_ASK_TIMEOUT_SECONDS = 60 * 5 
+DEFAULT_ASK_TIMEOUT_SECONDS = 60 * 5
 
 
 class ConfigError(ValueError):
