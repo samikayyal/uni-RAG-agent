@@ -100,7 +100,6 @@ def build_embeddings(
     loader: Callable[..., object] | None = None,
 ) -> tuple[object, int]:
     """Load a reviewed local model and probe its runtime dimension."""
-    del config  # Local Hugging Face loading is configured by the profile.
     constructor = (
         loader(profile, error=error)
         if loader is not None
@@ -110,8 +109,14 @@ def build_embeddings(
     if profile.trust_remote_code:
         model_kwargs["trust_remote_code"] = True
     try:
+        model_name = profile.effective_api_model_name
+        if (
+            profile.model_name == "google/embeddinggemma-300m"
+            and config.embeddinggemma_model_path is not None
+        ):
+            model_name = str(config.embeddinggemma_model_path)
         embeddings = constructor(
-            model_name=profile.effective_api_model_name,
+            model_name=model_name,
             model_kwargs=model_kwargs,
         )
     except Exception as exc:  # pragma: no cover - real model/access boundary

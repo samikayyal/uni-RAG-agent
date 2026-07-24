@@ -16,7 +16,7 @@ to verify details.
 | Keyword and vector indexing | [capabilities/keyword-and-vector-indexing.md](capabilities/keyword-and-vector-indexing.md) | `src/uni_rag_agent/indexing/`; `tests/test_keyword_indexing.py`, `test_vector_indexing.py`, `test_embedding_providers.py` | `index keyword/vector`, `search keyword/semantic`; SQLite `chunk_fts`, `embeddings`; Chroma under `data/indexes/vector/`; index JSONL |
 | Planning and hybrid retrieval | [capabilities/query-planning-and-retrieval.md](capabilities/query-planning-and-retrieval.md) | `src/uni_rag_agent/retrieval/{planner,metadata,rrf,core}.py`; `tests/test_query_planning.py`, `test_hybrid_retrieval.py` | `retrieve`; safe result JSON; non-persisting for SQLite search/evidence rows, Chroma, and `Courses/`; CLI JSONL run telemetry under `data/runs/` |
 | Evidence, coverage, and answers | [capabilities/evidence-and-answering.md](capabilities/evidence-and-answering.md) | `src/uni_rag_agent/retrieval/{evidence,evidence_persistence,evidence_models}.py`, `src/uni_rag_agent/answering/`; `tests/test_evidence_packets.py`, `test_answering.py` | `evidence build/show`, `answer`, `ask`; SQLite `search_runs`, `search_result_sets`, `search_results`, `evidence_packets`, append-only `answers`; retrieval/answering notebooks |
-| Web application | [capabilities/web-application.md](capabilities/web-application.md) | `src/uni_rag_agent/app/{api,service}.py`, `app/static/`; `tests/test_app.py` | `app serve`; local FastAPI routes and package-owned UI |
+| Web application | [capabilities/web-application.md](capabilities/web-application.md) | `src/uni_rag_agent/app/{api,service,public_demo,settings}.py`, `app/static/`; `tests/test_app.py`, `test_public_demo.py` | `app serve`; compatible local mode plus explicit public-demo routes and package-owned UI |
 | Evaluation | [capabilities/evaluation.md](capabilities/evaluation.md) | `src/uni_rag_agent/evaluation/`; `tests/test_evaluation.py` | `eval prepare-fixtures`, `eval run`; `evals/fixtures.json`, `evals/sources/`, `data/runs/eval/`, evaluation EDA notebook |
 
 Shared test assets: [`tests/fixtures/`](../tests/fixtures/),
@@ -41,4 +41,6 @@ copying the schema into docs.
 - Product boundary and stack: [project_overview.md](project_overview.md).
 - Domain vocabulary: [glossary.md](glossary.md).
 - Setup, reset, generated state, and evaluation modes: [operations.md](operations.md).
+- Operator-owned Cloud Run image preparation and deployment:
+  [`deployment/GCP_RUNBOOK.md`](../deployment/GCP_RUNBOOK.md).
 - Root [README.md](../README.md) is the short user/developer quickstart.

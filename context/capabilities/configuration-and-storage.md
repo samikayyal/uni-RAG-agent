@@ -20,6 +20,13 @@ resource-exhausted/quota errors (sticky wraparound rotation, per process);
 an error surfaces only when every key fails within one invocation
 (`src/uni_rag_agent/gemini_failover.py`; `tests/test_gemini_failover.py`).
 
+Public deployment configuration is fail-closed. `UNI_RAG_HOSTED_MODE=true`
+requires an existing offline EmbeddingGemma model directory.
+`UNI_RAG_PUBLIC_DEMO_ENABLED=true` additionally requires the Turnstile site and
+secret keys, a signing secret of at least 32 characters, and a Firestore
+project. Public query/settings/capacity/quota values are capped by validation;
+operators may lower them but cannot silently deploy broader values.
+
 ## Public entry points
 
 - `uv run -m uni_rag_agent config check`
@@ -50,6 +57,12 @@ an error surfaces only when every key fails within one invocation
   must remain intact.
 - Safe config output reports operational values, not API keys; public `/config`
   additionally omits absolute paths.
+- Deployment input review and staging are operator responsibilities documented
+  in `deployment/GCP_RUNBOOK.md`; the application has no deployment-preparation
+  or secret-scanning command.
+- Firestore stores only quota counters, request-id reservations, UTC buckets,
+  and keyed client digests. It is not an answer, query, evidence, IP-address,
+  or application-settings store.
 
 Binding decisions: [DEC-009/021](../decisions.md#dec-009021--uv-and-environment-configuration),
 [DEC-011](../decisions.md#dec-011--sqlite-authority-with-chroma-logical-indexes),

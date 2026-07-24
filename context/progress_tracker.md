@@ -38,6 +38,19 @@ The implemented pipeline is complete through evaluation hardening:
 10. Gemini document indexing uses the direct asynchronous Batch API with
     inline requests and per-job polling; interactive query batches remain
     synchronous so semantic search does not wait on a batch job.
+11. An explicit public-demo mode preserves the local web contract while adding
+    Turnstile-to-signed-token exchange, client-bound session ownership,
+    Firestore-backed idempotent quotas, a two-slot ask semaphore, request-scoped
+    bounded settings, per-tab history, and no public numeric history routes.
+12. Cloud Run deployment is operator-owned: the image consumes the selected
+    SQLite database and Chroma vectors directly from `data/`, only the ignored
+    offline model is staged with PowerShell, and the non-root multi-stage image
+    uses `/app` for packaged files and `/data` for mutable runtime state.
+13. Public-demo hardening rejects completed request-id replays before provider
+    work or capacity acquisition, normalizes all quota infrastructure failures
+    to the abuse-service 503 boundary. Deployment scanning, completeness checks,
+    and optional benchmark/smoke scripts are intentionally operator-owned and
+    are not part of the application.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

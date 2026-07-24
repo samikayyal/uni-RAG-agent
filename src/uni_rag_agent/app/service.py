@@ -13,7 +13,11 @@ from typing import Any
 from ..answering import AnswerResult, AnswerSession
 from ..answering.providers import build_answer_chat_model
 from ..config import Config, ConfigError
+from ..indexing import BuiltEmbeddingModel, SemanticSearchError, build_embedding_model
+from ..indexing.profiles import physical_collection_name, resolve_embedding_profile
+from ..indexing.vector import build_chroma_client
 from ..retrieval.planner import build_chat_model
+from ..search_contracts import LOGICAL_INDEX_TO_SOURCE_TYPE
 
 
 class AskCancelled(RuntimeError):
@@ -84,6 +88,163 @@ class ModelRegistry:
             return self._answer
 
 
+@dataclass(frozen=True)
+class EmbeddingRuntime:
+    built: BuiltEmbeddingModel
+    chroma_client: object
+    encoding_lock: object | None
+
+
+class EmbeddingRegistry:
+    """Reuse embedding providers and one Chroma client for the web process."""
+
+    def __init__(
+        self,
+        *,
+        embedding_builder: Callable[..., BuiltEmbeddingModel] = build_embedding_model,
+        chroma_builder: Callable[..., object] = build_chroma_client,
+    ) -> None:
+        self._embedding_builder = embedding_builder
+        self._chroma_builder = chroma_builder
+        self._lock = RLock()
+        self._models: dict[str, BuiltEmbeddingModel] = {}
+        self._errors: dict[str, Exception] = {}
+        self._profile_locks: dict[str, RLock] = {}
+        self._chroma_client: object | None = None
+        self._chroma_path: object | None = None
+        self._chroma_error: Exception | None = None
+        self._hosted_indexes_ready = False
+
+    def runtime(
+        self,
+        config: Config,
+        *,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> EmbeddingRuntime:
+        profile = resolve_embedding_profile(
+            config, config.embedding_model, error=SemanticSearchError
+        )
+        with self._lock:
+            if (
+                progress_callback is not None
+                and profile.provider == "huggingface"
+                and profile.model_name not in self._models
+                and profile.model_name not in self._errors
+            ):
+                progress_callback("loading_embedding_model")
+            built = self._model(config, profile.model_name)
+            client = self._client(config)
+            encoding_lock = None
+            if profile.provider == "huggingface":
+                encoding_lock = self._profile_locks.setdefault(
+                    profile.model_name, RLock()
+                )
+            return EmbeddingRuntime(
+                built=built,
+                chroma_client=client,
+                encoding_lock=encoding_lock,
+            )
+
+    def warm_hosted(self, config: Config) -> None:
+        """Eagerly construct Chroma and EmbeddingGemma for hosted readiness."""
+        hosted = replace(
+            config,
+            embedding_model="google/embeddinggemma-300m",
+        )
+        runtime = self.runtime(hosted)
+        self._hosted_indexes_ready = self._expected_indexes_ready(
+            runtime.chroma_client,
+            config.public_embedding_profiles,
+        )
+
+    def hosted_ready(self) -> bool:
+        with self._lock:
+            return (
+                self._chroma_client is not None
+                and "google/embeddinggemma-300m" in self._models
+                and self._hosted_indexes_ready
+                and self._chroma_error is None
+                and "google/embeddinggemma-300m" not in self._errors
+            )
+
+    def clear_failure(self, model_name: str | None = None) -> None:
+        """Allow an operator/test to retry a corrected runtime dependency."""
+        with self._lock:
+            if model_name is None:
+                self._errors.clear()
+                self._chroma_error = None
+                self._hosted_indexes_ready = False
+                return
+            self._errors.pop(model_name, None)
+
+    def _model(self, config: Config, model_name: str) -> BuiltEmbeddingModel:
+        previous_error = self._errors.get(model_name)
+        if previous_error is not None:
+            raise previous_error
+        existing = self._models.get(model_name)
+        if existing is not None:
+            return existing
+        try:
+            built = self._embedding_builder(
+                config, model_name, error=SemanticSearchError
+            )
+        except Exception as exc:  # noqa: BLE001 - cached/surfaced on request
+            self._errors[model_name] = exc
+            raise
+        self._models[model_name] = built
+        return built
+
+    def _client(self, config: Config) -> object:
+        path_identity = config.chroma_dir.resolve()
+        if self._chroma_path != path_identity:
+            self._chroma_client = None
+            self._chroma_error = None
+            self._hosted_indexes_ready = False
+            self._chroma_path = path_identity
+        if self._chroma_error is not None:
+            raise self._chroma_error
+        if self._chroma_client is None:
+            try:
+                self._chroma_client = self._chroma_builder(
+                    config, error=SemanticSearchError
+                )
+            except Exception as exc:  # noqa: BLE001 - cached/surfaced on request
+                self._chroma_error = exc
+                raise
+        return self._chroma_client
+
+    @staticmethod
+    def _expected_indexes_ready(client: object, model_names: tuple[str, ...]) -> bool:
+        """Check local collection metadata only; never construct hosted providers."""
+        try:
+            existing = {
+                getattr(item, "name", str(item))
+                for item in client.list_collections()  # type: ignore[attr-defined]
+            }
+            for model_name in model_names:
+                profile = resolve_embedding_profile(
+                    None, model_name, error=SemanticSearchError
+                )
+                names = (
+                    physical_collection_name(
+                        logical_index,
+                        provider=profile.provider,
+                        model_name=profile.model_name,
+                        dimension=profile.dimension,
+                        metric=profile.metric,
+                    )
+                    for logical_index in LOGICAL_INDEX_TO_SOURCE_TYPE
+                )
+                if not any(
+                    name in existing and int(client.get_collection(name).count()) > 0  # type: ignore[attr-defined]
+                    for name in names
+                ):
+                    return False
+        except Exception:
+            return False
+        return True
+
+
 class PersistenceGate:
     """Make request cancellation atomic with answer persistence."""
 
@@ -149,29 +310,38 @@ class ActiveAskRegistry:
 
     def __init__(self) -> None:
         self._lock = Lock()
-        self._gates: dict[str, PersistenceGate] = {}
+        self._gates: dict[str, tuple[PersistenceGate, str | None]] = {}
 
-    def register(self, request_id: str, gate: PersistenceGate) -> bool:
+    def register(
+        self, request_id: str, gate: PersistenceGate, owner: str | None = None
+    ) -> bool:
         with self._lock:
             if request_id in self._gates:
                 return False
-            self._gates[request_id] = gate
+            self._gates[request_id] = (gate, owner)
             return True
 
     def complete(self, request_id: str, gate: PersistenceGate) -> None:
         with self._lock:
-            if self._gates.get(request_id) is gate:
+            entry = self._gates.get(request_id)
+            if entry is not None and entry[0] is gate:
                 del self._gates[request_id]
 
-    def progress(self, request_id: str) -> dict[str, object] | None:
+    def progress(
+        self, request_id: str, owner: str | None = None
+    ) -> dict[str, object] | None:
         with self._lock:
-            gate = self._gates.get(request_id)
-        return gate.progress() if gate is not None else None
+            entry = self._gates.get(request_id)
+        if entry is None or entry[1] != owner:
+            return None
+        return entry[0].progress()
 
-    def cancel(self, request_id: str) -> bool | None:
+    def cancel(self, request_id: str, owner: str | None = None) -> bool | None:
         with self._lock:
-            gate = self._gates.get(request_id)
-        return gate.cancel() if gate is not None else None
+            entry = self._gates.get(request_id)
+        if entry is None or entry[1] != owner:
+            return None
+        return entry[0].cancel()
 
 
 @dataclass
@@ -270,6 +440,7 @@ class AskOrchestrator:
         session_factory: Callable[[Config], AnswerSession] = AnswerSession,
         enforce_model_config: bool = False,
         model_registry: ModelRegistry | None = None,
+        embedding_registry: EmbeddingRegistry | None = None,
     ) -> None:
         self._build_evidence = build_evidence
         self._generate_answer = generate_answer
@@ -278,6 +449,7 @@ class AskOrchestrator:
         self._session_factory = session_factory
         self._enforce_model_config = enforce_model_config
         self._model_registry = model_registry
+        self._embedding_registry = embedding_registry
 
     def ask(
         self,
@@ -285,7 +457,7 @@ class AskOrchestrator:
         query: str,
         session_id: str | None,
         gate: PersistenceGate,
-    ) -> tuple[AnswerResult, Any]:
+    ) -> tuple[AnswerResult, Any, Any]:
         if self._enforce_model_config and (
             config.llm_provider is None
             or config.llm_model is None
@@ -306,19 +478,32 @@ class AskOrchestrator:
         query: str,
         session: AnswerSession,
         gate: PersistenceGate,
-    ) -> tuple[AnswerResult, Any]:
+    ) -> tuple[AnswerResult, Any, Any]:
         context = session.conversation_context
         planner_model = (
             self._model_registry.planner(config)
             if self._model_registry is not None
             else None
         )
+        embedding_kwargs: dict[str, object] = {}
+        if self._embedding_registry is not None:
+            runtime = self._embedding_registry.runtime(
+                config,
+                progress_callback=gate.set_phase,
+            )
+            embedding_kwargs = {
+                "built_embedding": runtime.built,
+                "chroma_client": runtime.chroma_client,
+            }
+            if runtime.encoding_lock is not None:
+                embedding_kwargs["encoding_lock"] = runtime.encoding_lock
         evidence_result = self._build_evidence(
             config,
             query,
             conversation_context=context,
             chat_model=planner_model,
             progress_callback=gate.set_phase,
+            **embedding_kwargs,
         )
         gate.record_evidence(
             evidence_result.search_run_id,
@@ -358,4 +543,4 @@ class AskOrchestrator:
             evidence_packet_id=evidence_result.evidence_packet_id,
             search_run_id=evidence_result.search_run_id,
         )
-        return completed, evidence_result.coverage
+        return completed, evidence_result.coverage, evidence_result.packet

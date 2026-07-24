@@ -9,6 +9,7 @@ from typing import Protocol
 
 from uni_rag_agent.config import Config, validate_config
 from uni_rag_agent.indexing import (
+    BuiltEmbeddingModel,
     SemanticSearchError,
     keyword_search_terms,
     semantic_search_many,
@@ -70,6 +71,9 @@ def retrieve(
     model: str | None = None,
     *,
     chat_model: object | None = None,
+    built_embedding: BuiltEmbeddingModel | None = None,
+    chroma_client: object | None = None,
+    encoding_lock: object | None = None,
 ) -> RetrievalRun:
     """Run metadata, keyword, and semantic retrieval without persistence."""
     return _execute_retrieval(
@@ -78,6 +82,9 @@ def retrieve(
         conversation_context=conversation_context,
         model=model,
         chat_model=chat_model,
+        built_embedding=built_embedding,
+        chroma_client=chroma_client,
+        encoding_lock=encoding_lock,
     ).run
 
 
@@ -90,6 +97,9 @@ def _execute_retrieval(
     chat_model: object | None = None,
     recorder: _SearchRunRecorder | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    built_embedding: BuiltEmbeddingModel | None = None,
+    chroma_client: object | None = None,
+    encoding_lock: object | None = None,
 ) -> _RetrievalExecution:
     """Execute planner, backends, and RRF with an optional persistence seam."""
     normalized_query = normalize_query(query)
@@ -171,12 +181,20 @@ def _execute_retrieval(
             recorder.record_result_set(result_sets[-1])
 
         _report_progress(progress_callback, "semantic_search")
+        semantic_kwargs: dict[str, object] = {}
+        if built_embedding is not None:
+            semantic_kwargs["built_embedding"] = built_embedding
+        if chroma_client is not None:
+            semantic_kwargs["chroma_client"] = chroma_client
+        if encoding_lock is not None:
+            semantic_kwargs["encoding_lock"] = encoding_lock
         semantic_result_sets = semantic_search_many(
             config,
             query_plan.semantic_queries,
             courses=query_plan.candidate_courses,
             indexes=query_plan.candidate_indexes,
             model=profile.model_name,
+            **semantic_kwargs,
         )
         if len(semantic_result_sets) != len(query_plan.semantic_queries):
             raise SemanticSearchError(

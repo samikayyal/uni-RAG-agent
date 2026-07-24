@@ -18,27 +18,61 @@ const settingsStatus = document.querySelector("#settings-status");
 const settingsSaveButton = document.querySelector("#settings-save");
 const settingsResetButton = document.querySelector("#settings-reset");
 const settingsCloseButton = document.querySelector("#settings-close");
+const settingsNote = document.querySelector("#settings-note");
+const turnstilePanel = document.querySelector("#turnstile-panel");
+const turnstileWidget = document.querySelector("#turnstile-widget");
+const browserState = window.UniRagBrowserState;
 
 const SESSIONS_KEY = "uni-rag-sessions";
 const ACTIVE_KEY = "uni-rag-active-session";
 const DETAILS_KEY = "uni-rag-details";
+const PUBLIC_SETTINGS_KEY = "uni-rag-public-settings";
+const DEMO_TOKEN_KEY = "uni-rag-demo-token";
+const DEMO_TOKEN_EXP_KEY = "uni-rag-demo-token-exp";
 
 let current = null;
 let packetLoadedFor = null;
-let sessions = loadSessions();
-let activeSessionId = localStorage.getItem(ACTIVE_KEY);
-if (activeSessionId && !findSession(activeSessionId)) activeSessionId = null;
-let activeSessionLive = activeSessionId ? null : false;
+let appMode = "local";
+let sessionStore = localStorage;
+let sessions = [];
+let activeSessionId = null;
+let activeSessionLive = false;
 let activeRequest = null;
+let settingsPayload = null;
+let turnstilePromise = null;
 
-detailsToggle.checked = localStorage.getItem(DETAILS_KEY) === "1";
-applyDetailsVisibility();
-renderSessionState();
-renderHistory();
-restoreActiveSession();
+initializeApp();
+
+async function initializeApp() {
+  setBusy(true, "Loading application mode…");
+  try {
+    settingsPayload = await requestJson("/api/settings");
+    appMode = settingsPayload.mode === "public" ? "public" : "local";
+    sessionStore = browserState.selectStore(appMode, localStorage, sessionStorage);
+    sessions = loadSessions();
+    activeSessionId = sessionStore.getItem(ACTIVE_KEY);
+    if (activeSessionId && !findSession(activeSessionId)) activeSessionId = null;
+    activeSessionLive = activeSessionId ? null : false;
+    detailsToggle.checked = sessionStore.getItem(DETAILS_KEY) === "1";
+    if (appMode === "public") {
+      queryInput.maxLength = settingsPayload.public_limits?.query_max_chars || 4000;
+      settingsNote.textContent = "Settings are private to this tab and are sent only with your next question. They are not written to the server.";
+      hydratePublicSettingsPayload();
+    }
+    applyDetailsVisibility();
+    renderSessionState();
+    renderHistory();
+    await restoreActiveSession();
+    clearStatus();
+  } catch (error) {
+    setStatus(`Could not initialize the application: ${error.message}`, "error");
+  } finally {
+    setBusy(false);
+  }
+}
 
 detailsToggle.addEventListener("change", () => {
-  localStorage.setItem(DETAILS_KEY, detailsToggle.checked ? "1" : "0");
+  sessionStore.setItem(DETAILS_KEY, detailsToggle.checked ? "1" : "0");
   applyDetailsVisibility();
 });
 
@@ -47,7 +81,7 @@ newSessionButton.addEventListener("click", () => {
   activeSessionLive = false;
   current = null;
   packetLoadedFor = null;
-  localStorage.removeItem(ACTIVE_KEY);
+  sessionStore.removeItem(ACTIVE_KEY);
   clearResult();
   clearStatus();
   queryInput.value = "";
@@ -64,6 +98,14 @@ form.addEventListener("submit", async (event) => {
   }
   const query = queryInput.value.trim();
   if (!query) return;
+  if (appMode === "public") {
+    try {
+      await ensureDemoToken();
+    } catch (error) {
+      setStatus(error.message, "error");
+      return;
+    }
+  }
   const requestId = generateRequestId();
   const controller = new AbortController();
   const request = {
@@ -82,14 +124,19 @@ form.addEventListener("submit", async (event) => {
     current = await requestJson("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, session_id: sessionId, request_id: requestId }),
+      body: JSON.stringify({
+        query,
+        session_id: sessionId,
+        request_id: requestId,
+        ...(appMode === "public" ? { retrieval_settings: publicRequestSettings() } : {}),
+      }),
       signal: controller.signal,
     });
     packetLoadedFor = null;
     activeSessionId = sessionId;
     activeSessionLive = true;
-    localStorage.setItem(ACTIVE_KEY, sessionId);
-    recordTurn(sessionId, query, current.answer_id);
+    sessionStore.setItem(ACTIVE_KEY, sessionId);
+    recordTurn(sessionId, query, current);
     renderSessionState();
     renderHistory();
     renderAnswer(current, query);
@@ -149,14 +196,16 @@ const SETTING_LABELS = {
   query_plan_min_confidence: "Minimum plan confidence",
 };
 const FLOAT_SETTINGS = new Set(["query_plan_min_confidence"]);
-let settingsPayload = null;
 
 settingsButton.addEventListener("click", async () => {
   settingsDialog.showModal();
   clearSettingsStatus();
   settingsFields.replaceChildren(emptyMessage("Loading current settings…"));
   try {
-    settingsPayload = await requestJson("/api/settings");
+    if (!settingsPayload || appMode === "local") {
+      settingsPayload = await requestJson("/api/settings");
+    }
+    if (appMode === "public") hydratePublicSettingsPayload();
     renderSettingsForm(settingsPayload);
   } catch (error) {
     settingsFields.replaceChildren(
@@ -211,11 +260,19 @@ async function submitSettings(changes, successMessage) {
   settingsSaveButton.disabled = true;
   settingsResetButton.disabled = true;
   try {
-    settingsPayload = await requestJson("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(changes),
-    });
+    if (appMode === "public") {
+      const stored = Object.fromEntries(
+        Object.entries(changes).filter(([, value]) => value !== null),
+      );
+      sessionStorage.setItem(PUBLIC_SETTINGS_KEY, JSON.stringify(stored));
+      settingsPayload = { ...settingsPayload, overrides: stored };
+    } else {
+      settingsPayload = await requestJson("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(changes),
+      });
+    }
     renderSettingsForm(settingsPayload);
     setSettingsStatus(successMessage, "ok");
   } catch (error) {
@@ -304,19 +361,113 @@ function clearSettingsStatus() {
   settingsStatus.textContent = "";
 }
 
-/* ---------- session log (client-side; the server keeps no session listing) ---------- */
-
-function loadSessions() {
+function hydratePublicSettingsPayload() {
+  if (!settingsPayload || appMode !== "public") return;
+  let stored = {};
   try {
-    const parsed = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(sessionStorage.getItem(PUBLIC_SETTINGS_KEY) || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) stored = parsed;
   } catch {
-    return [];
+    stored = {};
+  }
+  settingsPayload = { ...settingsPayload, overrides: stored };
+}
+
+function publicRequestSettings() {
+  if (appMode !== "public") return null;
+  hydratePublicSettingsPayload();
+  return { ...(settingsPayload?.overrides || {}) };
+}
+
+async function ensureDemoToken() {
+  if (appMode !== "public") return null;
+  const state = browserState.tokenState(
+    sessionStorage,
+    DEMO_TOKEN_KEY,
+    DEMO_TOKEN_EXP_KEY,
+    Math.floor(Date.now() / 1000),
+  );
+  if (state.valid) return state.token;
+  if (state.renewalRequired && activeSessionId) {
+    detachActiveSession();
+    renderSessionState();
+  }
+  sessionStorage.removeItem(DEMO_TOKEN_KEY);
+  sessionStorage.removeItem(DEMO_TOKEN_EXP_KEY);
+  if (!turnstilePromise) turnstilePromise = runTurnstile();
+  try {
+    return await turnstilePromise;
+  } finally {
+    turnstilePromise = null;
   }
 }
 
+function runTurnstile() {
+  const sitekey = settingsPayload?.turnstile_site_key;
+  if (!sitekey) return Promise.reject(new Error("Public verification is not configured."));
+  turnstilePanel.hidden = false;
+  setStatus("Complete the one-time verification for this tab.", "working");
+  return loadTurnstileScript().then(() => new Promise((resolve, reject) => {
+    turnstileWidget.replaceChildren();
+    window.turnstile.render(turnstileWidget, {
+      sitekey,
+      callback: async (turnstileToken) => {
+        try {
+          const session = await requestJson("/api/demo/session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ turnstile_token: turnstileToken }),
+          });
+          sessionStorage.setItem(DEMO_TOKEN_KEY, session.demo_token);
+          sessionStorage.setItem(DEMO_TOKEN_EXP_KEY, String(session.expires_at));
+          turnstilePanel.hidden = true;
+          clearStatus();
+          resolve(session.demo_token);
+        } catch (error) {
+          reject(error);
+        }
+      },
+      "error-callback": () => reject(new Error("Verification could not be completed.")),
+      "expired-callback": () => reject(new Error("Verification expired. Please try again.")),
+    });
+  }));
+}
+
+function loadTurnstileScript() {
+  if (window.turnstile) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector("script[data-uni-rag-turnstile]");
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.dataset.uniRagTurnstile = "1";
+    script.addEventListener("load", resolve, { once: true });
+    script.addEventListener("error", () => reject(new Error("Verification service could not be loaded.")), { once: true });
+    document.head.append(script);
+  });
+}
+
+/* ---------- session log (client-side; the server keeps no session listing) ---------- */
+
+function loadSessions() {
+  return browserState.loadSessions(sessionStore, SESSIONS_KEY);
+}
+
 function saveSessions() {
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions.slice(0, 50)));
+  const limit = appMode === "public" ? 20 : 50;
+  sessions = browserState.saveSessions(
+    sessionStore,
+    SESSIONS_KEY,
+    sessions,
+    limit,
+    appMode === "public",
+  );
 }
 
 function findSession(id) {
@@ -324,20 +475,24 @@ function findSession(id) {
 }
 
 function generateSessionId() {
-  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return crypto.randomUUID();
 }
 
 function generateRequestId() {
-  return `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return crypto.randomUUID();
 }
 
-function recordTurn(sessionId, query, answerId) {
+function recordTurn(sessionId, query, answerPayload) {
   let session = findSession(sessionId);
   if (!session) {
     session = { id: sessionId, title: query, turns: [], updated: 0 };
     sessions.unshift(session);
   }
-  session.turns.push({ query, answer_id: answerId, at: Date.now() });
+  session.turns.push({ query, answer_id: answerPayload.answer_id, at: Date.now() });
+  if (appMode === "public") {
+    session.latest = { query, payload: answerPayload };
+    session.settings = publicRequestSettings();
+  }
   session.updated = Date.now();
   sessions = [session, ...sessions.filter((entry) => entry.id !== sessionId)];
   saveSessions();
@@ -395,10 +550,57 @@ async function resumeSession(session) {
   clearResult();
   activeSessionId = session.id;
   activeSessionLive = null;
-  localStorage.setItem(ACTIVE_KEY, session.id);
+  sessionStore.setItem(ACTIVE_KEY, session.id);
   renderSessionState();
   renderHistory();
   const lastTurn = session.turns[session.turns.length - 1];
+  if (appMode === "public") {
+    const initialDecision = browserState.publicResumeDecision(session, {
+      tokenRenewed: false,
+      serverLive: false,
+    });
+    if (initialDecision.remove) {
+      removeSession(session.id);
+      setStatus("This tab history entry is incomplete, so it was removed.", "error");
+      renderSessionState();
+      renderHistory();
+      return;
+    }
+    const latest = session.latest;
+    current = initialDecision.payload;
+    packetLoadedFor = current.evidence_packet_id;
+    renderAnswer(current, latest.query);
+    setBusy(true, "Checking whether the session is still active…");
+    try {
+      await ensureDemoToken();
+      const tokenRenewed = activeSessionId !== session.id;
+      if (tokenRenewed) {
+        setStatus("The saved answer was restored, but the renewed demo token starts a new server session.", "working");
+        return;
+      }
+      const state = await loadSessionState(session.id);
+      const decision = browserState.publicResumeDecision(session, {
+        tokenRenewed,
+        serverLive: state?.live,
+      });
+      if (decision.continueSession) {
+        activeSessionLive = true;
+        clearStatus();
+      } else {
+        detachActiveSession();
+        setStatus("The saved answer was restored, but its server context has expired. Start a new session before asking another question.", "error");
+      }
+    } catch (error) {
+      detachActiveSession();
+      setStatus(`The saved answer was restored, but session liveness could not be verified: ${error.message}`, "error");
+    } finally {
+      setBusy(false);
+      renderSessionState();
+      renderHistory();
+      applyDetailsVisibility();
+    }
+    return;
+  }
   if (!lastTurn?.answer_id) {
     setBusy(true, "Checking whether the session is still active…");
     try {
@@ -476,7 +678,7 @@ async function loadSessionState(sessionId) {
 function detachActiveSession() {
   activeSessionId = null;
   activeSessionLive = false;
-  localStorage.removeItem(ACTIVE_KEY);
+  sessionStore.removeItem(ACTIVE_KEY);
 }
 
 function removeSession(sessionId) {
@@ -519,7 +721,10 @@ function applyDetailsVisibility() {
 async function loadEvidencePacket() {
   const packetId = current.evidence_packet_id;
   try {
-    const packet = await requestJson(`/api/evidence-packets/${packetId}`);
+    const packet = appMode === "public"
+      ? current.evidence_packet
+      : await requestJson(`/api/evidence-packets/${packetId}`);
+    if (!packet) throw new Error("The answer does not contain packet details.");
     packetLoadedFor = packetId;
     renderPlan(packet);
     renderEvidencePacket(packet);
@@ -531,12 +736,24 @@ async function loadEvidencePacket() {
 }
 
 async function requestJson(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (appMode === "public" && !url.startsWith("/api/demo/session")) {
+    const token = sessionStorage.getItem(DEMO_TOKEN_KEY);
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
+  options = { ...options, headers };
   const response = await fetch(url, options);
   const body = await response.json();
   if (!response.ok) {
     const error = new Error(body?.error?.message || `Request failed (${response.status}).`);
     error.status = response.status;
     error.code = body?.error?.code;
+    if (response.status === 401 && appMode === "public") {
+      sessionStorage.removeItem(DEMO_TOKEN_KEY);
+      sessionStorage.removeItem(DEMO_TOKEN_EXP_KEY);
+      detachActiveSession();
+      renderSessionState();
+    }
     throw error;
   }
   return body;
@@ -570,6 +787,7 @@ function renderRequestFeedback(request) {
   if (activeRequest !== request || request.cancelled) return;
   const elapsed = request.progress?.elapsed_seconds ?? (Date.now() - request.startedAt) / 1000;
   const phaseLabels = {
+    loading_embedding_model: "Loading the embedding model",
     planning: "Planning the search",
     keyword_search: "Running keyword search",
     semantic_search: "Running semantic search",
@@ -615,8 +833,14 @@ function renderAnswer(payload, queryText) {
   renderLimitations(payload.limitations || []);
   renderCoverage(payload.coverage || {});
   renderTrace(payload);
-  setPanel("#d-plan", emptyMessage("Loading persisted evidence packet…"));
-  setPanel("#d-evidence", emptyMessage("Loading persisted evidence packet…"));
+  if (appMode === "public" && payload.evidence_packet) {
+    packetLoadedFor = payload.evidence_packet_id;
+    renderPlan(payload.evidence_packet);
+    renderEvidencePacket(payload.evidence_packet);
+  } else {
+    setPanel("#d-plan", emptyMessage("Loading persisted evidence packet…"));
+    setPanel("#d-evidence", emptyMessage("Loading persisted evidence packet…"));
+  }
   result.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -752,6 +976,11 @@ function renderTrace(payload) {
     search_run_id: payload.search_run_id,
     evidence_packet_id: payload.evidence_packet_id,
   }));
+  if (appMode === "public") {
+    fragment.append(paragraph("Historical numeric-ID lookup routes are disabled in public mode; this response already contains the complete packet detail."));
+    setPanel("#d-trace", fragment);
+    return;
+  }
   const links = document.createElement("div");
   links.className = "api-links";
   [

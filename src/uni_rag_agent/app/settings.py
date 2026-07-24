@@ -45,6 +45,18 @@ INT_SETTINGS: dict[str, NumericBounds] = {
 FLOAT_SETTINGS: dict[str, NumericBounds] = {
     "query_plan_min_confidence": NumericBounds(0.0, 1.0),
 }
+PUBLIC_INT_SETTINGS: dict[str, NumericBounds] = {
+    "keyword_top_k": NumericBounds(1, 40),
+    "semantic_top_k": NumericBounds(1, 40),
+    "metadata_top_k": NumericBounds(1, 40),
+    "final_top_k": NumericBounds(1, 15),
+    "rrf_k": INT_SETTINGS["rrf_k"],
+    "semantic_query_limit": NumericBounds(1, 3),
+    "filename_fuzzy_threshold": INT_SETTINGS["filename_fuzzy_threshold"],
+    "path_fuzzy_threshold": INT_SETTINGS["path_fuzzy_threshold"],
+    "evidence_max_tokens": NumericBounds(500, 16_000),
+}
+PUBLIC_FLOAT_SETTINGS = FLOAT_SETTINGS
 WEB_SETTING_NAMES: tuple[str, ...] = (
     "embedding_model",
     *INT_SETTINGS,
@@ -84,6 +96,66 @@ def _validated_value(name: str, value: object) -> object:
             )
         return float(value)
     raise SettingsError(f"{name} is not a web-adjustable setting.")
+
+
+def validate_public_settings(
+    config: Config, values: dict[str, object]
+) -> dict[str, object]:
+    """Validate request-scoped public settings without reading or writing disk."""
+    validated: dict[str, object] = {}
+    for name, value in values.items():
+        if value is None:
+            continue
+        if name == "embedding_model":
+            if not isinstance(value, str) or not value.strip():
+                raise SettingsError("embedding_model must be a deployed profile name.")
+            profile = resolve_embedding_profile(config, value, error=SettingsError)
+            if profile.model_name not in config.public_embedding_profiles:
+                raise SettingsError(
+                    "embedding_model is not deployed for the public demo."
+                )
+            validated[name] = profile.model_name
+            continue
+        if name in PUBLIC_INT_SETTINGS:
+            bounds = PUBLIC_INT_SETTINGS[name]
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise SettingsError(
+                    f"{name} must be an integer between "
+                    f"{int(bounds.minimum)} and {int(bounds.maximum)}."
+                )
+            if not bounds.minimum <= value <= bounds.maximum:
+                raise SettingsError(
+                    f"{name} must be between {int(bounds.minimum)} "
+                    f"and {int(bounds.maximum)}."
+                )
+            validated[name] = value
+            continue
+        if name in PUBLIC_FLOAT_SETTINGS:
+            bounds = PUBLIC_FLOAT_SETTINGS[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise SettingsError(
+                    f"{name} must be a number between {bounds.minimum} "
+                    f"and {bounds.maximum}."
+                )
+            numeric = float(value)
+            if not bounds.minimum <= numeric <= bounds.maximum:
+                raise SettingsError(
+                    f"{name} must be between {bounds.minimum} and {bounds.maximum}."
+                )
+            validated[name] = numeric
+            continue
+        raise SettingsError(f"{name} is not a public request setting.")
+    return validated
+
+
+def apply_public_settings(config: Config, values: dict[str, object]) -> Config:
+    """Overlay public request settings on deployment defaults in memory only."""
+    defaults = replace(
+        config,
+        embedding_model=config.public_default_embedding_model,
+    )
+    validated = validate_public_settings(defaults, values)
+    return replace(defaults, **validated) if validated else defaults
 
 
 class WebSettingsStore:
@@ -165,6 +237,7 @@ def describe_settings(
         for name, bounds in {**INT_SETTINGS, **FLOAT_SETTINGS}.items()
     }
     return {
+        "mode": "local",
         "settings": {**defaults, **overrides},
         "defaults": defaults,
         "overrides": dict(overrides),
@@ -178,4 +251,51 @@ def describe_settings(
             for _, profile in sorted(EMBEDDING_PROFILES.items())
         ],
         "limits": limits,
+    }
+
+
+def describe_public_settings(config: Config) -> dict[str, object]:
+    """Return deployment defaults and public-only bounds without local overrides."""
+    defaults = {
+        name: (
+            config.public_default_embedding_model
+            if name == "embedding_model"
+            else getattr(config, name)
+        )
+        for name in WEB_SETTING_NAMES
+    }
+    limits = {
+        name: {"min": bounds.minimum, "max": bounds.maximum}
+        for name, bounds in {
+            **PUBLIC_INT_SETTINGS,
+            **PUBLIC_FLOAT_SETTINGS,
+        }.items()
+    }
+    profiles = []
+    for model_name in config.public_embedding_profiles:
+        profile = EMBEDDING_PROFILES[model_name]
+        profiles.append(
+            {
+                "model_name": profile.model_name,
+                "provider": profile.provider,
+                "dimension": profile.dimension,
+                "requires_extra": profile.requires_extra,
+            }
+        )
+    return {
+        "mode": "public",
+        "settings": defaults,
+        "defaults": defaults,
+        "overrides": {},
+        "embedding_model_profiles": profiles,
+        "limits": limits,
+        "public_limits": {
+            "query_max_chars": config.public_query_max_chars,
+            "token_ttl_seconds": config.demo_token_ttl_seconds,
+            "minute_asks": config.public_minute_limit,
+            "client_daily_asks": config.public_client_daily_limit,
+            "global_daily_asks": config.public_global_daily_limit,
+            "active_asks": config.public_ask_capacity,
+        },
+        "turnstile_site_key": config.turnstile_site_key,
     }

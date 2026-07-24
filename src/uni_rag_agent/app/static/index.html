@@ -29,6 +29,10 @@
       </header>
 
       <form id="ask-form" class="ask-panel">
+        <div id="turnstile-panel" class="turnstile-panel" hidden>
+          <p>Complete the one-time verification for this browser tab.</p>
+          <div id="turnstile-widget"></div>
+        </div>
         <textarea id="query" name="query" maxlength="10000" rows="3" required
           placeholder="e.g. Explain MapReduce from my courses" aria-label="Question"></textarea>
         <div class="ask-row">
@@ -100,7 +104,7 @@
     <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
       <form id="settings-form" novalidate>
         <h2 id="settings-title" class="settings-title">Retrieval settings</h2>
-        <p class="settings-note">
+        <p id="settings-note" class="settings-note">
           Blank fields use the server configuration. Changes are saved on this
           machine and apply from your next question. A selected embedding model
           must already have a built vector index.
@@ -118,6 +122,7 @@
       </form>
     </dialog>
 
+    <script src="/static/browser_state.js" defer></script>
     <script src="/static/app.js" defer></script>
   </body>
 </html>

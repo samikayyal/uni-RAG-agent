@@ -1,6 +1,7 @@
 # Uni RAG Agent
 
-Uni RAG Agent is a local course-archive intelligence system. It inventories
+Uni RAG Agent is a course-archive intelligence system with a private local mode
+and an explicitly enabled, abuse-bounded public demo mode. It inventories
 `Courses/`, extracts searchable text and bounded data summaries, maintains FTS5
 and Chroma indexes, and answers from persisted source-grounded evidence with
 coverage and citations.
@@ -70,6 +71,19 @@ uv run -m uni_rag_agent eval prepare-fixtures
 uv run -m uni_rag_agent eval run
 uv run -m uni_rag_agent eval run --smoke-real-archive
 ```
+
+Local mode remains the default: browser retrieval settings persist to
+`data/app_settings.json`, history uses the existing local API projections, and
+no CAPTCHA or shared public quota is involved. Public demo mode is enabled only
+through deployment environment configuration; it uses Turnstile, signed
+per-tab sessions, Firestore-backed quotas, bounded request-scoped settings, and
+three predeployed embedding profiles.
+
+For the public deployment workflow, the image reads `data/uni_rag.sqlite` and
+`data/indexes/vector/` directly and requires only the accepted local
+EmbeddingGemma snapshot to be staged with the PowerShell commands in
+[the Cloud Run runbook](deployment/GCP_RUNBOOK.md). The application does not
+audit deployment inputs or create or modify GCP or Cloudflare resources.
 
 `retrieve` is read-only with respect to SQLite search/evidence rows, Chroma, and
 `Courses/` source files; the CLI still writes JSONL run telemetry under

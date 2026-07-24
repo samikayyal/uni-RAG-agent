@@ -12,6 +12,7 @@ wheels/
 # Data
 Courses/
 data/
+deployment/assets/
 .env
 
 # Tooling and caches
@@ -30,3 +31,7 @@ data/
 
 .brooks-lint*
 manual_testing/
+
+deployment\GCP_RUNBOOK.md
+data.pre-colab-20260724-172055
+*.zip

@@ -14,7 +14,12 @@ FALSE_VALUES = {"0", "false", "no", "off"}
 ALLOWED_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 ALLOWED_LLM_PROVIDERS = {"openai", "anthropic", "gemini", "ollama"}
 DEFAULT_ANSWER_PROMPT_MAX_TOKENS = 16_000
-DEFAULT_ASK_TIMEOUT_SECONDS = 60 * 5
+DEFAULT_ASK_TIMEOUT_SECONDS = 120
+PUBLIC_EMBEDDING_PROFILES = (
+    "google/embeddinggemma-300m",
+    "google/gemini-embedding-001",
+    "Qwen/Qwen3-Embedding-8B",
+)
 
 
 class ConfigError(ValueError):
@@ -53,6 +58,23 @@ class Config:
     answer_session_message_limit: int = 20
     answer_prompt_max_tokens: int = DEFAULT_ANSWER_PROMPT_MAX_TOKENS
     ask_timeout_seconds: int = DEFAULT_ASK_TIMEOUT_SECONDS
+    hosted_mode: bool = False
+    public_demo_enabled: bool = False
+    public_embedding_profiles: tuple[str, ...] = PUBLIC_EMBEDDING_PROFILES
+    public_default_embedding_model: str = "google/gemini-embedding-001"
+    public_query_max_chars: int = 4_000
+    public_ask_capacity: int = 2
+    public_capacity_wait_seconds: int = 10
+    public_minute_limit: int = 3
+    public_client_daily_limit: int = 10
+    public_global_daily_limit: int = 100
+    demo_token_ttl_seconds: int = 30 * 60
+    turnstile_site_key: str | None = None
+    turnstile_secret_key: str | None = field(default=None, repr=False)
+    demo_token_signing_secret: str | None = field(default=None, repr=False)
+    firestore_project_id: str | None = None
+    firestore_database: str = "(default)"
+    embeddinggemma_model_path: Path | None = None
 
     def as_safe_dict(self) -> dict[str, str | int | float | bool | None]:
         return {
@@ -83,6 +105,25 @@ class Config:
             "answer_session_message_limit": self.answer_session_message_limit,
             "answer_prompt_max_tokens": self.answer_prompt_max_tokens,
             "ask_timeout_seconds": self.ask_timeout_seconds,
+            "hosted_mode": self.hosted_mode,
+            "public_demo_enabled": self.public_demo_enabled,
+            "public_embedding_profiles": ",".join(self.public_embedding_profiles),
+            "public_default_embedding_model": self.public_default_embedding_model,
+            "public_query_max_chars": self.public_query_max_chars,
+            "public_ask_capacity": self.public_ask_capacity,
+            "public_capacity_wait_seconds": self.public_capacity_wait_seconds,
+            "public_minute_limit": self.public_minute_limit,
+            "public_client_daily_limit": self.public_client_daily_limit,
+            "public_global_daily_limit": self.public_global_daily_limit,
+            "demo_token_ttl_seconds": self.demo_token_ttl_seconds,
+            "turnstile_site_key": self.turnstile_site_key,
+            "firestore_project_id": self.firestore_project_id,
+            "firestore_database": self.firestore_database,
+            "embeddinggemma_model_path": (
+                str(self.embeddinggemma_model_path)
+                if self.embeddinggemma_model_path is not None
+                else None
+            ),
         }
 
     @property
@@ -186,6 +227,53 @@ def load_config(repo_root: Path | None = None, env_file: Path | None = None) -> 
             "UNI_RAG_ASK_TIMEOUT_SECONDS",
             DEFAULT_ASK_TIMEOUT_SECONDS,
         ),
+        hosted_mode=_bool_from_env(env, "UNI_RAG_HOSTED_MODE", False),
+        public_demo_enabled=_bool_from_env(env, "UNI_RAG_PUBLIC_DEMO_ENABLED", False),
+        public_embedding_profiles=_csv_from_env(
+            env,
+            "UNI_RAG_PUBLIC_EMBEDDING_PROFILES",
+            PUBLIC_EMBEDDING_PROFILES,
+        ),
+        public_default_embedding_model=_str_from_env(
+            env,
+            "UNI_RAG_PUBLIC_DEFAULT_EMBEDDING_MODEL",
+            "google/gemini-embedding-001",
+        ),
+        public_query_max_chars=_strict_positive_int_from_env(
+            env, "UNI_RAG_PUBLIC_QUERY_MAX_CHARS", 4_000
+        ),
+        public_ask_capacity=_strict_positive_int_from_env(
+            env, "UNI_RAG_PUBLIC_ASK_CAPACITY", 2
+        ),
+        public_capacity_wait_seconds=_strict_positive_int_from_env(
+            env, "UNI_RAG_PUBLIC_CAPACITY_WAIT_SECONDS", 10
+        ),
+        public_minute_limit=_strict_positive_int_from_env(
+            env, "UNI_RAG_PUBLIC_MINUTE_LIMIT", 3
+        ),
+        public_client_daily_limit=_strict_positive_int_from_env(
+            env, "UNI_RAG_PUBLIC_CLIENT_DAILY_LIMIT", 10
+        ),
+        public_global_daily_limit=_strict_positive_int_from_env(
+            env, "UNI_RAG_PUBLIC_GLOBAL_DAILY_LIMIT", 100
+        ),
+        demo_token_ttl_seconds=_strict_positive_int_from_env(
+            env, "UNI_RAG_DEMO_TOKEN_TTL_SECONDS", 30 * 60
+        ),
+        turnstile_site_key=_optional_str_from_env(env, "TURNSTILE_SITE_KEY"),
+        turnstile_secret_key=_optional_str_from_env(env, "TURNSTILE_SECRET_KEY"),
+        demo_token_signing_secret=_optional_str_from_env(
+            env, "UNI_RAG_DEMO_TOKEN_SIGNING_SECRET"
+        ),
+        firestore_project_id=_optional_str_from_env(
+            env, "UNI_RAG_FIRESTORE_PROJECT_ID"
+        ),
+        firestore_database=_str_from_env(
+            env, "UNI_RAG_FIRESTORE_DATABASE", "(default)"
+        ),
+        embeddinggemma_model_path=_optional_path_from_env(
+            root, env, "UNI_RAG_EMBEDDINGGEMMA_MODEL_PATH"
+        ),
     )
 
 
@@ -260,6 +348,8 @@ def validate_config(config: Config) -> None:
     if config.ask_timeout_seconds <= 0:
         raise ConfigError("UNI_RAG_ASK_TIMEOUT_SECONDS must be greater than zero")
 
+    _validate_public_demo_config(config)
+
 
 def find_project_root(start: Path | None = None) -> Path:
     current = (start or Path.cwd()).resolve()
@@ -292,6 +382,120 @@ def _optional_str_from_env(env: Mapping[str, str], name: str) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _str_from_env(env: Mapping[str, str], name: str, default: str) -> str:
+    value = env.get(name, default).strip()
+    if not value:
+        raise ConfigError(f"{name} cannot be empty")
+    return value
+
+
+def _csv_from_env(
+    env: Mapping[str, str], name: str, default: tuple[str, ...]
+) -> tuple[str, ...]:
+    raw = env.get(name)
+    if raw is None:
+        return default
+    values = tuple(
+        dict.fromkeys(item.strip() for item in raw.split(",") if item.strip())
+    )
+    if not values:
+        raise ConfigError(f"{name} must contain at least one value")
+    return values
+
+
+def _optional_path_from_env(
+    root: Path, env: Mapping[str, str], name: str
+) -> Path | None:
+    raw = env.get(name)
+    if raw is None or not raw.strip():
+        return None
+    path = Path(raw.strip())
+    if not path.is_absolute():
+        path = root / path
+    return path.resolve()
+
+
+def _validate_public_demo_config(config: Config) -> None:
+    public_profiles = set(PUBLIC_EMBEDDING_PROFILES)
+    enabled_profiles = set(config.public_embedding_profiles)
+    unknown = enabled_profiles - public_profiles
+    if unknown:
+        raise ConfigError(
+            "UNI_RAG_PUBLIC_EMBEDDING_PROFILES contains undeployed profiles: "
+            + ", ".join(sorted(unknown))
+        )
+    if config.public_default_embedding_model not in enabled_profiles:
+        raise ConfigError(
+            "UNI_RAG_PUBLIC_DEFAULT_EMBEDDING_MODEL must be one of the enabled "
+            "public embedding profiles"
+        )
+    for name, value in {
+        "UNI_RAG_PUBLIC_QUERY_MAX_CHARS": config.public_query_max_chars,
+        "UNI_RAG_PUBLIC_ASK_CAPACITY": config.public_ask_capacity,
+        "UNI_RAG_PUBLIC_CAPACITY_WAIT_SECONDS": config.public_capacity_wait_seconds,
+        "UNI_RAG_PUBLIC_MINUTE_LIMIT": config.public_minute_limit,
+        "UNI_RAG_PUBLIC_CLIENT_DAILY_LIMIT": config.public_client_daily_limit,
+        "UNI_RAG_PUBLIC_GLOBAL_DAILY_LIMIT": config.public_global_daily_limit,
+        "UNI_RAG_DEMO_TOKEN_TTL_SECONDS": config.demo_token_ttl_seconds,
+    }.items():
+        if value <= 0:
+            raise ConfigError(f"{name} must be greater than zero")
+    if config.public_minute_limit > config.public_client_daily_limit:
+        raise ConfigError(
+            "UNI_RAG_PUBLIC_MINUTE_LIMIT cannot exceed the client daily limit"
+        )
+    if config.public_client_daily_limit > config.public_global_daily_limit:
+        raise ConfigError(
+            "UNI_RAG_PUBLIC_CLIENT_DAILY_LIMIT cannot exceed the global daily limit"
+        )
+    if config.hosted_mode:
+        path = config.embeddinggemma_model_path
+        if path is None or not path.is_dir():
+            raise ConfigError(
+                "UNI_RAG_EMBEDDINGGEMMA_MODEL_PATH must be an existing directory "
+                "when UNI_RAG_HOSTED_MODE is enabled"
+            )
+    if not config.public_demo_enabled:
+        return
+    public_bounds = {
+        "UNI_RAG_KEYWORD_TOP_K": (config.keyword_top_k, 40),
+        "UNI_RAG_SEMANTIC_TOP_K": (config.semantic_top_k, 40),
+        "UNI_RAG_METADATA_TOP_K": (config.metadata_top_k, 40),
+        "UNI_RAG_FINAL_TOP_K": (config.final_top_k, 15),
+        "UNI_RAG_SEMANTIC_QUERY_LIMIT": (config.semantic_query_limit, 3),
+        "UNI_RAG_EVIDENCE_MAX_TOKENS": (config.evidence_max_tokens, 16_000),
+        "UNI_RAG_PUBLIC_QUERY_MAX_CHARS": (config.public_query_max_chars, 4_000),
+        "UNI_RAG_PUBLIC_ASK_CAPACITY": (config.public_ask_capacity, 2),
+        "UNI_RAG_PUBLIC_MINUTE_LIMIT": (config.public_minute_limit, 3),
+        "UNI_RAG_PUBLIC_CLIENT_DAILY_LIMIT": (
+            config.public_client_daily_limit,
+            10,
+        ),
+        "UNI_RAG_PUBLIC_GLOBAL_DAILY_LIMIT": (
+            config.public_global_daily_limit,
+            100,
+        ),
+    }
+    for name, (value, maximum) in public_bounds.items():
+        if value > maximum:
+            raise ConfigError(f"{name} must not exceed {maximum} in public mode")
+    required = {
+        "TURNSTILE_SITE_KEY": config.turnstile_site_key,
+        "TURNSTILE_SECRET_KEY": config.turnstile_secret_key,
+        "UNI_RAG_DEMO_TOKEN_SIGNING_SECRET": config.demo_token_signing_secret,
+        "UNI_RAG_FIRESTORE_PROJECT_ID": config.firestore_project_id,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise ConfigError(
+            "Public demo mode requires configuration for: " + ", ".join(missing)
+        )
+    if len(config.demo_token_signing_secret or "") < 32:
+        raise ConfigError(
+            "UNI_RAG_DEMO_TOKEN_SIGNING_SECRET must contain at least 32 characters"
+        )
 
 
 def _bool_from_env(env: Mapping[str, str], name: str, default: bool) -> bool:

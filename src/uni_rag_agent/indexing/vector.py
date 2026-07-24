@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterable, Iterator, Sequence
-from contextlib import closing
+from contextlib import closing, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -36,7 +36,11 @@ from .eligibility import (
 from .embedding_providers.common import EmbeddingValidationError, validate_vectors
 from .embedding_providers.factory import BuiltEmbeddingModel, build_embedding_model
 from .models import SemanticSearchError, VectorIndexError, VectorIndexResult
-from .profiles import EmbeddingProfile, physical_collection_name
+from .profiles import (
+    EmbeddingProfile,
+    physical_collection_name,
+    resolve_embedding_profile,
+)
 
 _EMBED_BATCH = 64
 _VECTOR_ID_BATCH = 256
@@ -208,6 +212,9 @@ def semantic_search(
     model: str | None = None,
     *,
     courses: Sequence[str] | None = None,
+    built_embedding: BuiltEmbeddingModel | None = None,
+    chroma_client: object | None = None,
+    encoding_lock: object | None = None,
 ) -> list[RetrievalResult]:
     """Run one semantic query using the multi-query request seam."""
     return semantic_search_many(
@@ -218,6 +225,9 @@ def semantic_search(
         top_k=top_k,
         model=model,
         courses=courses,
+        built_embedding=built_embedding,
+        chroma_client=chroma_client,
+        encoding_lock=encoding_lock,
     )[0]
 
 
@@ -230,6 +240,9 @@ def semantic_search_many(
     model: str | None = None,
     *,
     courses: Sequence[str] | None = None,
+    built_embedding: BuiltEmbeddingModel | None = None,
+    chroma_client: object | None = None,
+    encoding_lock: object | None = None,
 ) -> list[list[RetrievalResult]]:
     """Search all semantic queries with one embedding/Chroma request context."""
     limit = top_k if top_k is not None else config.semantic_top_k
@@ -262,14 +275,18 @@ def semantic_search_many(
             config,
             model=model,
             selected=selected,
+            built_embedding=built_embedding,
+            chroma_client=chroma_client,
         )
         try:
-            query_vectors = validate_vectors(
-                _embed_query_batch(context.built.embeddings, query_texts),
-                expected_count=len(query_texts),
-                expected_dimension=context.built.dimension,
-                context="embedding provider query response",
-            )
+            lock_context = encoding_lock if encoding_lock is not None else nullcontext()
+            with lock_context:  # type: ignore[attr-defined]
+                query_vectors = validate_vectors(
+                    _embed_query_batch(context.built.embeddings, query_texts),
+                    expected_count=len(query_texts),
+                    expected_dimension=context.built.dimension,
+                    context="embedding provider query response",
+                )
         except EmbeddingValidationError as exc:
             raise SemanticSearchError(str(exc)) from exc
 
@@ -313,14 +330,23 @@ def _build_semantic_context(
     *,
     model: str | None,
     selected: Sequence[tuple[str, str]],
+    built_embedding: BuiltEmbeddingModel | None = None,
+    chroma_client: object | None = None,
 ) -> _SemanticContext:
-    built = build_embedding_model(config, model, error=SemanticSearchError)
+    profile = resolve_embedding_profile(config, model, error=SemanticSearchError)
+    built = built_embedding or build_embedding_model(
+        config, profile.model_name, error=SemanticSearchError
+    )
+    if built.profile.model_name != profile.model_name:
+        raise SemanticSearchError(
+            "Injected embedding runtime does not match the selected profile."
+        )
     storage = check_storage(config)
     if not storage.ok:
         details = "; ".join(storage.diagnostics) or "storage is not ready"
         raise SemanticSearchError(f"Semantic search storage check failed: {details}")
 
-    client = _chroma_client(config, error=SemanticSearchError)
+    client = chroma_client or _chroma_client(config, error=SemanticSearchError)
     existing = _existing_collection_names(client)
     collections: dict[str, object] = {}
     counts: dict[str, int] = {}
@@ -1032,6 +1058,13 @@ def _chroma_client(config: Config, *, error: type[Exception]) -> object:
         path=str(config.chroma_dir),
         settings=Settings(anonymized_telemetry=False),
     )
+
+
+def build_chroma_client(
+    config: Config, *, error: type[Exception] = SemanticSearchError
+) -> object:
+    """Public construction seam for one process-scoped Chroma client."""
+    return _chroma_client(config, error=error)
 
 
 def _require_chromadb(*, error: type[Exception]) -> object:

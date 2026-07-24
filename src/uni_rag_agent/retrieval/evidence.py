@@ -9,12 +9,13 @@ from contextlib import closing
 from dataclasses import dataclass
 
 from uni_rag_agent.config import Config
+from uni_rag_agent.indexing import BuiltEmbeddingModel
+from uni_rag_agent.search_contracts import LOGICAL_INDEX_TO_SOURCE_TYPE
 from uni_rag_agent.storage import (
     StorageError,
     connect_sqlite,
     connect_sqlite_read_only,
 )
-from uni_rag_agent.search_contracts import LOGICAL_INDEX_TO_SOURCE_TYPE
 
 from .core import _execute_retrieval, _RetrievalExecution
 from .evidence_models import (
@@ -70,6 +71,9 @@ def build_evidence(
     *,
     chat_model: object | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    built_embedding: BuiltEmbeddingModel | None = None,
+    chroma_client: object | None = None,
+    encoding_lock: object | None = None,
 ) -> EvidenceBuildResult:
     """Run the mandatory planner/retriever and persist one evidence packet."""
     recorder = _SearchRunRecorder(config)
@@ -82,6 +86,9 @@ def build_evidence(
             chat_model=chat_model,
             recorder=recorder,
             progress_callback=progress_callback,
+            built_embedding=built_embedding,
+            chroma_client=chroma_client,
+            encoding_lock=encoding_lock,
         )
     except Exception as exc:  # noqa: BLE001 - retain persisted run identity
         run_id = recorder.search_run_id if recorder.search_run_id > 0 else None

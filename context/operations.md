@@ -62,6 +62,23 @@ Start the local web surface with `uv run -m uni_rag_agent app serve` (or pass
 /api/ask`, and read-only coverage, evidence-packet, and answer lookups. It does
 not expose ingestion, indexing, evaluation, uploads, or source mutation.
 
+Public Cloud Run deployment is a separate, explicit operator workflow. After
+preparing `data/uni_rag.sqlite` and `data/indexes/vector/` as the generated state
+you intend to publish, stage only the accepted offline model with PowerShell:
+
+```powershell
+$ModelSource = 'D:\path\to\accepted\embeddinggemma\snapshot'
+New-Item -ItemType Directory -Force deployment/assets/models | Out-Null
+Copy-Item $ModelSource deployment/assets/models/embeddinggemma-300m -Recurse
+```
+
+The model copy overwrites matching files but does not clean, inspect, validate,
+or scan them. The Docker and Cloud Build contexts include only the required
+SQLite file and vector directory from `data/`; other generated state remains
+excluded. Reviewing secrets, history, settings, logs, vector population, model
+revision, and the upload set is the operator's responsibility. Continue with
+[`deployment/GCP_RUNBOOK.md`](../deployment/GCP_RUNBOOK.md).
+
 ## Generated state and safe rebuild
 
 Normal generated state is under `data/`: `uni_rag.sqlite`, `extracted/`,

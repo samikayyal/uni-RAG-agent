@@ -250,6 +250,51 @@ clears one override, and invalid or unknown entries in the stored file are
 dropped on read instead of failing requests. The CLI ignores web overrides.
 DEC-036/017's ban on per-request provider/model overrides is unchanged.
 
+### DEC-042 — Explicit public-demo boundary and deployment contract
+
+**Decision:** Local web behavior remains the default. Public behavior is enabled
+only by `UNI_RAG_PUBLIC_DEMO_ENABLED=true` and is a separate bounded contract:
+Cloudflare Turnstile is exchanged once for a short-lived signed client-bound
+token; browser state and complete answer payloads live per tab in
+`sessionStorage`; settings are request-scoped and restricted to the three
+predeployed embedding profiles; historical numeric answer, packet, and coverage
+routes are hidden. Firestore atomically enforces idempotent request reservations
+with 3 starts per rolling minute, 10 per client digest per UTC day, and 100
+globally per UTC day. A request consumes quota only after acquiring one of two
+process ask slots; subsequent provider failure or client cancellation still
+counts. Cloud Run request concurrency is four so control/static requests remain
+responsive while two asks run.
+
+A request id is a one-shot acceptance identity within its signed demo-token
+nonce. A completed replay returns a stable conflict and cannot start retrieval,
+consume capacity, or mutate session ownership, even though the existing
+reservation remains readable for Firestore transaction idempotency. Firestore
+infrastructure failures, including quota-summary reads, are abuse-service
+outages and therefore return the safe 503 contract.
+
+Hosted runtime assets are staged by the operator and baked into a CPU-only,
+non-root image. EmbeddingGemma loads eagerly from its offline snapshot; Gemini
+and Nebius load lazily. Providers and Chroma clients are
+process scoped, with a per-local-profile encoding lock. `/ready` checks storage
+and eager local-model readiness without probing external providers. Application
+code never creates cloud resources; the operator follows the checked-in GCP and
+Cloudflare runbook.
+
+**Why:** A public unauthenticated demo has materially different privacy, abuse,
+cost, memory, and state-lifetime risks from the private local UI. Making that
+mode explicit keeps local workflows compatible while enforcing server-owned
+limits.
+
+**Constraints/consequences:** Public startup fails closed when Turnstile,
+signing, Firestore, offline-model, or upper-bound configuration is missing or
+unsafe. Firestore may hold only quota counters, idempotency reservations, UTC
+buckets, and keyed client digests—not queries, raw IP addresses, evidence,
+answers, tokens, or browser settings. Selecting, reviewing, and staging the
+SQLite database, Chroma indexes, and accepted offline model are operator
+responsibilities; the application does not scan or certify deployment inputs.
+GCP budget alerts are warnings, not spending caps; provider and platform limits
+remain operator responsibilities.
+
 ### DEC-037/038 — Isolated, safe evaluation
 
 **Decision:** Fixture evaluation uses strict UTF-8 `evals/fixtures.json`, isolated

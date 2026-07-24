@@ -162,6 +162,17 @@ body {
   padding: 14px;
   transition: border-color .2s ease;
 }
+
+.turnstile-panel {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface-2);
+}
+
+.turnstile-panel p {
+  margin: 0 0 0.65rem;
+}
 .ask-panel:focus-within { border-color: var(--accent); }
 
 textarea {
