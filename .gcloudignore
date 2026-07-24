@@ -30,3 +30,10 @@ dist/
 # Deployment assets are generated, ignored by Git, and intentionally uploaded.
 !deployment/assets/
 !deployment/assets/**
+
+
+# Local Colab transfer archives; not Cloud Run image inputs.
+colab-vector-output*.zip
+
+# Local backup generated during the Colab transfer; deploy only data/.
+data.pre-colab-*/
