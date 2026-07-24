@@ -32,6 +32,6 @@ deployment/assets/
 .brooks-lint*
 manual_testing/
 
-deployment\GCP_RUNBOOK.md
+deployment/GCP_RUNBOOK.md
 data.pre-colab-20260724-172055
 *.zip
