@@ -622,7 +622,7 @@ def test_hosted_profiles_flow_through_real_chroma_and_sqlite(
     config = make_config(
         tmp_path,
         embedding_model=selected_model,
-        google_api_key="offline-google-test-key",
+        google_api_key_embedding="offline-google-test-key",
         nebius_api_key="offline-nebius-test-key",
     )
     with initialized_connection(config) as connection:
@@ -680,7 +680,7 @@ def test_gemini_alias_and_canonical_selection_share_one_physical_profile(
     config = make_config(
         tmp_path,
         embedding_model="gemini-embedding-001",
-        google_api_key="offline-google-test-key",
+        google_api_key_embedding="offline-google-test-key",
     )
     with initialized_connection(config) as connection:
         stored = insert_minimal_chunk(
@@ -720,7 +720,7 @@ def test_failed_hosted_batch_preserves_completed_batches_for_resume(
     config = make_config(
         tmp_path,
         embedding_model="google/gemini-embedding-001",
-        google_api_key="offline-google-test-key",
+        google_api_key_embedding="offline-google-test-key",
     )
     with initialized_connection(config) as connection:
         for index in range(65):

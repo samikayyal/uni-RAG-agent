@@ -154,9 +154,11 @@ Hugging Face models, `google/gemini-embedding-001` (alias
 explicit and reproducible.
 
 **Constraints/consequences:** Local profiles use `embeddings`; hosted profiles
-use `embeddings-cloud`. Google uses direct Gemini with `GOOGLE_API_KEY` (not
-Vertex AI); document indexing uses the Gemini Batch API while interactive
-query embedding remains synchronous; Nebius uses its fixed Token Factory
+use `embeddings-cloud`. Google uses direct Gemini with the dedicated
+`GOOGLE_API_KEY_EMBEDDING` (not Vertex AI); document indexing uses the Gemini
+Batch API while interactive query embedding remains synchronous. Gemini planner
+and answer models retain `GOOGLE_API_KEY` with optional `GOOGLE_API_KEY_2`
+quota failover; Nebius uses its fixed Token Factory
 endpoint and `NEBIUS_API_KEY`. SDKs load lazily. Batches validate finite
 vectors and dimensions, retry only transient/network/408/429/5xx failures
 (three total attempts), and commit each successful batch; Gemini Batch API job

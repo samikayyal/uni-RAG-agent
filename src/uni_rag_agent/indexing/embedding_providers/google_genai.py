@@ -157,7 +157,7 @@ def build_embeddings(
     api_key = _google_api_key(config)
     if not api_key:
         raise error(
-            "Google GenAI embedding provider requires GOOGLE_API_KEY. "
+            "Google GenAI embedding provider requires GOOGLE_API_KEY_EMBEDDING. "
             "Set it in the merged .env file or environment."
         )
 
@@ -187,10 +187,10 @@ def build_embeddings(
 
 
 def _google_api_key(config: Config) -> str | None:
-    configured = getattr(config, "google_api_key", None)
+    configured = getattr(config, "google_api_key_embedding", None)
     if isinstance(configured, str) and configured.strip():
         return configured.strip()
-    value = os.getenv("GOOGLE_API_KEY")
+    value = os.getenv("GOOGLE_API_KEY_EMBEDDING")
     return value.strip() if value and value.strip() else None
 
 

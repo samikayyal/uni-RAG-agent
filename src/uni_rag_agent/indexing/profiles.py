@@ -127,8 +127,8 @@ EMBEDDING_PROFILES: dict[str, EmbeddingProfile] = {
         api_model_name="gemini-embedding-001",
         aliases=("gemini-embedding-001",),
         access_notes=(
-            "Uses the direct Gemini Developer API and requires GOOGLE_API_KEY. "
-            "Vertex AI is not used by this profile."
+            "Uses the direct Gemini Developer API and requires "
+            "GOOGLE_API_KEY_EMBEDDING. Vertex AI is not used by this profile."
         ),
     ),
     "Qwen/Qwen3-Embedding-8B": EmbeddingProfile(

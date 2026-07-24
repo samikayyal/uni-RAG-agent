@@ -35,7 +35,11 @@ UNI_RAG_ENV_KEYS = {
     "UNI_RAG_SEMANTIC_TOP_K",
     "UNI_RAG_SQLITE_PATH",
 }
-PROVIDER_ENV_KEYS = {"GOOGLE_API_KEY", "NEBIUS_API_KEY"}
+PROVIDER_ENV_KEYS = {
+    "GOOGLE_API_KEY",
+    "GOOGLE_API_KEY_EMBEDDING",
+    "NEBIUS_API_KEY",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -247,6 +251,7 @@ def test_safe_dict_excludes_injected_secret_values(
     monkeypatch.setenv("OPENAI_API_KEY", "secret-openai-value")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "secret-anthropic-value")
     monkeypatch.setenv("GOOGLE_API_KEY", "secret-google-value")
+    monkeypatch.setenv("GOOGLE_API_KEY_EMBEDDING", "secret-embedding-value")
 
     config = load_config(repo_root=tmp_path, env_file=tmp_path / "missing.env")
     safe = config.as_safe_dict()
@@ -257,6 +262,7 @@ def test_safe_dict_excludes_injected_secret_values(
     assert "secret-openai-value" not in safe.values()
     assert "secret-anthropic-value" not in safe.values()
     assert "secret-google-value" not in safe.values()
+    assert "secret-embedding-value" not in safe.values()
     assert safe["courses_root"] == str(tmp_path / "Courses")
 
 

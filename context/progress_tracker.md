@@ -51,6 +51,9 @@ The implemented pipeline is complete through evaluation hardening:
     to the abuse-service 503 boundary. Deployment scanning, completeness checks,
     and optional benchmark/smoke scripts are intentionally operator-owned and
     are not part of the application.
+14. Direct Gemini embeddings use a dedicated `GOOGLE_API_KEY_EMBEDDING`;
+    planner and answer Gemini key rotation remains on `GOOGLE_API_KEY` and
+    optional `GOOGLE_API_KEY_2`.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

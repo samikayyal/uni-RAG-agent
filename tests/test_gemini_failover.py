@@ -157,3 +157,23 @@ def test_load_config_reads_second_google_api_key(
     # Keys never appear in the loggable snapshot or the dataclass repr.
     assert "google_api_key_2" not in config.as_safe_dict()
     assert "secondary" not in repr(config)
+
+
+def test_gemini_embedding_uses_dedicated_key_not_chat_key(tmp_path: Path) -> None:
+    config = make_config(
+        tmp_path,
+        google_api_key="chat-key",
+        google_api_key_embedding="embedding-key",
+    )
+
+    from uni_rag_agent.indexing.embedding_providers.google_genai import _google_api_key
+
+    assert _google_api_key(config) == "embedding-key"
+
+
+def test_gemini_embedding_does_not_fallback_to_chat_key(tmp_path: Path) -> None:
+    config = make_config(tmp_path, google_api_key="chat-key")
+
+    from uni_rag_agent.indexing.embedding_providers.google_genai import _google_api_key
+
+    assert _google_api_key(config) is None

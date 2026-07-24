@@ -283,7 +283,7 @@ def test_google_constructor_uses_batch_api_and_no_probe(
         "_require_google_genai",
         lambda *_a, **_k: FakeGoogleClient,
     )
-    config = make_config(tmp_path, google_api_key="google-secret")
+    config = make_config(tmp_path, google_api_key_embedding="google-secret")
     built = build_embedding_model(config, "gemini-embedding-001")
 
     assert built.profile.model_name == "google/gemini-embedding-001"
@@ -625,7 +625,7 @@ def test_hosted_responses_validate_actual_dimensions_and_do_not_retry_malformed(
         lambda *_a, **_k: FakeGoogleClient,
     )
     built = build_embedding_model(
-        make_config(tmp_path, google_api_key="google-secret"),
+        make_config(tmp_path, google_api_key_embedding="google-secret"),
         "google/gemini-embedding-001",
     )
     with pytest.raises(RuntimeError, match="invalid embedding response"):
@@ -636,7 +636,11 @@ def test_hosted_responses_validate_actual_dimensions_and_do_not_retry_malformed(
 @pytest.mark.parametrize(
     ("model", "field", "message"),
     [
-        ("google/gemini-embedding-001", "google_api_key", "GOOGLE_API_KEY"),
+        (
+            "google/gemini-embedding-001",
+            "google_api_key_embedding",
+            "GOOGLE_API_KEY_EMBEDDING",
+        ),
         ("Qwen/Qwen3-Embedding-8B", "nebius_api_key", "NEBIUS_API_KEY"),
     ],
 )
@@ -648,6 +652,7 @@ def test_hosted_missing_credentials_are_provider_specific_and_sanitized(
     message: str,
 ) -> None:
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY_EMBEDDING", raising=False)
     monkeypatch.delenv("NEBIUS_API_KEY", raising=False)
     config = dataclasses.replace(make_config(tmp_path), **{field: None})
     with pytest.raises(VectorIndexError, match=message) as exc_info:
@@ -660,7 +665,7 @@ def test_missing_hosted_extras_have_provider_specific_install_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "google.genai", None)
-    config = make_config(tmp_path, google_api_key="google-secret")
+    config = make_config(tmp_path, google_api_key_embedding="google-secret")
     with pytest.raises(VectorIndexError, match="Google GenAI.*embeddings-cloud"):
         build_embedding_model(config, "google/gemini-embedding-001")
 
@@ -675,24 +680,31 @@ def test_config_loads_cloud_keys_without_repr_or_safe_projection_leaks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY_EMBEDDING", raising=False)
     monkeypatch.delenv("NEBIUS_API_KEY", raising=False)
     (tmp_path / "Courses").mkdir()
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "GOOGLE_API_KEY=google-secret\nNEBIUS_API_KEY=nebius-secret\n",
+        "GOOGLE_API_KEY=chat-secret\n"
+        "GOOGLE_API_KEY_EMBEDDING=embedding-secret\n"
+        "NEBIUS_API_KEY=nebius-secret\n",
         encoding="utf-8",
     )
     config = load_config(repo_root=tmp_path, env_file=env_file)
 
-    assert config.google_api_key == "google-secret"
+    assert config.google_api_key == "chat-secret"
+    assert config.google_api_key_embedding == "embedding-secret"
     assert config.nebius_api_key == "nebius-secret"
     representation = repr(config)
     safe = config.as_safe_dict()
-    assert "google-secret" not in representation
+    assert "chat-secret" not in representation
+    assert "embedding-secret" not in representation
     assert "nebius-secret" not in representation
     assert "google_api_key" not in safe
+    assert "google_api_key_embedding" not in safe
     assert "nebius_api_key" not in safe
-    assert "google-secret" not in safe.values()
+    assert "chat-secret" not in safe.values()
+    assert "embedding-secret" not in safe.values()
     assert "nebius-secret" not in safe.values()
     assert not hasattr(config, "embedding_provider")
 

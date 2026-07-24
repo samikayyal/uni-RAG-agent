@@ -94,7 +94,8 @@ Profiles are `BAAI/bge-m3`, `jinaai/jina-embeddings-v3`,
 - Canonical model identity is used in SQLite, Chroma, retrieval/evidence
   settings, and telemetry. The Gemini alias never creates another profile.
 - Hosted text and semantic queries leave the machine and may incur charges;
-  credentials are never emitted.
+  credentials are never emitted. The direct Gemini profile requires its
+  dedicated `GOOGLE_API_KEY_EMBEDDING`, not either Gemini chat-model key.
 
 Binding decisions: [DEC-011](../decisions.md#dec-011--sqlite-authority-with-chroma-logical-indexes),
 [DEC-023/029/028/040](../decisions.md#dec-023029028040--current-file-and-deletion-semantics),

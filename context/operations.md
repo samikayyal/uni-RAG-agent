@@ -26,7 +26,7 @@ uv run -m uni_rag_agent index vector --model BAAI/bge-m3
 
 # Hosted Gemini/Nebius embeddings plus planner/answer integrations (shared install).
 uv sync --extra embeddings-cloud --extra llm
-# Gemini: set GOOGLE_API_KEY in the .env or current shell.
+# Gemini embeddings: set GOOGLE_API_KEY_EMBEDDING in the .env or current shell.
 uv run -m uni_rag_agent index vector --model google/gemini-embedding-001
 # Nebius: set NEBIUS_API_KEY in the .env or current shell.
 uv run -m uni_rag_agent index vector --model Qwen/Qwen3-Embedding-8B
