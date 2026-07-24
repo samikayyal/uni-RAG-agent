@@ -46,30 +46,28 @@ are read from the Docker build context, so stage the model and review all three
 inputs locally before starting the Cloud Build or Cloud Run workflow. Do not
 upload `Courses/` or other unrequested generated state.
 
-## 2. Create and bill a dedicated project
+## 2. Select and bill the deployment project
 
-Choose the suffix yourself if the generated ID collides:
+Use the existing dedicated project ID `uni-rag-agent`:
 
 ```powershell
-$Date = Get-Date -Format 'yyyyMMdd'
-$Suffix = -join ((97..122) | Get-Random -Count 5 | ForEach-Object { [char]$_ })
-$ProjectId = "uni-rag-agent-$Date-$Suffix"
+$ProjectId = 'uni-rag-agent'
 $Region = 'europe-west1'
 $Repository = 'uni-rag'
 $Service = 'uni-rag-agent'
 $RuntimeAccount = 'uni-rag-runtime'
 
-gcloud projects create $ProjectId --name="Uni RAG Agent $Date"
+gcloud config set project $ProjectId
 gcloud billing accounts list
 ```
 
-Copy the intended billing account ID from the last command; do not select one
-implicitly:
+Verify that the project is already linked to the intended billing account. If
+it is not, copy that account's ID from the preceding command and link it
+explicitly:
 
 ```powershell
 $BillingAccount = '000000-000000-000000'
 gcloud billing projects link $ProjectId --billing-account=$BillingAccount
-gcloud config set project $ProjectId
 gcloud config set run/region $Region
 ```
 
@@ -77,13 +75,12 @@ gcloud config set run/region $Region
 
 1. Open the [Google Cloud Console](https://console.cloud.google.com/) and open
    the project selector.
-2. Click **New project**, enter the generated `$ProjectId` as the project ID and
-   `Uni RAG Agent $Date` as the name, then click **Create**. If the generated ID
-   is already taken, choose a different suffix before creating the project.
-3. Select the new project. Open **Billing** from the navigation menu, choose
+2. Select the existing `uni-rag-agent` project.
+3. Open **Billing** from the navigation menu, choose
    **Account management** if necessary, select the intended billing account,
-   and click **Link a billing account** for this project. Confirm the exact
-   billing account before saving; do not accept an accidental default.
+   and click **Link a billing account** only if the project is not already
+   linked. Confirm the exact billing account before saving; do not accept an
+   accidental default.
 4. The Console has no project-wide equivalent to `gcloud config set
    run/region`. Keep `europe-west1` selected whenever a regional resource or
    Cloud Run service is created. The active project selector at the top of the
