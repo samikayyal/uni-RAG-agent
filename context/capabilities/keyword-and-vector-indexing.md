@@ -39,11 +39,12 @@ filters, and do not persist search runs.
 The web application's embedding registry retains one provider per canonical
 profile and one Chroma client per persistence path. It can inject those
 process-scoped objects into the existing retrieval call chain without changing
-CLI construction semantics. Hosted startup eagerly loads the offline
-EmbeddingGemma profile from `UNI_RAG_EMBEDDINGGEMMA_MODEL_PATH`; hosted Gemini
-and Nebius profiles remain lazy. Only local Hugging Face encoding is protected
-by a per-profile lock because the local transformer runtime is shared mutable
-compute, while independent hosted calls may overlap.
+CLI construction semantics. Hosted startup constructs Chroma and checks only
+the serving default vector space; it does not construct EmbeddingGemma.
+EmbeddingGemma is prepared when the browser saves that selection, with direct
+ask calls retaining lazy construction as a fallback. Local Hugging Face
+construction and encoding are protected per profile, while independent hosted
+calls may overlap.
 
 Gemini document batches use the direct Gemini Batch API and wait for each
 inline job to finish before the batch is committed. Interactive query batches

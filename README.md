@@ -80,8 +80,8 @@ per-tab sessions, Firestore-backed quotas, bounded request-scoped settings, and
 three predeployed embedding profiles.
 
 For the public deployment, the image reads `data/uni_rag.sqlite` and
-`data/indexes/vector/` directly and requires an accepted local EmbeddingGemma
-snapshot. See the [deployment reference](context/deployment.md) for the
+`data/indexes/vector/` directly and retains an accepted local EmbeddingGemma
+snapshot for on-demand selection. See the [deployment reference](context/deployment.md) for the
 completed Google Cloud and Cloudflare configuration. The application does not
 audit deployment inputs or create or modify GCP or Cloudflare resources.
 

@@ -98,3 +98,47 @@ test("expired token detaches server context without deleting restored answer", (
     serverLive: true,
   }).remove, true);
 });
+
+test("only a selected local profile is prepared before saving settings", () => {
+  const payload = {
+    defaults: { embedding_model: "Qwen/Qwen3-Embedding-8B" },
+    embedding_model_profiles: [
+      { model_name: "google/embeddinggemma-300m", provider: "huggingface" },
+      { model_name: "Qwen/Qwen3-Embedding-8B", provider: "nebius" },
+    ],
+  };
+
+  assert.equal(
+    state.localEmbeddingPreparationModel(payload, {
+      embedding_model: "google/embeddinggemma-300m",
+    }),
+    "google/embeddinggemma-300m",
+  );
+  assert.equal(
+    state.localEmbeddingPreparationModel(payload, {
+      embedding_model: "Qwen/Qwen3-Embedding-8B",
+    }),
+    null,
+  );
+  assert.equal(state.localEmbeddingPreparationModel(payload, {}), null);
+  assert.equal(
+    state.localEmbeddingPreparationModel(
+      {
+        ...payload,
+        defaults: { embedding_model: "google/embeddinggemma-300m" },
+      },
+      { embedding_model: null, final_top_k: 4 },
+    ),
+    null,
+  );
+  assert.equal(
+    state.localEmbeddingPreparationModel(
+      {
+        ...payload,
+        defaults: { embedding_model: "google/embeddinggemma-300m" },
+      },
+      {},
+    ),
+    null,
+  );
+});

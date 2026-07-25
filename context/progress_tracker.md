@@ -61,6 +61,11 @@ The implemented pipeline is complete through evaluation hardening:
 14. Direct Gemini embeddings use a dedicated `GOOGLE_API_KEY_EMBEDDING`;
     planner and answer Gemini key rotation remains on `GOOGLE_API_KEY` and
     optional `GOOGLE_API_KEY_2`.
+15. Hosted readiness now checks storage plus the serving default vector space
+    without constructing an embedding provider. Optional local Hugging Face
+    profiles remain lazy, can be prepared through the authenticated quota-free
+    browser control route before settings persist, and retain ask-time lazy
+    loading as a fallback.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

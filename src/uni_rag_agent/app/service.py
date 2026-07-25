@@ -106,14 +106,19 @@ class EmbeddingRegistry:
     ) -> None:
         self._embedding_builder = embedding_builder
         self._chroma_builder = chroma_builder
-        self._lock = RLock()
+        # State changes are deliberately tiny critical sections.  Building a
+        # local transformer can take minutes and must not make an unrelated
+        # hosted profile wait behind it.
+        self._state_lock = RLock()
         self._models: dict[str, BuiltEmbeddingModel] = {}
         self._errors: dict[str, Exception] = {}
         self._profile_locks: dict[str, RLock] = {}
+        self._profile_build_locks: dict[str, RLock] = {}
+        self._chroma_build_lock = RLock()
         self._chroma_client: object | None = None
         self._chroma_path: object | None = None
         self._chroma_error: Exception | None = None
-        self._hosted_indexes_ready = False
+        self._default_vector_index_ready = False
 
     def runtime(
         self,
@@ -124,94 +129,130 @@ class EmbeddingRegistry:
         profile = resolve_embedding_profile(
             config, config.embedding_model, error=SemanticSearchError
         )
-        with self._lock:
-            if (
+        with self._state_lock:
+            loading = (
                 progress_callback is not None
                 and profile.provider == "huggingface"
                 and profile.model_name not in self._models
                 and profile.model_name not in self._errors
-            ):
-                progress_callback("loading_embedding_model")
-            built = self._model(config, profile.model_name)
-            client = self._client(config)
-            encoding_lock = None
-            if profile.provider == "huggingface":
-                encoding_lock = self._profile_locks.setdefault(
-                    profile.model_name, RLock()
-                )
-            return EmbeddingRuntime(
-                built=built,
-                chroma_client=client,
-                encoding_lock=encoding_lock,
             )
+        if loading:
+            progress_callback("loading_embedding_model")
+        built = self._model(config, profile.model_name)
+        client = self._client(config)
+        encoding_lock = self._encoding_lock(profile.model_name, profile.provider)
+        return EmbeddingRuntime(
+            built=built,
+            chroma_client=client,
+            encoding_lock=encoding_lock,
+        )
 
     def warm_hosted(self, config: Config) -> None:
-        """Eagerly construct Chroma and EmbeddingGemma for hosted readiness."""
-        hosted = replace(
-            config,
-            embedding_model="google/embeddinggemma-300m",
+        """Build Chroma and check only the hosted serving default's vectors."""
+        model_name = (
+            config.public_default_embedding_model
+            if config.public_demo_enabled
+            else config.embedding_model
         )
-        runtime = self.runtime(hosted)
-        self._hosted_indexes_ready = self._expected_indexes_ready(
-            runtime.chroma_client,
-            config.public_embedding_profiles,
-        )
+        if not model_name:
+            with self._state_lock:
+                self._default_vector_index_ready = False
+            return
+        try:
+            profile = resolve_embedding_profile(
+                config, model_name, error=SemanticSearchError
+            )
+            client = self._client(config)
+            ready = self._expected_indexes_ready(client, (profile.model_name,))
+        except Exception:
+            ready = False
+        with self._state_lock:
+            self._default_vector_index_ready = ready
 
     def hosted_ready(self) -> bool:
-        with self._lock:
+        with self._state_lock:
             return (
                 self._chroma_client is not None
-                and "google/embeddinggemma-300m" in self._models
-                and self._hosted_indexes_ready
+                and self._default_vector_index_ready
                 and self._chroma_error is None
-                and "google/embeddinggemma-300m" not in self._errors
             )
+
+    def prepare(self, config: Config, model_name: str, *, retry: bool = False) -> None:
+        """Construct one explicitly selected local profile without touching Chroma."""
+        profile = resolve_embedding_profile(
+            config, model_name, error=SemanticSearchError
+        )
+        if profile.provider != "huggingface":
+            raise SemanticSearchError("Only local embedding profiles can be prepared.")
+        if retry:
+            self.clear_failure(profile.model_name)
+        self._model(config, profile.model_name)
 
     def clear_failure(self, model_name: str | None = None) -> None:
         """Allow an operator/test to retry a corrected runtime dependency."""
-        with self._lock:
+        with self._state_lock:
             if model_name is None:
                 self._errors.clear()
                 self._chroma_error = None
-                self._hosted_indexes_ready = False
+                self._default_vector_index_ready = False
                 return
             self._errors.pop(model_name, None)
 
     def _model(self, config: Config, model_name: str) -> BuiltEmbeddingModel:
-        previous_error = self._errors.get(model_name)
-        if previous_error is not None:
-            raise previous_error
-        existing = self._models.get(model_name)
-        if existing is not None:
-            return existing
-        try:
-            built = self._embedding_builder(
-                config, model_name, error=SemanticSearchError
-            )
-        except Exception as exc:  # noqa: BLE001 - cached/surfaced on request
-            self._errors[model_name] = exc
-            raise
-        self._models[model_name] = built
-        return built
+        build_lock = self._profile_build_lock(model_name)
+        with build_lock:
+            with self._state_lock:
+                previous_error = self._errors.get(model_name)
+                if previous_error is not None:
+                    raise previous_error
+                existing = self._models.get(model_name)
+                if existing is not None:
+                    return existing
+            try:
+                built = self._embedding_builder(
+                    config, model_name, error=SemanticSearchError
+                )
+            except Exception as exc:  # noqa: BLE001 - cached/surfaced on request
+                with self._state_lock:
+                    self._errors[model_name] = exc
+                raise
+            with self._state_lock:
+                self._models[model_name] = built
+            return built
 
     def _client(self, config: Config) -> object:
         path_identity = config.chroma_dir.resolve()
-        if self._chroma_path != path_identity:
-            self._chroma_client = None
-            self._chroma_error = None
-            self._hosted_indexes_ready = False
-            self._chroma_path = path_identity
-        if self._chroma_error is not None:
-            raise self._chroma_error
-        if self._chroma_client is None:
+        with self._chroma_build_lock:
+            with self._state_lock:
+                if self._chroma_path != path_identity:
+                    self._chroma_client = None
+                    self._chroma_error = None
+                    self._default_vector_index_ready = False
+                    self._chroma_path = path_identity
+                if self._chroma_error is not None:
+                    raise self._chroma_error
+                existing = self._chroma_client
+            if existing is not None:
+                return existing
             try:
-                self._chroma_client = self._chroma_builder(
-                    config, error=SemanticSearchError
-                )
+                built = self._chroma_builder(config, error=SemanticSearchError)
             except Exception as exc:  # noqa: BLE001 - cached/surfaced on request
-                self._chroma_error = exc
+                with self._state_lock:
+                    self._chroma_error = exc
                 raise
-        return self._chroma_client
+            with self._state_lock:
+                self._chroma_client = built
+            return built
+
+    def _profile_build_lock(self, model_name: str) -> RLock:
+        with self._state_lock:
+            return self._profile_build_locks.setdefault(model_name, RLock())
+
+    def _encoding_lock(self, model_name: str, provider: str) -> object | None:
+        if provider != "huggingface":
+            return None
+        with self._state_lock:
+            return self._profile_locks.setdefault(model_name, RLock())
 
     @staticmethod
     def _expected_indexes_ready(client: object, model_names: tuple[str, ...]) -> bool:

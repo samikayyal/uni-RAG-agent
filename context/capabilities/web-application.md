@@ -64,6 +64,10 @@ EmbeddingGemma, Gemini Embedding, or Qwen/Nebius profiles that were deployed.
   `Authorization: Bearer <demo-token>` and bind that token to a privacy-safe
   client-address digest. `PUT /api/settings` and historical numeric answer,
   packet, and coverage routes return 404 publicly.
+- `POST /api/embedding-profiles/prepare` accepts one reviewed local Hugging Face
+  profile. In public mode it requires the existing demo bearer token but does
+  not reserve an ask slot or consume quota; it keeps the request open while the
+  selected local model is constructed, then returns a safe ready/failure result.
 - `POST /api/ask` accepts a nonempty query (up to 10,000 characters) and an
   optional alphanumeric/underscore/hyphen session id and client-generated
   request id. Provider/model overrides are not accepted through HTTP.
@@ -110,8 +114,10 @@ EmbeddingGemma, Gemini Embedding, or Qwen/Nebius profiles that were deployed.
   already committed. Active-request progress is transient, contains only a
   phase, elapsed seconds, and cancellation state, and disappears when work
   finishes; it is not persisted or exposed as session history.
-- `/ready` validates storage and, in hosted mode, confirms that the offline
-  EmbeddingGemma runtime was loaded eagerly. It never probes Gemini or Nebius.
+- `/ready` validates storage and, in hosted mode, confirms only the effective
+  serving default's Chroma vector space (`public_default_embedding_model` in
+  public mode, otherwise `embedding_model`). It never constructs an embedding
+  provider or probes Gemini/Nebius; optional local profiles do not gate it.
 - Public quota reservations are atomic and idempotent per request id. A request
   is counted only after it obtains one of two ask slots; provider failures and
   client cancellation still count, while a capacity rejection does not.
@@ -124,9 +130,10 @@ EmbeddingGemma, Gemini Embedding, or Qwen/Nebius profiles that were deployed.
   ownership applies to ask, progress, cancellation, and liveness routes; a
   token for another client or session cannot operate them.
 - Embedding providers and Chroma clients are process scoped. Local Hugging Face
-  query encoding is serialized per model; hosted Gemini/Nebius encodes may
-  overlap. A failed lazy hosted-profile construction is cached until an
-  explicit registry reset rather than retried on every request.
+  query encoding and construction are coordinated per profile, so a slow
+  EmbeddingGemma preparation does not serialize unrelated Gemini/Nebius asks.
+  Failed constructions are cached for ordinary asks, while an explicit
+  preparation request retries that profile.
 - Turnstile and Firestore read/write infrastructure failures use the stable 503
   `abuse_service_unavailable` envelope; none fall through as generic 500s.
 

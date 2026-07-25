@@ -42,7 +42,7 @@ Three operator-selected inputs are baked into every release image:
 
 | Image input | Container location | Purpose |
 | --- | --- | --- |
-| `deployment/assets/models/embeddinggemma-300m` | `/app/models/embeddinggemma-300m` | Offline EmbeddingGemma snapshot, loaded eagerly. |
+| `deployment/assets/models/embeddinggemma-300m` | `/app/models/embeddinggemma-300m` | Offline EmbeddingGemma snapshot, retained for on-demand local-profile selection. |
 | `data/uni_rag.sqlite` | `/app/seed-data/uni_rag.sqlite` then `/data/uni_rag.sqlite` | Selected archive database. The entrypoint copies the seed to mutable runtime state at each boot. |
 | `data/indexes/vector/` | `/data/indexes/vector` | Chroma vector collections for the selected archive. |
 
@@ -61,22 +61,23 @@ a revision that cannot find `uvicorn` exits before readiness can succeed.
 | Setting | Current value | Reason |
 | --- | --- | --- |
 | Port | `8080` | Uvicorn listener and both HTTP probes. |
-| CPU / memory | 2 vCPU / 8 GiB | Supports the eager local embedding model. |
+| CPU / memory | 2 vCPU / 8 GiB | Supports the optional local embedding model when selected. |
 | Concurrency | 4 | Deliberately above the two expensive ask slots so UI/control requests remain responsive. |
 | Minimum / maximum instances | 0 / 1 | One bounded public-demo instance; cold starts are expected. |
 | Request timeout | 300 seconds | Platform headroom around the application ask timeout. |
 | CPU allocation | Request-based | CPU is throttled outside requests. |
-| Startup CPU boost | Enabled | Helps the offline model initialise. |
+| Startup CPU boost | Enabled | Retained Cloud Run startup configuration. |
 | Execution environment | Second generation | Current Cloud Run revision setting. |
 | Startup probe | `GET /ready`, port 8080, 10-second timeout and period, threshold 24 | Allows up to four minutes for startup. |
 | Readiness probe | `GET /ready`, port 8080, 5-second timeout and period, threshold 3 | Controls serving readiness. |
 
 `GET /health` is liveness-only. `GET /ready` additionally verifies storage and
-the hosted offline EmbeddingGemma runtime; it does not call Gemini or Nebius.
+the serving default's vector index; it neither constructs EmbeddingGemma nor
+calls Gemini or Nebius. Optional profiles do not gate readiness.
 The last public readiness response was:
 
 ```json
-{"status":"ready","storage_ready":true,"embeddinggemma_ready":true}
+{"status":"ready","storage_ready":true,"default_vector_index_ready":true}
 ```
 
 For a failed revision, inspect its Cloud Logging stderr and startup events before

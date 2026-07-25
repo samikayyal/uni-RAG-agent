@@ -54,8 +54,20 @@
     };
   }
 
+  function localEmbeddingPreparationModel(payload, changes) {
+    // Preparation is a consequence of an explicit profile selection, not of
+    // saving other fields while the selector remains on the server default.
+    const model = changes?.embedding_model;
+    if (typeof model !== "string" || !model.trim()) return null;
+    const profile = (payload?.embedding_model_profiles || []).find(
+      (candidate) => candidate.model_name === model,
+    );
+    return profile?.provider === "huggingface" ? profile.model_name : null;
+  }
+
   return {
     loadSessions,
+    localEmbeddingPreparationModel,
     publicResumeDecision,
     saveSessions,
     selectStore,

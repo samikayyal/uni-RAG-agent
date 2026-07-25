@@ -260,6 +260,19 @@ async function submitSettings(changes, successMessage) {
   settingsSaveButton.disabled = true;
   settingsResetButton.disabled = true;
   try {
+    const localModel = browserState.localEmbeddingPreparationModel(
+      settingsPayload,
+      changes,
+    );
+    if (localModel) {
+      if (appMode === "public") await ensureDemoToken();
+      setSettingsStatus(`Preparing ${localModel}…`, "working");
+      await requestJson("/api/embedding-profiles/prepare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embedding_model: localModel }),
+      });
+    }
     if (appMode === "public") {
       const stored = Object.fromEntries(
         Object.entries(changes).filter(([, value]) => value !== null),
@@ -276,6 +289,7 @@ async function submitSettings(changes, successMessage) {
     renderSettingsForm(settingsPayload);
     setSettingsStatus(successMessage, "ok");
   } catch (error) {
+    renderSettingsForm(settingsPayload);
     setSettingsStatus(error.message, "error");
   } finally {
     settingsSaveButton.disabled = false;

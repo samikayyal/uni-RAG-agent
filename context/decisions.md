@@ -275,12 +275,15 @@ infrastructure failures, including quota-summary reads, are abuse-service
 outages and therefore return the safe 503 contract.
 
 Hosted runtime assets are staged by the operator and baked into a CPU-only,
-non-root image. EmbeddingGemma loads eagerly from its offline snapshot; Gemini
-and Nebius load lazily. Providers and Chroma clients are
-process scoped, with a per-local-profile encoding lock. `/ready` checks storage
-and eager local-model readiness without probing external providers. Application
-code never creates cloud resources; the operator follows the checked-in GCP and
-Cloudflare runbook.
+non-root image. The offline EmbeddingGemma snapshot remains packaged, but the
+model is lazy: saving a local-profile selection prepares it over the browser
+request, while direct asks retain lazy construction as a fallback. Providers
+and Chroma clients are process scoped, with per-profile local construction and
+encoding locks. `/ready` checks storage plus only the serving default's vector
+space, without constructing an embedding provider or probing external
+providers. Optional profiles never gate readiness. Application code never
+creates cloud resources; the operator follows the checked-in GCP and Cloudflare
+runbook.
 
 **Why:** A public unauthenticated demo has materially different privacy, abuse,
 cost, memory, and state-lifetime risks from the private local UI. Making that

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.support import make_config
+from tests.support import make_config, make_initialized_config
 from tests.test_app import _services
 from uni_rag_agent.app import create_app
 from uni_rag_agent.app.public_demo import (
@@ -52,6 +52,7 @@ def _public_client(
     *,
     services=None,
     quota_store=None,
+    embedding_registry=None,
     raise_server_exceptions: bool = True,
     **config_changes: object,
 ):
@@ -72,6 +73,7 @@ def _public_client(
                 "Verifier", (), {"verify": lambda self, value: value == "valid"}
             )(),
             quota_store=quota,
+            embedding_registry=embedding_registry,
             client_resolver=lambda request, hosted_mode: "203.0.113.9",
             now=lambda: now,
         ),
@@ -757,6 +759,65 @@ def test_embedding_registry_reports_lazy_local_load_once_and_recovers_cached_fai
     ]
 
 
+def test_embedding_registry_prepares_one_local_profile_without_blocking_hosted(
+    tmp_path: Path,
+) -> None:
+    local = "google/embeddinggemma-300m"
+    hosted = "Qwen/Qwen3-Embedding-8B"
+    entered = Event()
+    release = Event()
+    builds: list[str] = []
+    errors: list[Exception] = []
+
+    def build(_config, model, *, error):
+        del error
+        builds.append(model)
+        if model == local:
+            entered.set()
+            assert release.wait(5)
+        profile = EMBEDDING_PROFILES[model]
+        return BuiltEmbeddingModel(object(), profile, profile.dimension)
+
+    registry = EmbeddingRegistry(
+        embedding_builder=build,
+        chroma_builder=lambda _config, *, error: object(),
+    )
+    local_config = replace(make_config(tmp_path), embedding_model=local)
+    hosted_config = replace(local_config, embedding_model=hosted)
+
+    def prepare() -> None:
+        try:
+            registry.prepare(local_config, local)
+        except Exception as exc:  # pragma: no cover - assertion aid
+            errors.append(exc)
+
+    first = Thread(target=prepare)
+    duplicate = Thread(target=prepare)
+    first.start()
+    assert entered.wait(2)
+    duplicate.start()
+    hosted_finished = Event()
+
+    def acquire_hosted() -> None:
+        try:
+            registry.runtime(hosted_config)
+            hosted_finished.set()
+        except Exception as exc:  # pragma: no cover - assertion aid
+            errors.append(exc)
+
+    hosted_thread = Thread(target=acquire_hosted)
+    hosted_thread.start()
+    assert hosted_finished.wait(2)
+    release.set()
+    first.join(5)
+    duplicate.join(5)
+    hosted_thread.join(5)
+
+    assert not errors
+    assert builds.count(local) == 1
+    assert builds.count(hosted) == 1
+
+
 def test_semantic_encoding_lock_serializes_local_and_allows_hosted_overlap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -833,19 +894,19 @@ def test_semantic_encoding_lock_serializes_local_and_allows_hosted_overlap(
     assert exercise(None, expect_overlap=True) == 2
 
 
-def test_hosted_registry_readiness_requires_every_public_vector_space(
+def test_hosted_registry_readiness_checks_only_default_vector_space_without_models(
     tmp_path: Path,
 ) -> None:
     logical_index = next(iter(LOGICAL_INDEX_TO_SOURCE_TYPE))
+    default = "Qwen/Qwen3-Embedding-8B"
     names = {
         physical_collection_name(
             logical_index,
-            provider=EMBEDDING_PROFILES[model].provider,
-            model_name=model,
-            dimension=EMBEDDING_PROFILES[model].dimension,
-            metric=EMBEDDING_PROFILES[model].metric,
+            provider=EMBEDDING_PROFILES[default].provider,
+            model_name=default,
+            dimension=EMBEDDING_PROFILES[default].dimension,
+            metric=EMBEDDING_PROFILES[default].metric,
         )
-        for model in _public_config(tmp_path).public_embedding_profiles
     }
 
     class Client:
@@ -868,18 +929,197 @@ def test_hosted_registry_readiness_requires_every_public_vector_space(
         embedding_builder=build,
         chroma_builder=lambda config, *, error: Client(),
     )
-    config = _public_config(tmp_path)
+    config = _public_config(
+        tmp_path,
+        hosted_mode=True,
+        public_default_embedding_model=default,
+    )
 
     assert not registry.hosted_ready()
     registry.warm_hosted(config)
     assert registry.hosted_ready()
-    assert builds == ["google/embeddinggemma-300m"]
+    assert builds == []
 
     registry.runtime(replace(config, embedding_model="google/gemini-embedding-001"))
-    assert builds == [
-        "google/embeddinggemma-300m",
-        "google/gemini-embedding-001",
-    ]
+    assert builds == ["google/gemini-embedding-001"]
+
+
+def test_hosted_readiness_returns_the_default_vector_space_contract(
+    tmp_path: Path,
+) -> None:
+    default = "Qwen/Qwen3-Embedding-8B"
+    offline_model = tmp_path / "offline-embeddinggemma"
+    offline_model.mkdir()
+    config = make_initialized_config(
+        tmp_path,
+        hosted_mode=True,
+        public_demo_enabled=True,
+        turnstile_site_key="site-key",
+        turnstile_secret_key="turnstile-secret",
+        demo_token_signing_secret="s" * 40,
+        firestore_project_id="offline-test-project",
+        public_default_embedding_model=default,
+        embeddinggemma_model_path=offline_model,
+    )
+    logical_index = next(iter(LOGICAL_INDEX_TO_SOURCE_TYPE))
+    name = physical_collection_name(
+        logical_index,
+        provider=EMBEDDING_PROFILES[default].provider,
+        model_name=default,
+        dimension=EMBEDDING_PROFILES[default].dimension,
+        metric=EMBEDDING_PROFILES[default].metric,
+    )
+
+    class Client:
+        def list_collections(self):
+            return [type("Collection", (), {"name": name})()]
+
+        def get_collection(self, requested):
+            assert requested == name
+            return type("Collection", (), {"count": lambda self: 1})()
+
+    builds: list[str] = []
+    registry = EmbeddingRegistry(
+        embedding_builder=lambda _config, model, *, error: builds.append(model),
+        chroma_builder=lambda _config, *, error: Client(),
+    )
+    with TestClient(
+        create_app(
+            config_loader=lambda: config,
+            services=_services(),
+            embedding_registry=registry,
+        )
+    ) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "storage_ready": True,
+        "default_vector_index_ready": True,
+    }
+    assert builds == []
+
+
+def test_hosted_readiness_returns_503_when_the_default_vector_space_is_missing(
+    tmp_path: Path,
+) -> None:
+    offline_model = tmp_path / "offline-embeddinggemma"
+    offline_model.mkdir()
+    config = make_initialized_config(
+        tmp_path,
+        hosted_mode=True,
+        public_demo_enabled=True,
+        turnstile_site_key="site-key",
+        turnstile_secret_key="turnstile-secret",
+        demo_token_signing_secret="s" * 40,
+        firestore_project_id="offline-test-project",
+        public_default_embedding_model="Qwen/Qwen3-Embedding-8B",
+        embeddinggemma_model_path=offline_model,
+    )
+
+    class EmptyClient:
+        def list_collections(self):
+            return []
+
+    registry = EmbeddingRegistry(
+        chroma_builder=lambda _config, *, error: EmptyClient(),
+    )
+    with TestClient(
+        create_app(
+            config_loader=lambda: config,
+            services=_services(),
+            embedding_registry=registry,
+        )
+    ) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "storage_ready": True,
+        "default_vector_index_ready": False,
+    }
+
+
+def test_public_embedding_profile_preparation_is_authenticated_and_quota_free(
+    tmp_path: Path,
+) -> None:
+    profile = EMBEDDING_PROFILES["google/embeddinggemma-300m"]
+    builds: list[str] = []
+    registry = EmbeddingRegistry(
+        embedding_builder=lambda _config, model, *, error: (
+            builds.append(model)
+            or BuiltEmbeddingModel(object(), profile, profile.dimension)
+        ),
+        chroma_builder=lambda _config, *, error: object(),
+    )
+    client, _, quota = _public_client(tmp_path, embedding_registry=registry)
+    body = {"embedding_model": profile.model_name}
+
+    assert client.post("/api/embedding-profiles/prepare", json=body).status_code == 401
+    headers = _authorize(client)
+    response = client.post(
+        "/api/embedding-profiles/prepare", headers=headers, json=body
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"embedding_model": profile.model_name, "status": "ready"}
+    assert (
+        client.post(
+            "/api/embedding-profiles/prepare", headers=headers, json=body
+        ).status_code
+        == 200
+    )
+    assert builds == [profile.model_name]
+    assert quota.remaining("unused", datetime.now(UTC)).client_day == 10
+    invalid = client.post(
+        "/api/embedding-profiles/prepare",
+        headers=headers,
+        json={"embedding_model": "Qwen/Qwen3-Embedding-8B"},
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "embedding_profile_invalid"
+
+
+def test_explicit_embedding_profile_preparation_retries_cached_failure(
+    tmp_path: Path,
+) -> None:
+    profile = EMBEDDING_PROFILES["google/embeddinggemma-300m"]
+    failed = True
+    attempts = 0
+
+    def build(_config, _model, *, error):
+        nonlocal attempts
+        attempts += 1
+        if failed:
+            raise RuntimeError("private model path")
+        return BuiltEmbeddingModel(object(), profile, profile.dimension)
+
+    registry = EmbeddingRegistry(
+        embedding_builder=build,
+        chroma_builder=lambda _config, *, error: object(),
+    )
+    client, _, _ = _public_client(tmp_path, embedding_registry=registry)
+    headers = _authorize(client)
+    body = {"embedding_model": profile.model_name}
+
+    failed_response = client.post(
+        "/api/embedding-profiles/prepare", headers=headers, json=body
+    )
+    assert failed_response.status_code == 502
+    assert failed_response.json() == {
+        "error": {
+            "code": "embedding_profile_unavailable",
+            "message": "The embedding profile is currently unavailable.",
+        }
+    }
+    failed = False
+    recovered = client.post(
+        "/api/embedding-profiles/prepare", headers=headers, json=body
+    )
+    assert recovered.status_code == 200
+    assert attempts == 2
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")

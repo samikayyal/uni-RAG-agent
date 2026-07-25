@@ -29,6 +29,7 @@ from ..answering import (
     store_answer,
 )
 from ..config import Config, ConfigError, load_config, validate_config
+from ..indexing.profiles import resolve_embedding_profile
 from ..retrieval import (
     EvidenceError,
     QueryPlanningError,
@@ -141,6 +142,14 @@ class SettingsUpdateRequest(BaseModel):
     path_fuzzy_threshold: int | None = None
     evidence_max_tokens: int | None = None
     query_plan_min_confidence: float | None = None
+
+
+class EmbeddingProfilePrepareRequest(BaseModel):
+    """An explicit browser request to load a selected local profile."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    embedding_model: str = Field(min_length=1, max_length=256)
 
 
 class ApiError(RuntimeError):
@@ -378,17 +387,17 @@ def create_app(
     async def ready() -> JSONResponse:
         config = await asyncio.to_thread(_base_config)
         storage = await asyncio.to_thread(check_storage, config)
-        embedding_ready = not config.hosted_mode or (
+        default_vector_index_ready = not config.hosted_mode or (
             resolved_embedding_registry is not None
             and resolved_embedding_registry.hosted_ready()
         )
-        is_ready = storage.ok and embedding_ready
+        is_ready = storage.ok and default_vector_index_ready
         return JSONResponse(
             status_code=200 if is_ready else 503,
             content={
                 "status": "ready" if is_ready else "not_ready",
                 "storage_ready": storage.ok,
-                "embeddinggemma_ready": embedding_ready,
+                "default_vector_index_ready": default_vector_index_ready,
             },
         )
 
@@ -421,6 +430,59 @@ def create_app(
         except SettingsError as exc:
             raise ApiError(422, "settings_validation_error", str(exc)) from exc
         return describe_settings(config, overrides)
+
+    @app.post("/api/embedding-profiles/prepare")
+    async def prepare_embedding_profile(
+        payload: EmbeddingProfilePrepareRequest, request: Request
+    ) -> dict[str, str]:
+        """Load one selected local profile before browser settings are persisted."""
+        config = await asyncio.to_thread(_base_config)
+        if config.public_demo_enabled:
+            try:
+                _authorize(request, config)
+            except DemoAuthorizationError as exc:
+                raise ApiError(401, "demo_authorization_error", str(exc)) from exc
+            except AbuseServiceError as exc:
+                raise ApiError(503, "abuse_service_unavailable", str(exc)) from exc
+        try:
+            profile = resolve_embedding_profile(
+                config, payload.embedding_model, error=SettingsError
+            )
+        except SettingsError as exc:
+            raise ApiError(
+                422,
+                "embedding_profile_invalid",
+                "The embedding profile cannot be prepared.",
+            ) from exc
+        if profile.provider != "huggingface" or (
+            config.public_demo_enabled
+            and profile.model_name not in config.public_embedding_profiles
+        ):
+            raise ApiError(
+                422,
+                "embedding_profile_invalid",
+                "The embedding profile cannot be prepared.",
+            )
+        if resolved_embedding_registry is None:
+            raise ApiError(
+                502,
+                "embedding_profile_unavailable",
+                "The embedding profile is currently unavailable.",
+            )
+        try:
+            await asyncio.to_thread(
+                resolved_embedding_registry.prepare,
+                config,
+                profile.model_name,
+                retry=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - never disclose model/runtime details
+            raise ApiError(
+                502,
+                "embedding_profile_unavailable",
+                "The embedding profile is currently unavailable.",
+            ) from exc
+        return {"embedding_model": profile.model_name, "status": "ready"}
 
     @app.post("/api/demo/session")
     async def demo_session(
