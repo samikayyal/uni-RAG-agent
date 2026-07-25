@@ -3,7 +3,7 @@ FROM ghcr.io/astral-sh/uv:0.8 AS uv
 
 FROM python:3.12-slim AS builder
 COPY --from=uv /uv /usr/local/bin/uv
-WORKDIR /build
+WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 COPY pyproject.toml uv.lock README.md ./
@@ -20,7 +20,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 appuser
 WORKDIR /app
-COPY --from=builder /build/.venv /app/.venv
+COPY --from=builder /app/.venv /app/.venv
 COPY --chown=appuser:appuser deployment/assets/models/embeddinggemma-300m /app/models/embeddinggemma-300m
 COPY --chown=appuser:appuser data/uni_rag.sqlite /app/seed-data/uni_rag.sqlite
 COPY --chown=appuser:appuser data/indexes/vector /data/indexes/vector

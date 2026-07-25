@@ -45,7 +45,11 @@ The implemented pipeline is complete through evaluation hardening:
 12. Cloud Run deployment is operator-owned: the image consumes the selected
     SQLite database and Chroma vectors directly from `data/`, only the ignored
     offline model is staged with PowerShell, and the non-root multi-stage image
-    uses `/app` for packaged files and `/data` for mutable runtime state.
+    uses `/app` for packaged files and `/data` for mutable runtime state. On
+    2026-07-25, revision `uni-rag-agent-00005-v2q` was deployed from immutable
+    image digest `sha256:0cede5317d2e9de552cd781006a25140cd33cb5de93154d710277cd23de79109`;
+    its startup/readiness probes and live storage/EmbeddingGemma readiness
+    checks passed.
 13. Public-demo hardening rejects completed request-id replays before provider
     work or capacity acquisition, normalizes all quota infrastructure failures
     to the abuse-service 503 boundary. Deployment scanning, completeness checks,
