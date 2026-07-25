@@ -79,10 +79,10 @@ through deployment environment configuration; it uses Turnstile, signed
 per-tab sessions, Firestore-backed quotas, bounded request-scoped settings, and
 three predeployed embedding profiles.
 
-For the public deployment workflow, the image reads `data/uni_rag.sqlite` and
-`data/indexes/vector/` directly and requires only the accepted local
-EmbeddingGemma snapshot to be staged with the PowerShell commands in
-[the Cloud Run runbook](deployment/GCP_RUNBOOK.md). The application does not
+For the public deployment, the image reads `data/uni_rag.sqlite` and
+`data/indexes/vector/` directly and requires an accepted local EmbeddingGemma
+snapshot. See the [deployment reference](context/deployment.md) for the
+completed Google Cloud and Cloudflare configuration. The application does not
 audit deployment inputs or create or modify GCP or Cloudflare resources.
 
 `retrieve` is read-only with respect to SQLite search/evidence rows, Chroma, and

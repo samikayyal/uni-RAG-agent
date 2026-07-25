@@ -61,7 +61,7 @@ operators may lower them but cannot silently deploy broader values.
 - Safe config output reports operational values, not API keys; public `/config`
   additionally omits absolute paths.
 - Deployment input review and staging are operator responsibilities documented
-  in `deployment/GCP_RUNBOOK.md`; the application has no deployment-preparation
+  in [deployment.md](../deployment.md); the application has no deployment-preparation
   or secret-scanning command.
 - Firestore stores only quota counters, request-id reservations, UTC buckets,
   and keyed client digests. It is not an answer, query, evidence, IP-address,

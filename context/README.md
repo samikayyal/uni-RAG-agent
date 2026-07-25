@@ -41,6 +41,6 @@ copying the schema into docs.
 - Product boundary and stack: [project_overview.md](project_overview.md).
 - Domain vocabulary: [glossary.md](glossary.md).
 - Setup, reset, generated state, and evaluation modes: [operations.md](operations.md).
-- Operator-owned Cloud Run image preparation and deployment:
-  [`deployment/GCP_RUNBOOK.md`](../deployment/GCP_RUNBOOK.md).
+- Completed Google Cloud and Cloudflare deployment reference:
+  [deployment.md](deployment.md).
 - Root [README.md](../README.md) is the short user/developer quickstart.

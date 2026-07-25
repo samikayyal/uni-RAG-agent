@@ -77,7 +77,10 @@ or scan them. The Docker and Cloud Build contexts include only the required
 SQLite file and vector directory from `data/`; other generated state remains
 excluded. Reviewing secrets, history, settings, logs, vector population, model
 revision, and the upload set is the operator's responsibility. Continue with
-[`deployment/GCP_RUNBOOK.md`](../deployment/GCP_RUNBOOK.md).
+[deployment.md](deployment.md) for the completed Google Cloud and Cloudflare
+deployment configuration, its operational boundaries, and the DNS-only
+`unirag.samikayyal.com` custom-domain mapping. The ignored
+`deployment/GCP_RUNBOOK.md` remains a local historical provisioning guide.
 
 ## Generated state and safe rebuild
 

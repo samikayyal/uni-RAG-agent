@@ -49,7 +49,10 @@ The implemented pipeline is complete through evaluation hardening:
     2026-07-25, revision `uni-rag-agent-00005-v2q` was deployed from immutable
     image digest `sha256:0cede5317d2e9de552cd781006a25140cd33cb5de93154d710277cd23de79109`;
     its startup/readiness probes and live storage/EmbeddingGemma readiness
-    checks passed.
+    checks passed. The operator runbook now also records reproducible `gcloud`
+    bootstrap/identity checks and the DNS-only
+    `unirag.samikayyal.com` custom-domain cutover; no custom-domain mapping is
+    claimed as live until its own Turnstile and browser checks pass.
 13. Public-demo hardening rejects completed request-id replays before provider
     work or capacity acquisition, normalizes all quota infrastructure failures
     to the abuse-service 503 boundary. Deployment scanning, completeness checks,
