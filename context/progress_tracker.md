@@ -98,6 +98,11 @@ The implemented pipeline is complete through evaluation hardening:
 17. The web UI and API no longer expose archive-wide index composition; index
     counts and per-course indexing state remain internal to the offline
     inventory, extraction, and retrieval workflows.
+18. A repository-local post-commit hook now queues the complete local Cloud
+    Build context in the background. Its serialized latest-request-wins worker
+    cancels older builds for the deployment image, handles requests that arrive
+    during the large source upload, and retains an explicit dry-run-capable
+    submission shortcut with local logs.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

@@ -180,6 +180,20 @@ traffic to that same image digest; do not make an unauthenticated revision the
 first runtime test of a new archive, vector index, model snapshot, or
 configuration.
 
+This checkout uses the tracked `.githooks/post-commit` hook (enabled through the
+repository-local `core.hooksPath`) to queue `deployment/submit-build.ps1` after
+each successful commit. The commit returns immediately while a background
+worker uploads the complete local context, including ignored deployment inputs.
+The worker implements latest-request-wins behavior: it serializes local uploads,
+cancels ongoing builds for this exact Artifact Registry image before submitting
+an immutable timestamp/commit-tagged replacement, and cancels its own new build
+if another commit arrived during upload. Run
+`.\deployment\submit-build.ps1` for the same explicit shortcut without a commit,
+or `.\deployment\submit-build.ps1 -DryRun` to validate inputs and preview the
+action. Per-request logs are local under `.git/uni-rag-build/`.
+Set `UNI_RAG_SKIP_BUILD=1` in the committing process for a deliberate one-commit
+skip.
+
 Rollback is a Cloud Run traffic change to a known-good revision, followed by
 verification of active traffic allocation, logs, and `/ready`. The generated
 Cloud Run URL is the domain-level fallback; removing a domain mapping is a

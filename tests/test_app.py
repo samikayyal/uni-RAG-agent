@@ -731,7 +731,7 @@ def test_static_ui_loads_as_question_answering_screen() -> None:
     response = TestClient(create_app()).get("/")
 
     assert response.status_code == 200
-    assert "Ask your university materials" in response.text
+    assert "Study with trusted course content" in response.text
     assert "ask-form" in response.text
     assert "cancel-request" in response.text
     assert "settings-dialog" in response.text

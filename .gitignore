@@ -36,3 +36,6 @@ manual_testing/
 deployment/GCP_RUNBOOK.md
 data.pre-colab-20260724-172055
 *.zip
+
+deployment/submit-build.ps1
+.githooks
