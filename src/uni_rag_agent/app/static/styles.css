@@ -51,7 +51,9 @@
 /* ---------- tokens ---------- */
 
 :root {
-  color-scheme: light;
+  /* `only` opts out of Chromium/Samsung Internet forced darkening: the theme is
+     app-controlled, so the browser must never re-tint what we already painted. */
+  color-scheme: only light;
   --canvas: #fdfcf9;
   --surface: #f1ece5;
   --border: #aaa196;
@@ -69,7 +71,7 @@
 }
 
 :root[data-theme="dark"] {
-  color-scheme: dark;
+  color-scheme: only dark;
   --canvas: #1c1916;
   --surface: #26221d;
   --border: #70665a;

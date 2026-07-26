@@ -755,8 +755,8 @@ def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
     assert 'id="query-count"' in response.text
     assert 'id="clear-history"' in response.text
     assert "/static/browser_state.js?v=lan-uuid-20260726" in response.text
-    assert "/static/styles.css?v=cancel-draft-mobile-20260726" in response.text
-    assert "/static/app.js?v=cancel-draft-mobile-20260726" in response.text
+    assert "/static/styles.css?v=force-dark-optout-20260726" in response.text
+    assert "/static/app.js?v=force-dark-optout-20260726" in response.text
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; base-uri 'self'; form-action 'self'; "
         "frame-ancestors 'none'; object-src 'none'; "

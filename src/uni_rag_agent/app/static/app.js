@@ -28,6 +28,7 @@ const settingsNote = document.querySelector("#settings-note");
 const themeToggle = document.querySelector("#theme-toggle");
 const themeIcon = document.querySelector("#theme-icon");
 const themeColor = document.querySelector("#theme-color");
+const colorSchemeMeta = document.querySelector("#color-scheme");
 const turnstilePanel = document.querySelector("#turnstile-panel");
 const turnstileWidget = document.querySelector("#turnstile-widget");
 const indexChip = document.querySelector("#index-chip");
@@ -108,6 +109,7 @@ function applyTheme(theme) {
   themeToggle.setAttribute("aria-label", `Switch to ${switchTo} theme`);
   themeToggle.title = `Switch to ${switchTo} theme`;
   themeColor.setAttribute("content", nextTheme === "dark" ? "#1c1916" : "#fdfcf9");
+  colorSchemeMeta.setAttribute("content", nextTheme === "dark" ? "only dark" : "only light");
 }
 
 function resizeQueryInput() {
