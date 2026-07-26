@@ -69,7 +69,10 @@ session history, detaches the active conversation, clears the draft and rendered
 answer state, and returns the viewport to the initial question screen without a
 confirmation dialog. It does not delete persisted answer records or change
 settings or theme state. Versioned static asset URLs prevent an updated HTML
-shell from reusing an older clear-history script.
+shell from reusing an older clear-history script. Browser-generated session and
+request identifiers use native UUID generation when available and a
+cryptographically random fallback on plain-HTTP LAN origins where browsers do
+not expose `crypto.randomUUID()`.
 
 ## Public entry points
 

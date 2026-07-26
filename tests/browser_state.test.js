@@ -169,3 +169,29 @@ test("only a selected local profile is prepared before saving settings", () => {
     null,
   );
 });
+
+test("request identifiers work with and without crypto.randomUUID", () => {
+  const native = state.randomId({
+    randomUUID: () => "native-uuid",
+  });
+  assert.equal(native, "native-uuid");
+
+  const fallback = state.randomId({
+    getRandomValues: (bytes) => {
+      bytes.fill(0xab);
+      return bytes;
+    },
+  });
+  assert.equal(fallback, "abababab-abab-4bab-abab-abababababab");
+  assert.match(
+    fallback,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+});
+
+test("request identifiers fail clearly without a cryptographic random source", () => {
+  assert.throws(
+    () => state.randomId({}),
+    /cannot generate secure request identifiers/,
+  );
+});

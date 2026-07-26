@@ -875,11 +875,11 @@ function findSession(id) {
 }
 
 function generateSessionId() {
-  return crypto.randomUUID();
+  return browserState.randomId(crypto);
 }
 
 function generateRequestId() {
-  return crypto.randomUUID();
+  return browserState.randomId(crypto);
 }
 
 function recordTurn(sessionId, query, answerPayload) {

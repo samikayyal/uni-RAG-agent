@@ -77,7 +77,9 @@ The implemented pipeline is complete through evaluation hardening:
     header now also provides an immediate no-confirmation clear action that
     removes all browser-held sessions and returns the conversation surface to
     its initial blank state; versioned script URLs prevent stale cached
-    JavaScript from leaving the control unbound after an update.
+    JavaScript from leaving the control unbound after an update. Session and
+    request IDs also retain a cryptographically random UUID fallback for
+    plain-HTTP LAN browsers that omit `crypto.randomUUID()`.
     Preparing an explicitly selected local embedding profile also shows a
     top-bar loading indicator, with an explicit Gemma label for
     EmbeddingGemma's lazy-load request. Settings saves are diff-based and

@@ -752,8 +752,8 @@ def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
     assert 'id="answer-card"' in response.text
     assert 'id="query-count"' in response.text
     assert 'id="clear-history"' in response.text
-    assert "/static/browser_state.js?v=clear-history-20260726" in response.text
-    assert "/static/app.js?v=clear-history-20260726" in response.text
+    assert "/static/browser_state.js?v=lan-uuid-20260726" in response.text
+    assert "/static/app.js?v=lan-uuid-20260726" in response.text
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; base-uri 'self'; form-action 'self'; "
         "frame-ancestors 'none'; object-src 'none'; "
@@ -794,6 +794,8 @@ def test_static_ui_guards_one_active_ask_and_preserves_shift_enter_newlines() ->
     assert "indexPanel" not in app_js
     assert "beginQuestion(query);" in app_js
     assert 'window.addEventListener("unhandledrejection"' in app_js
+    assert "browserState.randomId(crypto)" in app_js
+    assert "crypto.randomUUID()" not in app_js
     assert "Partial coverage" not in app_js
 
 
