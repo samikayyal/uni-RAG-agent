@@ -194,6 +194,7 @@ button {
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 5px 11px;
+  white-space: nowrap;
 }
 
 .linky {
@@ -1552,6 +1553,22 @@ body:has(.settings-dialog[open]) {
   .composer textarea {
     font-size: 16px;
     min-height: 46px;
+  }
+
+  .composer-foot {
+    flex-wrap: wrap;
+  }
+
+  .composer-foot .session-tag {
+    flex: 1 1 100%;
+  }
+
+  .composer-spacer {
+    display: none;
+  }
+
+  #new-session {
+    flex: 0 0 auto;
   }
 
   .answer-text p {
