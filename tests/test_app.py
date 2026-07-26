@@ -796,7 +796,8 @@ def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
     assert ".evidence-where" in styles and "min-width: 0;" in styles
     assert "grid-template-columns: minmax(0, 1fr);" in styles
     assert "height: 100dvh;" in styles
-    assert ".composer textarea:focus" in styles
+    assert ".composer textarea:focus-visible" in styles
+    assert ".composer textarea:focus-visible {\n  outline: none;" in styles
     assert "resize: none;" in styles
     assert "max-height: 360px;" in styles
     assert "font-size: 16px;" in styles
@@ -817,6 +818,14 @@ def test_static_ui_grows_the_composer_and_persists_the_selected_theme() -> None:
     assert 'const THEME_KEY = "uni-rag-theme";' in app_js
     assert 'queryInput.addEventListener("input", () => {' in app_js
     assert "queryInput.style.height = `${queryInput.scrollHeight}px`;" in app_js
+    assert (
+        """submissionPending = true;
+  setBusy(true);
+  queryInput.value = "";
+  resizeQueryInput();
+  updateQueryCount();"""
+        in app_js
+    )
     assert "updateQueryCount();" in app_js
     assert "themeStore.setItem(THEME_KEY, nextTheme);" in app_js
 

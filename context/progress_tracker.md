@@ -71,7 +71,8 @@ The implemented pipeline is complete through evaluation hardening:
     Shift+Enter-to-newline input, bounds mobile layout content, restores input
     focus and reachable dialog actions, reduces screen-reader announcement
     noise, applies strict settings input/resource-id HTTP validation, grows the
-    non-resizable composer with typed content, and preserves an explicit
+    non-resizable composer with typed content, clears it as soon as a question
+    is accepted for submission, and preserves an explicit
     light/dark appearance choice locally in the browser.
     Preparing an explicitly selected local embedding profile also shows a
     top-bar loading indicator, with an explicit Gemma label for

@@ -61,7 +61,8 @@ to `Uni RAG Agent` shows a live loading indicator (including a Gemma-specific
 label for EmbeddingGemma); it clears on either readiness or failure.
 
 The composer grows with the typed question up to its visible maximum instead of
-being manually resizable. A top-bar light/dark control persists the selected
+being manually resizable. Once a nonempty question is accepted for submission,
+the composer clears immediately while the request is in progress. A top-bar light/dark control persists the selected
 appearance in browser-local state; it does not affect retrieval settings or any
 server-side state.
 

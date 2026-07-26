@@ -197,6 +197,9 @@ form.addEventListener("submit", async (event) => {
   }
   submissionPending = true;
   setBusy(true);
+  queryInput.value = "";
+  resizeQueryInput();
+  updateQueryCount();
   if (appMode === "public") {
     try {
       await ensureDemoToken();
