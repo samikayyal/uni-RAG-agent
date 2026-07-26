@@ -735,6 +735,7 @@ def test_static_ui_loads_as_question_answering_screen() -> None:
     assert "ask-form" in response.text
     assert "cancel-request" in response.text
     assert "settings-dialog" in response.text
+    assert 'id="theme-toggle"' in response.text
     assert "ingestion" not in response.text.lower()
 
 
@@ -790,7 +791,25 @@ def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
     assert "grid-template-columns: minmax(0, 1fr);" in styles
     assert "height: 100dvh;" in styles
     assert ".composer textarea:focus" in styles
+    assert "resize: none;" in styles
+    assert "max-height: 360px;" in styles
     assert "font-size: 16px;" in styles
+
+
+def test_static_ui_grows_the_composer_and_persists_the_selected_theme() -> None:
+    app_js = (
+        Path(__file__).parents[1]
+        / "src"
+        / "uni_rag_agent"
+        / "app"
+        / "static"
+        / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'const THEME_KEY = "uni-rag-theme";' in app_js
+    assert 'queryInput.addEventListener("input", resizeQueryInput);' in app_js
+    assert "queryInput.style.height = `${queryInput.scrollHeight}px`;" in app_js
+    assert "themeStore.setItem(THEME_KEY, nextTheme);" in app_js
 
 
 def test_settings_allowlist_is_one_list_across_store_api_and_ui() -> None:

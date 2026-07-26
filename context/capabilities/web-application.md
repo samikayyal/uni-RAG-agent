@@ -52,6 +52,11 @@ same dialog is per tab and request scoped: it never reads or writes
 `data/app_settings.json`, is bounded more tightly, and can select only
 EmbeddingGemma, Gemini Embedding, or Qwen/Nebius profiles that were deployed.
 
+The composer grows with the typed question up to its visible maximum instead of
+being manually resizable. A top-bar light/dark control persists the selected
+appearance in browser-local state; it does not affect retrieval settings or any
+server-side state.
+
 ## Public entry points
 
 - `uv run -m uni_rag_agent app serve [--host 127.0.0.1] [--port 8000]`.

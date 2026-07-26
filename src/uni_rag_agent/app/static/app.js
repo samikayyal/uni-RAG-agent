@@ -23,6 +23,9 @@ const settingsSaveButton = document.querySelector("#settings-save");
 const settingsResetButton = document.querySelector("#settings-reset");
 const settingsCloseButton = document.querySelector("#settings-close");
 const settingsNote = document.querySelector("#settings-note");
+const themeToggle = document.querySelector("#theme-toggle");
+const themeIcon = document.querySelector("#theme-icon");
+const themeColor = document.querySelector("#theme-color");
 const turnstilePanel = document.querySelector("#turnstile-panel");
 const turnstileWidget = document.querySelector("#turnstile-widget");
 const indexChip = document.querySelector("#index-chip");
@@ -48,12 +51,14 @@ const DETAILS_KEY = "uni-rag-details";
 const PUBLIC_SETTINGS_KEY = "uni-rag-public-settings";
 const DEMO_TOKEN_KEY = "uni-rag-demo-token";
 const DEMO_TOKEN_EXP_KEY = "uni-rag-demo-token-exp";
+const THEME_KEY = "uni-rag-theme";
 let current = null;
 let currentPacket = null;
 let currentMeta = null;
 let packetLoadedFor = null;
 let appMode = "local";
 let sessionStore = localStorage;
+let themeStore = localStorage;
 let sessions = [];
 let activeSessionId = null;
 let activeSessionLive = false;
@@ -63,7 +68,29 @@ let settingsPayload = null;
 let turnstilePromise = null;
 let quotaRemaining = null;
 
+initializeTheme();
+resizeQueryInput();
 initializeApp();
+
+function initializeTheme() {
+  const savedTheme = themeStore.getItem(THEME_KEY);
+  applyTheme(savedTheme === "dark" ? "dark" : "light");
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "dark" ? "dark" : "light";
+  const switchTo = nextTheme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = nextTheme;
+  themeIcon.textContent = nextTheme === "dark" ? "☀" : "☾";
+  themeToggle.setAttribute("aria-label", `Switch to ${switchTo} theme`);
+  themeToggle.title = `Switch to ${switchTo} theme`;
+  themeColor.setAttribute("content", nextTheme === "dark" ? "#1c1916" : "#fdfcf9");
+}
+
+function resizeQueryInput() {
+  queryInput.style.height = "auto";
+  queryInput.style.height = `${queryInput.scrollHeight}px`;
+}
 
 async function initializeApp() {
   setBusy(true, "Loading application mode…");
@@ -71,6 +98,8 @@ async function initializeApp() {
     settingsPayload = await requestJson("/api/settings");
     appMode = settingsPayload.mode === "public" ? "public" : "local";
     sessionStore = browserState.selectStore(appMode, localStorage, sessionStorage);
+    themeStore = browserState.selectStore(appMode, localStorage, sessionStorage);
+    initializeTheme();
     sessions = loadSessions();
     activeSessionId = sessionStore.getItem(ACTIVE_KEY);
     if (activeSessionId && !findSession(activeSessionId)) activeSessionId = null;
@@ -98,6 +127,12 @@ detailsToggle.addEventListener("change", () => {
   applyDetailsVisibility();
 });
 
+themeToggle.addEventListener("click", () => {
+  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  themeStore.setItem(THEME_KEY, nextTheme);
+  applyTheme(nextTheme);
+});
+
 newSessionButton.addEventListener("click", () => {
   if (activeRequest || submissionPending) return;
   activeSessionId = null;
@@ -108,6 +143,7 @@ newSessionButton.addEventListener("click", () => {
   clearResult();
   clearStatus();
   queryInput.value = "";
+  resizeQueryInput();
   renderSessionState();
   renderHistory();
   queryInput.focus();
@@ -181,6 +217,7 @@ form.addEventListener("submit", async (event) => {
       turnIndex: findSession(sessionId)?.turns.length || 1,
     });
     queryInput.value = "";
+    resizeQueryInput();
     clearStatus();
   } catch (error) {
     if (!request.cancelled) {
@@ -226,6 +263,8 @@ queryInput.addEventListener("keydown", (event) => {
     if (!askButton.disabled) form.requestSubmit(askButton);
   }
 });
+
+queryInput.addEventListener("input", resizeQueryInput);
 
 /* ---------- retrieval settings dialog ---------- */
 

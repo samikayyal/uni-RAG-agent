@@ -70,7 +70,9 @@ The implemented pipeline is complete through evaluation hardening:
     clears stale result state on each new ask, preserves Enter-to-submit and
     Shift+Enter-to-newline input, bounds mobile layout content, restores input
     focus and reachable dialog actions, reduces screen-reader announcement
-    noise, and applies strict settings input/resource-id HTTP validation.
+    noise, applies strict settings input/resource-id HTTP validation, grows the
+    non-resizable composer with typed content, and preserves an explicit
+    light/dark appearance choice locally in the browser.
 17. The web UI and API no longer expose archive-wide index composition; index
     counts and per-course indexing state remain internal to the offline
     inventory, extraction, and retrieval workflows.
