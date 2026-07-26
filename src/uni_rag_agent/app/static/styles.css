@@ -1554,7 +1554,7 @@ body:has(.settings-dialog[open]) {
 
   .answer-text p {
     font-size: 15.5px;
-    line-height: 1.68;
+    line-height: 44px;
   }
 
   .evidence-grid,
@@ -1684,5 +1684,20 @@ body:has(.settings-dialog[open]) {
     align-items: center;
     justify-content: center;
     vertical-align: middle;
+  }
+}
+
+@media (max-width: 720px) and (max-height: 480px) {
+  .shell {
+    padding-top: 4px;
+    gap: 8px;
+  }
+
+  .hero h1 {
+    margin-bottom: 6px;
+  }
+
+  .hero .subtitle {
+    line-height: 1.4;
   }
 }

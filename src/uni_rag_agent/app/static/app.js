@@ -222,6 +222,7 @@ form.addEventListener("submit", async (event) => {
     try {
       await ensureDemoToken();
     } catch (error) {
+      restoreQueryDraft(query);
       setStatus(error.message, "error");
       submissionPending = false;
       setBusy(false);
@@ -279,6 +280,7 @@ form.addEventListener("submit", async (event) => {
     updateQueryCount();
     clearStatus();
   } catch (error) {
+    restoreQueryDraft(query);
     if (!request.cancelled) {
       setStatus(error.message, "error");
       showRequestFailure(query, error);
@@ -327,6 +329,12 @@ queryInput.addEventListener("input", () => {
   resizeQueryInput();
   updateQueryCount();
 });
+
+function restoreQueryDraft(query) {
+  queryInput.value = query;
+  resizeQueryInput();
+  updateQueryCount();
+}
 
 /* ---------- retrieval settings dialog ---------- */
 
@@ -705,7 +713,11 @@ function updateChangedMarkers() {
   settingsChanged.hidden = changed === 0;
   settingsChanged.textContent = `${changed} edited`;
   settingsResetButton.hidden = changed === 0;
-  settingsResetButton.textContent = changed === 1 ? "Undo edit" : `Undo all ${changed} edits`;
+  settingsResetButton.textContent = changed === 0
+    ? "Undo edits"
+    : changed === 1
+      ? "Undo edit"
+      : `Undo all ${changed} edits`;
   setSettingsControlsDisabled(Boolean(settingsOperation) || settingsLoadFailed);
 }
 

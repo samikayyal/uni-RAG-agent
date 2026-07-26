@@ -66,7 +66,10 @@ label for EmbeddingGemma); it clears on either readiness or failure.
 
 The composer grows with the typed question up to its visible maximum instead of
 being manually resizable. Once a nonempty question is accepted for submission,
-the composer clears immediately while the request is in progress. A top-bar light/dark control persists the selected
+the composer clears while the request is in progress, then restores that draft
+if the user cancels or the request fails so it can be edited and retried. Empty
+submissions use the app's visible status message instead of browser-native
+validation. A top-bar light/dark control persists the selected
 appearance in browser-local state; it does not affect retrieval settings or any
 server-side state. A history-header control immediately clears all browser-held
 session history, detaches the active conversation, clears the draft and rendered
@@ -140,7 +143,8 @@ not expose `crypto.randomUUID()`.
   packet is fetched once per answer rather than only when the trace is open; a
   failed packet fetch degrades the cards to course and location text instead of
   blocking the answer. On narrow screens the chip's touch target participates in
-  line layout rather than overlaying adjacent answer text, and long retrieval
+  line layout with consistent mobile line rhythm rather than overlaying adjacent
+  answer text, and long retrieval
   contribution metadata wraps inside its trace card. Coverage is reported as
   which planned sources produced chunk-backed hits plus the recorded aggregate
   counts; per-source hit counts do not exist in the coverage projection and are

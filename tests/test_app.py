@@ -736,6 +736,8 @@ def test_static_ui_loads_as_question_answering_screen() -> None:
     assert "cancel-request" in response.text
     assert "settings-dialog" in response.text
     assert 'id="theme-toggle"' in response.text
+    assert '<form id="ask-form" class="composer" novalidate>' in response.text
+    assert 'rows="3" required' not in response.text
     assert "ingestion" not in response.text.lower()
 
 
@@ -753,8 +755,8 @@ def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
     assert 'id="query-count"' in response.text
     assert 'id="clear-history"' in response.text
     assert "/static/browser_state.js?v=lan-uuid-20260726" in response.text
-    assert "/static/styles.css?v=settings-redesign-20260726" in response.text
-    assert "/static/app.js?v=settings-redesign-20260726" in response.text
+    assert "/static/styles.css?v=cancel-draft-mobile-20260726" in response.text
+    assert "/static/app.js?v=cancel-draft-mobile-20260726" in response.text
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; base-uri 'self'; form-action 'self'; "
         "frame-ancestors 'none'; object-src 'none'; "
@@ -794,6 +796,16 @@ def test_static_ui_guards_one_active_ask_and_preserves_shift_enter_newlines() ->
     assert 'window.scrollTo({ top: 0, behavior: "auto" });' in clear_history_handler
     assert "indexPanel" not in app_js
     assert "beginQuestion(query);" in app_js
+    assert "restoreQueryDraft(query);" in app_js
+    assert app_js.count("restoreQueryDraft(query);") == 2
+    assert (
+        """function restoreQueryDraft(query) {
+  queryInput.value = query;
+  resizeQueryInput();
+  updateQueryCount();
+}"""
+        in app_js
+    )
     assert 'window.addEventListener("unhandledrejection"' in app_js
     assert "browserState.randomId(crypto)" in app_js
     assert "crypto.randomUUID()" not in app_js
@@ -833,6 +845,15 @@ def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
     assert "min-height: 44px;" in mobile_citation
     assert "margin: 0 2px;" in mobile_citation
     assert "margin: -" not in mobile_citation
+    mobile_answer = (
+        styles.split("@media (max-width: 720px)", maxsplit=1)[1]
+        .split(".answer-text p {", maxsplit=1)[1]
+        .split("}", maxsplit=1)[0]
+    )
+    assert "line-height: 44px;" in mobile_answer
+    assert "@media (max-width: 720px) and (max-height: 480px)" in styles
+    assert "padding-top: 4px;" in styles
+    assert "gap: 8px;" in styles
 
 
 def test_static_ui_grows_the_composer_and_persists_the_selected_theme() -> None:
@@ -901,7 +922,8 @@ def test_settings_dialog_shows_effective_values_and_tracks_current_edits() -> No
     assert "let settingsBaseline = {};" in app_js
     assert "payload.overrides?.[name] ?? payload.settings?.[name]" in app_js
     assert "was ${baseline} ·" in app_js
-    assert "Undo all ${changed} edits" in app_js
+    assert '? "Undo edits"' in app_js
+    assert ": `Undo all ${changed} edits`" in app_js
     assert "Reset all retrieval settings" not in app_js
     assert ".settings-changed::before" in styles
     assert ".settings-control" in styles

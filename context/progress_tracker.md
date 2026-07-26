@@ -74,7 +74,10 @@ The implemented pipeline is complete through evaluation hardening:
     retrieval contribution metadata inside trace cards, applies strict settings
     input/resource-id HTTP validation, grows the
     non-resizable composer with typed content, clears it as soon as a question
-    is accepted for submission, and preserves an explicit
+    is accepted for submission, restores the submitted draft after cancellation
+    or failure, uses its own visible empty-question validation, keeps the Ask
+    action visible in short phone viewports, maintains even mobile citation-line
+    rhythm, gives the zero-edit Undo action a plain label, and preserves an explicit
     light/dark appearance choice locally in the browser. A responsive history
     header now also provides an immediate no-confirmation clear action that
     removes all browser-held sessions and returns the conversation surface to
