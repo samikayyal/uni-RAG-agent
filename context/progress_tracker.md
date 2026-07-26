@@ -70,7 +70,9 @@ The implemented pipeline is complete through evaluation hardening:
     clears stale result state on each new ask, preserves Enter-to-submit and
     Shift+Enter-to-newline input, bounds mobile layout content, restores input
     focus and reachable dialog actions, reduces screen-reader announcement
-    noise, applies strict settings input/resource-id HTTP validation, grows the
+    noise, keeps citation touch targets in normal answer flow, wraps long
+    retrieval contribution metadata inside trace cards, applies strict settings
+    input/resource-id HTTP validation, grows the
     non-resizable composer with typed content, clears it as soon as a question
     is accepted for submission, and preserves an explicit
     light/dark appearance choice locally in the browser. A responsive history

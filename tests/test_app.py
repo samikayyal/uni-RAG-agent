@@ -821,6 +821,17 @@ def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
     assert "#embedding-loading-label" in styles
     assert ".history-clear" in styles
     assert "min-height: 44px;" in styles
+    assert ".contributions .badge" in styles
+    assert "flex: 1 1 100%;" in styles
+    assert "overflow-wrap: anywhere;" in styles
+    mobile_citation = (
+        styles.split("@media (max-width: 720px)", maxsplit=1)[1]
+        .split(".cite {", maxsplit=1)[1]
+        .split("}", maxsplit=1)[0]
+    )
+    assert "min-height: 44px;" in mobile_citation
+    assert "margin: 0 2px;" in mobile_citation
+    assert "margin: -" not in mobile_citation
 
 
 def test_static_ui_grows_the_composer_and_persists_the_selected_theme() -> None:

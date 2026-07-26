@@ -135,9 +135,12 @@ not expose `crypto.randomUUID()`.
   matching cited-evidence card. Those cards quote the packet, so the evidence
   packet is fetched once per answer rather than only when the trace is open; a
   failed packet fetch degrades the cards to course and location text instead of
-  blocking the answer. Coverage is reported as which planned sources produced
-  chunk-backed hits plus the recorded aggregate counts; per-source hit counts do
-  not exist in the coverage projection and are not invented.
+  blocking the answer. On narrow screens the chip's touch target participates in
+  line layout rather than overlaying adjacent answer text, and long retrieval
+  contribution metadata wraps inside its trace card. Coverage is reported as
+  which planned sources produced chunk-backed hits plus the recorded aggregate
+  counts; per-source hit counts do not exist in the coverage projection and are
+  not invented.
 - While startup session liveness is unknown, the ask control remains busy and
   submission is rejected rather than silently forking a new session.
 - Planner and answer settings remain separate; each configured model is cached
