@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Ask grounded questions about your indexed university course materials.">
+    <meta name="theme-color" content="#fdfcf9">
+    <meta name="color-scheme" content="light dark">
     <title>Uni RAG Agent</title>
     <link rel="stylesheet" href="/static/styles.css">
   </head>
@@ -55,7 +58,7 @@
 
       <div id="status" class="status" role="status" aria-live="polite" hidden></div>
 
-      <section id="progress-panel" class="progress-panel" hidden aria-live="polite">
+      <section id="progress-panel" class="progress-panel" hidden>
         <div class="progress-head">
           <span class="live-dot" aria-hidden="true"></span>
           <strong id="progress-title">Working</strong>
@@ -70,7 +73,7 @@
         </div>
       </section>
 
-      <section id="result" hidden aria-live="polite">
+      <section id="result" hidden>
         <p class="question-meta">
           <span id="question-index">Question</span>
           <span id="question-meta-detail"></span>
@@ -80,7 +83,7 @@
         <div id="receipt" class="receipt" hidden></div>
         <div id="answer-notice" class="notice" hidden></div>
 
-        <article class="answer-card" id="answer-card">
+        <article class="answer-card" id="answer-card" aria-live="polite">
           <p class="answer-state" id="answer-state" hidden></p>
           <div id="answer-text" class="answer-text"></div>
         </article>

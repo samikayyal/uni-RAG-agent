@@ -131,7 +131,9 @@ EmbeddingGemma, Gemini Embedding, or Qwen/Nebius profiles that were deployed.
   `PersistenceGate` protects the final write while preserving an evidence packet
   already committed. Active-request progress is transient, contains only a
   phase, elapsed seconds, and cancellation state, and disappears when work
-  finishes; it is not persisted or exposed as session history.
+  finishes; it is not persisted or exposed as session history. The browser
+  permits one active submission only, disables starting a new session until it
+  settles, and maps Enter to submit while Shift+Enter adds a newline.
 - `/ready` validates storage and, in hosted mode, confirms only the effective
   serving default's Chroma vector space (`public_default_embedding_model` in
   public mode, otherwise `embedding_model`). It never constructs an embedding

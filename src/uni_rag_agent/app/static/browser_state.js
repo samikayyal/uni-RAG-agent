@@ -12,10 +12,12 @@
   function loadSessions(store, key) {
     try {
       const parsed = JSON.parse(store.getItem(key) || "[]");
-      return Array.isArray(parsed) ? parsed : [];
+      if (Array.isArray(parsed)) return parsed;
     } catch {
-      return [];
+      // Fall through to remove the invalid value below.
     }
+    store.removeItem(key);
+    return [];
   }
 
   function saveSessions(store, key, values, limit, pruneOnQuota) {

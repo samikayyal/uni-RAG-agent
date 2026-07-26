@@ -395,6 +395,25 @@ def test_missing_lookup_uses_404_envelope(tmp_path: Path) -> None:
     }
 
 
+def test_unrepresentable_lookup_ids_use_the_same_404_envelope(tmp_path: Path) -> None:
+    client = TestClient(create_app(config_loader=lambda: make_config(tmp_path)))
+    too_large = "9223372036854775808"
+
+    for path in (
+        f"/api/answers/{too_large}",
+        f"/api/evidence-packets/{too_large}",
+        f"/api/search-runs/{too_large}/coverage",
+    ):
+        response = client.get(path)
+        assert response.status_code == 404
+        assert response.json() == {
+            "error": {
+                "code": "not_found",
+                "message": "The requested resource does not exist.",
+            }
+        }
+
+
 def test_timeout_returns_504_and_never_persists_late_answer(tmp_path: Path) -> None:
     config = replace(make_config(tmp_path), ask_timeout_seconds=0.05)
     stored: list[bool] = []
@@ -720,6 +739,61 @@ def test_static_ui_loads_as_question_answering_screen() -> None:
     assert "ingestion" not in response.text.lower()
 
 
+def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
+    client = TestClient(create_app())
+    response = client.get("/")
+
+    assert '<meta name="description"' in response.text
+    assert '<meta name="theme-color"' in response.text
+    assert 'id="progress-panel" class="progress-panel" hidden>' in response.text
+    assert '<section id="result" hidden>' in response.text
+    assert 'id="answer-card" aria-live="polite"' in response.text
+    assert response.headers["content-security-policy"] == (
+        "default-src 'self'; base-uri 'self'; form-action 'self'; "
+        "frame-ancestors 'none'; object-src 'none'; "
+        "script-src 'self' https://challenges.cloudflare.com; "
+        "frame-src https://challenges.cloudflare.com; connect-src 'self'; "
+        "style-src 'self'; font-src 'self'; img-src 'self' data:"
+    )
+    assert response.headers["referrer-policy"] == "same-origin"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_static_ui_guards_one_active_ask_and_preserves_shift_enter_newlines() -> None:
+    app_js = (
+        Path(__file__).parents[1]
+        / "src"
+        / "uni_rag_agent"
+        / "app"
+        / "static"
+        / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "let submissionPending = false;" in app_js
+    assert "if (activeRequest || submissionPending) return;" in app_js
+    assert 'event.key === "Enter" && !event.shiftKey && !event.isComposing' in app_js
+    assert "form.requestSubmit(askButton);" in app_js
+    assert "newSessionButton.disabled = busy;" in app_js
+
+
+def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
+    styles = (
+        Path(__file__).parents[1]
+        / "src"
+        / "uni_rag_agent"
+        / "app"
+        / "static"
+        / "styles.css"
+    ).read_text(encoding="utf-8")
+
+    assert ".asked-query" in styles and "overflow-wrap: anywhere;" in styles
+    assert ".evidence-where" in styles and "min-width: 0;" in styles
+    assert "grid-template-columns: minmax(0, 1fr);" in styles
+    assert "height: 100dvh;" in styles
+    assert ".composer textarea:focus" in styles
+    assert "font-size: 16px;" in styles
+
+
 def test_settings_allowlist_is_one_list_across_store_api_and_ui() -> None:
     """The store allowlist, Pydantic request model, and JS labels must agree.
 
@@ -838,6 +912,25 @@ def test_settings_update_rejects_invalid_unknown_and_sensitive_fields(
         assert response.json()["error"]["code"] == "validation_error"
 
     # Nothing invalid was persisted.
+    assert client.get("/api/settings").json()["overrides"] == {}
+
+
+def test_settings_update_rejects_coerced_boolean_string_and_float_values(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(create_app(config_loader=lambda: make_config(tmp_path)))
+
+    for body in (
+        {"keyword_top_k": True},
+        {"keyword_top_k": "20"},
+        {"keyword_top_k": 20.0},
+        {"query_plan_min_confidence": True},
+        {"query_plan_min_confidence": "0.7"},
+    ):
+        response = client.put("/api/settings", json=body)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation_error"
+
     assert client.get("/api/settings").json()["overrides"] == {}
 
 

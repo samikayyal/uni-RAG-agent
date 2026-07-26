@@ -66,6 +66,11 @@ The implemented pipeline is complete through evaluation hardening:
     profiles remain lazy, can be prepared through the authenticated quota-free
     browser control route before settings persist, and retain ask-time lazy
     loading as a fallback.
+16. Web UI reliability/accessibility hardening now prevents concurrent asks,
+    clears stale result state on each new ask, preserves Enter-to-submit and
+    Shift+Enter-to-newline input, bounds mobile layout content, restores input
+    focus and reachable dialog actions, reduces screen-reader announcement
+    noise, and applies strict settings input/resource-id HTTP validation.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

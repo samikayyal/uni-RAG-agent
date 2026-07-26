@@ -69,6 +69,18 @@ test("public history keeps newest twenty and prunes oldest on quota pressure", (
   assert.equal(state.loadSessions(constrained, sessionsKey).length, pruned.length);
 });
 
+test("invalid stored session history is removed after a safe empty fallback", () => {
+  const store = new MemoryStorage();
+  store.setItem(sessionsKey, "not json");
+
+  assert.deepEqual(state.loadSessions(store, sessionsKey), []);
+  assert.equal(store.getItem(sessionsKey), null);
+
+  store.setItem(sessionsKey, JSON.stringify({ not: "a session list" }));
+  assert.deepEqual(state.loadSessions(store, sessionsKey), []);
+  assert.equal(store.getItem(sessionsKey), null);
+});
+
 test("expired token detaches server context without deleting restored answer", () => {
   const store = new MemoryStorage();
   store.setItem("token", "signed-token");

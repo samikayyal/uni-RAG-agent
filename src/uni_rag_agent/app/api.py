@@ -71,6 +71,7 @@ from .settings import (
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+SQLITE_MAX_ROW_ID = 9_223_372_036_854_775_807
 PositiveId = Annotated[int, ApiPath(gt=0)]
 SessionId = Annotated[str, ApiPath(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 RequestId = Annotated[str, ApiPath(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
@@ -106,16 +107,16 @@ class PublicRetrievalSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     embedding_model: str | None = None
-    keyword_top_k: int | None = None
-    semantic_top_k: int | None = None
-    metadata_top_k: int | None = None
-    final_top_k: int | None = None
-    rrf_k: int | None = None
-    semantic_query_limit: int | None = None
-    filename_fuzzy_threshold: int | None = None
-    path_fuzzy_threshold: int | None = None
-    evidence_max_tokens: int | None = None
-    query_plan_min_confidence: float | None = None
+    keyword_top_k: Annotated[int, Field(strict=True)] | None = None
+    semantic_top_k: Annotated[int, Field(strict=True)] | None = None
+    metadata_top_k: Annotated[int, Field(strict=True)] | None = None
+    final_top_k: Annotated[int, Field(strict=True)] | None = None
+    rrf_k: Annotated[int, Field(strict=True)] | None = None
+    semantic_query_limit: Annotated[int, Field(strict=True)] | None = None
+    filename_fuzzy_threshold: Annotated[int, Field(strict=True)] | None = None
+    path_fuzzy_threshold: Annotated[int, Field(strict=True)] | None = None
+    evidence_max_tokens: Annotated[int, Field(strict=True)] | None = None
+    query_plan_min_confidence: Annotated[float, Field(strict=True)] | None = None
 
 
 class DemoSessionRequest(BaseModel):
@@ -134,16 +135,16 @@ class SettingsUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     embedding_model: str | None = None
-    keyword_top_k: int | None = None
-    semantic_top_k: int | None = None
-    metadata_top_k: int | None = None
-    final_top_k: int | None = None
-    rrf_k: int | None = None
-    semantic_query_limit: int | None = None
-    filename_fuzzy_threshold: int | None = None
-    path_fuzzy_threshold: int | None = None
-    evidence_max_tokens: int | None = None
-    query_plan_min_confidence: float | None = None
+    keyword_top_k: Annotated[int, Field(strict=True)] | None = None
+    semantic_top_k: Annotated[int, Field(strict=True)] | None = None
+    metadata_top_k: Annotated[int, Field(strict=True)] | None = None
+    final_top_k: Annotated[int, Field(strict=True)] | None = None
+    rrf_k: Annotated[int, Field(strict=True)] | None = None
+    semantic_query_limit: Annotated[int, Field(strict=True)] | None = None
+    filename_fuzzy_threshold: Annotated[int, Field(strict=True)] | None = None
+    path_fuzzy_threshold: Annotated[int, Field(strict=True)] | None = None
+    evidence_max_tokens: Annotated[int, Field(strict=True)] | None = None
+    query_plan_min_confidence: Annotated[float, Field(strict=True)] | None = None
 
 
 class EmbeddingProfilePrepareRequest(BaseModel):
@@ -266,6 +267,20 @@ def create_app(
         redoc_url=None,
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next: Any) -> Any:
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; base-uri 'self'; form-action 'self'; "
+            "frame-ancestors 'none'; object-src 'none'; "
+            "script-src 'self' https://challenges.cloudflare.com; "
+            "frame-src https://challenges.cloudflare.com; connect-src 'self'; "
+            "style-src 'self'; font-src 'self'; img-src 'self' data:"
+        )
+        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_: Request, exc: ApiError) -> JSONResponse:
@@ -757,6 +772,7 @@ def create_app(
 
     @app.get("/api/search-runs/{search_run_id}/coverage")
     async def coverage(search_run_id: PositiveId) -> dict[str, object]:
+        _require_sqlite_row_id(search_run_id)
         base = await asyncio.to_thread(_base_config)
         if base.public_demo_enabled:
             raise ApiError(404, "not_found", "The requested resource does not exist.")
@@ -773,6 +789,7 @@ def create_app(
 
     @app.get("/api/evidence-packets/{evidence_packet_id}")
     async def evidence_packet(evidence_packet_id: PositiveId) -> dict[str, object]:
+        _require_sqlite_row_id(evidence_packet_id)
         base = await asyncio.to_thread(_base_config)
         if base.public_demo_enabled:
             raise ApiError(404, "not_found", "The requested resource does not exist.")
@@ -789,6 +806,7 @@ def create_app(
 
     @app.get("/api/answers/{answer_id}")
     async def answer(answer_id: PositiveId) -> dict[str, object]:
+        _require_sqlite_row_id(answer_id)
         base = await asyncio.to_thread(_base_config)
         if base.public_demo_enabled:
             raise ApiError(404, "not_found", "The requested resource does not exist.")
@@ -896,6 +914,12 @@ def _public_answer(
     if packet is not None:
         result["evidence_packet"] = packet.as_safe_dict()
     return result
+
+
+def _require_sqlite_row_id(value: int) -> None:
+    """Keep an unrepresentable SQLite row id on the ordinary 404 boundary."""
+    if value > SQLITE_MAX_ROW_ID:
+        raise ApiError(404, "not_found", "The requested resource does not exist.")
 
 
 def _domain_error(

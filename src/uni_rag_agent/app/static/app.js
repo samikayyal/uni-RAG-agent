@@ -64,6 +64,7 @@ let sessions = [];
 let activeSessionId = null;
 let activeSessionLive = false;
 let activeRequest = null;
+let submissionPending = false;
 let settingsPayload = null;
 let turnstilePromise = null;
 let indexStatus = null;
@@ -106,6 +107,7 @@ detailsToggle.addEventListener("change", () => {
 });
 
 newSessionButton.addEventListener("click", () => {
+  if (activeRequest || submissionPending) return;
   activeSessionId = null;
   activeSessionLive = false;
   current = null;
@@ -121,17 +123,22 @@ newSessionButton.addEventListener("click", () => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (activeRequest || submissionPending) return;
   if (activeSessionLive === null) {
     setStatus("Wait for the active-session check to finish before asking.", "working");
     return;
   }
   const query = queryInput.value.trim();
   if (!query) return;
+  submissionPending = true;
+  setBusy(true);
   if (appMode === "public") {
     try {
       await ensureDemoToken();
     } catch (error) {
       setStatus(error.message, "error");
+      submissionPending = false;
+      setBusy(false);
       return;
     }
   }
@@ -191,8 +198,11 @@ form.addEventListener("submit", async (event) => {
       clearResult();
     }
   } finally {
-    stopRequestFeedback(request);
-    setBusy(false);
+    if (activeRequest === request) {
+      stopRequestFeedback(request);
+      setBusy(false);
+    }
+    submissionPending = false;
   }
 });
 
@@ -206,7 +216,7 @@ cancelRequestButton.addEventListener("click", async () => {
     });
     if (outcome.cancelled) {
       request.cancelled = true;
-      setStatus("Request cancelled. Any in-flight work will finish without saving an answer.", "working");
+      setStatus("Request cancelled. Any in-flight work will finish without saving an answer.", "cancelled");
       request.controller.abort();
     } else {
       setStatus("The request completed before it could be cancelled.", "working");
@@ -219,8 +229,9 @@ cancelRequestButton.addEventListener("click", async () => {
 });
 
 queryInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-    form.requestSubmit();
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    if (!askButton.disabled) form.requestSubmit(askButton);
   }
 });
 
@@ -259,7 +270,10 @@ const SETTING_GROUPS = [
 
 settingsButton.addEventListener("click", async () => {
   settingsDialog.showModal();
+  settingsCloseButton.focus();
   clearSettingsStatus();
+  settingsSaveButton.disabled = true;
+  settingsResetButton.disabled = true;
   settingsFields.replaceChildren(emptyMessage("Loading current settings…"));
   try {
     if (!settingsPayload || appMode === "local") {
@@ -271,10 +285,14 @@ settingsButton.addEventListener("click", async () => {
     settingsFields.replaceChildren(
       emptyMessage(`Could not load settings: ${error.message}`),
     );
+  } finally {
+    settingsSaveButton.disabled = false;
+    settingsResetButton.disabled = false;
   }
 });
 
 settingsCloseButton.addEventListener("click", () => settingsDialog.close());
+settingsDialog.addEventListener("close", () => settingsButton.focus());
 
 settingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -382,6 +400,7 @@ function renderSettingsForm(payload) {
   });
   settingsFields.replaceChildren(fragment);
   updateChangedMarkers();
+  if (settingsDialog.open) settingsFields.querySelector("select, input")?.focus();
 }
 
 function buildEmbeddingModelField(payload) {
@@ -1056,6 +1075,10 @@ function beginQuestion(query) {
   const session = activeSessionId ? findSession(activeSessionId) : null;
   const turnIndex = (session?.turns.length || 0) + 1;
   hero.hidden = true;
+  current = null;
+  currentPacket = null;
+  currentMeta = null;
+  packetLoadedFor = null;
   shell.classList.remove("has-answer");
   indexPanel.hidden = true;
   result.hidden = false;
@@ -1069,6 +1092,7 @@ function beginQuestion(query) {
   searchedPanel.hidden = true;
   detailsSection.hidden = true;
   progressPanel.hidden = false;
+  clearStatus();
 }
 
 function markPhase(request, phase, now) {
@@ -1871,8 +1895,8 @@ function fileName(path) {
 
 function setBusy(busy, message = "") {
   askButton.disabled = busy;
-  askButton.classList.toggle("busy", busy);
   askButton.querySelector(".button-label").textContent = busy ? "Working…" : "Ask";
+  newSessionButton.disabled = busy;
   if (!busy) {
     cancelRequestButton.hidden = true;
     cancelRequestButton.disabled = false;
