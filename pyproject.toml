@@ -63,7 +63,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"uni_rag_agent.app" = ["static/*"]
+"uni_rag_agent.app" = ["static/*", "static/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

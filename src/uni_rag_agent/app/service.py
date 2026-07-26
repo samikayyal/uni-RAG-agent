@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from threading import Lock, RLock
 from time import monotonic
@@ -18,6 +19,7 @@ from ..indexing.profiles import physical_collection_name, resolve_embedding_prof
 from ..indexing.vector import build_chroma_client
 from ..retrieval.planner import build_chat_model
 from ..search_contracts import LOGICAL_INDEX_TO_SOURCE_TYPE
+from ..storage import connect_sqlite_read_only
 
 
 class AskCancelled(RuntimeError):
@@ -585,3 +587,90 @@ class AskOrchestrator:
             search_run_id=evidence_result.search_run_id,
         )
         return completed, evidence_result.coverage, evidence_result.packet
+
+
+_EMPTY_INDEX_STATUS: dict[str, object] = {
+    "totals": {
+        "courses": 0,
+        "indexed_courses": 0,
+        "files": 0,
+        "indexed_files": 0,
+        "chunks": 0,
+        "embedded_chunks": 0,
+    },
+    "courses": [],
+    "last_indexed_at": None,
+}
+
+_COURSE_COUNTS_SQL = """
+SELECT
+    c.name AS course,
+    COUNT(DISTINCT f.id) AS file_count,
+    COUNT(DISTINCT k.file_id) AS indexed_file_count,
+    COUNT(DISTINCT k.id) AS chunk_count
+FROM courses c
+LEFT JOIN files f ON f.course_id = c.id
+LEFT JOIN chunks k ON k.file_id = f.id
+GROUP BY c.id, c.name
+ORDER BY c.name COLLATE NOCASE
+"""
+
+_INDEX_TOTALS_SQL = """
+SELECT
+    (SELECT COUNT(*) FROM files) AS files,
+    (SELECT COUNT(DISTINCT file_id) FROM chunks) AS indexed_files,
+    (SELECT COUNT(*) FROM chunks) AS chunks,
+    (SELECT COUNT(DISTINCT chunk_id) FROM embeddings) AS embedded_chunks,
+    (SELECT MAX(created_at) FROM chunks) AS last_indexed_at
+"""
+
+
+def load_index_status(config: Config) -> dict[str, object]:
+    """Project read-only course, file, and chunk counts for the browser screen.
+
+    This is a display projection over already-ingested state: it never
+    traverses ``Courses/`` and never writes. A missing database or a schema
+    that predates a table simply reports an empty index rather than failing
+    the screen that shows it.
+    """
+    if not config.sqlite_path.is_file():
+        return _empty_index_status()
+    try:
+        with closing(connect_sqlite_read_only(config)) as connection:
+            course_rows = connection.execute(_COURSE_COUNTS_SQL).fetchall()
+            totals_row = connection.execute(_INDEX_TOTALS_SQL).fetchone()
+    except sqlite3.Error:
+        return _empty_index_status()
+
+    courses = [
+        {
+            # Course names are already course-relative labels; no host path
+            # ever reaches the browser through this route.
+            "course": str(row["course"]),
+            "file_count": int(row["file_count"]),
+            "indexed_file_count": int(row["indexed_file_count"]),
+            "chunk_count": int(row["chunk_count"]),
+            "indexed": int(row["chunk_count"]) > 0,
+        }
+        for row in course_rows
+    ]
+    last_indexed_at = totals_row["last_indexed_at"] if totals_row else None
+    return {
+        "totals": {
+            "courses": len(courses),
+            "indexed_courses": sum(1 for course in courses if course["indexed"]),
+            "files": int(totals_row["files"]) if totals_row else 0,
+            "indexed_files": int(totals_row["indexed_files"]) if totals_row else 0,
+            "chunks": int(totals_row["chunks"]) if totals_row else 0,
+            "embedded_chunks": (
+                int(totals_row["embedded_chunks"]) if totals_row else 0
+            ),
+        },
+        "courses": courses,
+        "last_indexed_at": str(last_indexed_at) if last_indexed_at else None,
+    }
+
+
+def _empty_index_status() -> dict[str, object]:
+    totals = dict(_EMPTY_INDEX_STATUS["totals"])  # type: ignore[arg-type]
+    return {**_EMPTY_INDEX_STATUS, "totals": totals, "courses": []}

@@ -103,6 +103,8 @@ def test_public_settings_are_request_scoped_and_historical_routes_are_hidden(
     assert client.get("/api/answers/1").status_code == 404
     assert client.get("/api/evidence-packets/1").status_code == 404
     assert client.get("/api/search-runs/1/coverage").status_code == 404
+    # Index composition is deployment state, not something a demo visitor reads.
+    assert client.get("/api/index-status").status_code == 404
     assert not (config.data_dir / "app_settings.json").exists()
 
 

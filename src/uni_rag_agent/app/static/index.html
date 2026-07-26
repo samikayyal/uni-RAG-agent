@@ -7,118 +7,158 @@
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
-    <nav class="topbar">
+    <header class="topbar">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"></span>
         <span class="brand-name">Uni RAG Agent</span>
       </div>
+      <span id="index-chip" class="chip" hidden></span>
       <div class="topbar-actions">
         <label class="toggle" for="details-toggle" title="Show everything recorded for this query">
-          <span class="toggle-label">Full details</span>
-          <input id="details-toggle" type="checkbox" role="switch" aria-label="Show full query details">
+          <span class="toggle-label">Full trace</span>
+          <input id="details-toggle" type="checkbox" role="switch" aria-label="Show the full recorded trace">
           <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
         </label>
         <button type="button" id="settings-button" class="ghost" aria-haspopup="dialog">Settings</button>
       </div>
-    </nav>
+    </header>
 
-    <main class="shell">
-      <header class="hero">
+    <main class="shell" id="shell">
+      <section class="hero" id="hero">
         <h1>Ask your university materials</h1>
-        <p class="subtitle">Every answer is grounded in your indexed course files and cites its evidence.</p>
-      </header>
+        <p class="subtitle">
+          Nothing here is invented. Every sentence is assembled from your
+          indexed course files and carries the page it came from.
+        </p>
+      </section>
 
-      <form id="ask-form" class="ask-panel">
+      <form id="ask-form" class="composer">
         <div id="turnstile-panel" class="turnstile-panel" hidden>
           <p>Complete the one-time verification for this browser tab.</p>
           <div id="turnstile-widget"></div>
         </div>
         <textarea id="query" name="query" maxlength="10000" rows="3" required
           placeholder="e.g. Explain MapReduce from my courses" aria-label="Question"></textarea>
-        <div class="ask-row">
-          <div class="active-session">
+        <div class="composer-foot">
+          <span class="session-tag">
             <span class="session-dot" aria-hidden="true"></span>
             <span id="active-session-label">New session</span>
-            <button type="button" id="new-session" class="ghost" hidden>Start new</button>
-          </div>
-          <div class="ask-actions">
-            <button type="button" id="cancel-request" class="ghost cancel" hidden>Cancel</button>
-            <button id="ask-button" type="submit">
-              <span class="button-label">Ask</span>
-            </button>
-          </div>
+          </span>
+          <button type="button" id="new-session" class="pill" hidden>Start new</button>
+          <span class="composer-spacer"></span>
+          <button type="button" id="cancel-request" class="ghost warn" hidden>Cancel</button>
+          <button id="ask-button" type="submit" class="primary">
+            <span class="button-label">Ask</span>
+          </button>
         </div>
       </form>
 
       <div id="status" class="status" role="status" aria-live="polite" hidden></div>
 
+      <section id="progress-panel" class="progress-panel" hidden aria-live="polite">
+        <div class="progress-head">
+          <span class="live-dot" aria-hidden="true"></span>
+          <strong id="progress-title">Working</strong>
+          <span id="progress-stage" class="meta"></span>
+        </div>
+        <ol id="stage-list" class="stages"></ol>
+        <p class="progress-note">
+          Cold start adds one stage in front — loading the embedding model.
+        </p>
+        <div class="skeleton" aria-hidden="true">
+          <span></span><span></span><span class="short"></span>
+        </div>
+      </section>
+
       <section id="result" hidden aria-live="polite">
+        <p class="question-meta">
+          <span id="question-index">Question</span>
+          <span id="question-meta-detail"></span>
+        </p>
+        <h2 class="asked-query" id="asked-query" dir="auto"></h2>
+
+        <div id="receipt" class="receipt" hidden></div>
+        <div id="answer-notice" class="notice" hidden></div>
+
         <article class="answer-card" id="answer-card">
           <p class="answer-state" id="answer-state" hidden></p>
-          <p class="asked-query" id="asked-query" dir="auto"></p>
           <div id="answer-text" class="answer-text"></div>
-          <div id="sources" class="sources"></div>
         </article>
 
+        <section id="evidence-cited" class="evidence-cited" hidden></section>
+        <section id="searched-panel" class="searched-panel" hidden></section>
+
         <section id="details" class="details" hidden>
-          <h2 class="section-heading">Everything recorded for this query</h2>
-
           <details class="panel" open>
-            <summary>Citations</summary>
-            <div id="d-citations" class="panel-body"></div>
-          </details>
-
-          <details class="panel" open>
-            <summary>Limitations</summary>
+            <summary>Limitations<span class="panel-meta" id="d-limitations-meta"></span></summary>
             <div id="d-limitations" class="panel-body"></div>
           </details>
 
+          <details class="panel" open>
+            <summary>Citations<span class="panel-meta" id="d-citations-meta"></span></summary>
+            <div id="d-citations" class="panel-body"></div>
+          </details>
+
           <details class="panel">
-            <summary>Search coverage</summary>
+            <summary>Search coverage<span class="panel-meta" id="d-coverage-meta"></span></summary>
             <div id="d-coverage" class="panel-body"></div>
           </details>
 
           <details class="panel">
-            <summary>Query plan &amp; retrieval settings</summary>
+            <summary>Query plan &amp; retrieval settings<span class="panel-meta" id="d-plan-meta"></span></summary>
             <div id="d-plan" class="panel-body"><p class="empty">Loading persisted evidence packet…</p></div>
           </details>
 
           <details class="panel">
-            <summary>Evidence packet</summary>
+            <summary>Evidence packet<span class="panel-meta" id="d-evidence-meta"></span></summary>
             <div id="d-evidence" class="panel-body"><p class="empty">Loading persisted evidence packet…</p></div>
           </details>
 
           <details class="panel">
-            <summary>Trace &amp; raw API</summary>
+            <summary>Trace &amp; raw API<span class="panel-meta" id="d-trace-meta"></span></summary>
             <div id="d-trace" class="panel-body"></div>
           </details>
         </section>
       </section>
 
+      <section id="index-panel" class="index-panel" hidden>
+        <div class="section-head">
+          <span class="section-label">Your index</span>
+          <span class="meta" id="index-summary"></span>
+        </div>
+        <div id="index-courses" class="chip-row"></div>
+        <p class="index-note" id="index-note" hidden></p>
+      </section>
+
       <section id="history" class="history" hidden>
-        <h2 class="section-heading">Previous sessions</h2>
+        <div class="section-head">
+          <span class="section-label">Previous sessions</span>
+        </div>
         <div id="history-list"></div>
       </section>
     </main>
 
     <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
       <form id="settings-form" novalidate>
-        <h2 id="settings-title" class="settings-title">Retrieval settings</h2>
-        <p id="settings-note" class="settings-note">
-          Blank fields use the server configuration. Changes are saved on this
-          machine and apply from your next question. A selected embedding model
-          must already have a built vector index. Selecting a local profile
-          prepares it before the setting is saved.
-        </p>
+        <div class="settings-head">
+          <h2 id="settings-title" class="settings-title">Retrieval settings</h2>
+          <span id="settings-changed" class="settings-changed" hidden></span>
+          <p id="settings-note" class="settings-note">
+            Blank fields use the server configuration. Changes are saved on this
+            machine and apply from your next question. A selected embedding model
+            must already have a built vector index. Selecting a local profile
+            prepares it before the setting is saved.
+          </p>
+        </div>
         <div id="settings-fields" class="settings-fields">
           <p class="empty">Loading current settings…</p>
         </div>
         <p id="settings-status" class="settings-status" role="status" hidden></p>
         <div class="settings-actions">
-          <button type="button" id="settings-reset" class="ghost">Reset all to server defaults</button>
+          <button type="button" id="settings-reset" class="linky warn">Reset all to server defaults</button>
           <span class="settings-actions-spacer"></span>
           <button type="button" id="settings-close" class="ghost">Close</button>
-          <button type="submit" id="settings-save">Save settings</button>
+          <button type="submit" id="settings-save" class="primary">Save settings</button>
         </div>
       </form>
     </dialog>

@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any, Annotated
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Path as ApiPath, Request
+from fastapi import FastAPI, Request
+from fastapi import Path as ApiPath
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -59,6 +60,7 @@ from .service import (
     PersistenceGate,
     SessionCapacityError,
     SessionRegistry,
+    load_index_status,
 )
 from .settings import (
     SettingsError,
@@ -410,6 +412,14 @@ def create_app(
             else await asyncio.to_thread(web_settings.apply, config)
         )
         return _public_config(effective)
+
+    @app.get("/api/index-status")
+    async def index_status() -> dict[str, object]:
+        """Report indexed course/file/chunk counts for the browser index panel."""
+        config = await asyncio.to_thread(_base_config)
+        if config.public_demo_enabled:
+            raise ApiError(404, "not_found", "The requested resource does not exist.")
+        return await asyncio.to_thread(load_index_status, config)
 
     @app.get("/api/settings")
     async def settings_view() -> dict[str, object]:
