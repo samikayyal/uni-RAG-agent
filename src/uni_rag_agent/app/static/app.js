@@ -73,6 +73,7 @@ let turnstilePromise = null;
 let quotaRemaining = null;
 let settingsOperation = null;
 let settingsLoadFailed = false;
+let settingsBaseline = {};
 
 initializeTheme();
 resizeQueryInput();
@@ -140,7 +141,7 @@ async function initializeApp() {
     if (appMode === "public") {
       queryInput.maxLength = settingsPayload.public_limits?.query_max_chars || 4000;
       updateQueryCount();
-      settingsNote.textContent = "Settings are private to this tab and are sent only with your next question. They are not written to the server.";
+      settingsNote.textContent = "Each field shows the value your next question will actually use. Changes are marked, stay private to this tab, and are sent only with your next question.";
       hydratePublicSettingsPayload();
     }
     applyDetailsVisibility();
@@ -408,18 +409,15 @@ settingsForm.addEventListener("submit", async (event) => {
   await submitSettings(changes, "Settings saved. They apply from your next question.");
 });
 
-settingsResetButton.addEventListener("click", async () => {
+settingsResetButton.addEventListener("click", () => {
   if (!settingsPayload || settingsOperation || settingsLoadFailed) return;
-  if (!window.confirm("Reset all retrieval settings to their server defaults?")) return;
-  const changes = {};
   Object.keys(SETTING_LABELS).forEach((name) => {
-    if (settingsPayload.overrides[name] !== undefined) changes[name] = null;
+    const input = settingsForm.querySelector(`[name="${name}"]`);
+    if (input) input.value = formatValue(settingsBaseline[name]);
   });
-  if (!Object.keys(changes).length) {
-    settingsDialog.close();
-    return;
-  }
-  await submitSettings(changes, "All settings now follow the server configuration.");
+  clearSettingsErrors();
+  clearSettingsStatus();
+  updateChangedMarkers();
 });
 
 async function submitSettings(changes, successMessage) {
@@ -474,8 +472,9 @@ async function submitSettings(changes, successMessage) {
 }
 
 function setSettingsControlsDisabled(disabled) {
-  settingsSaveButton.disabled = disabled;
-  settingsResetButton.disabled = disabled;
+  const changed = countSettingsChanges();
+  settingsSaveButton.disabled = disabled || changed === 0;
+  settingsResetButton.disabled = disabled || changed === 0;
 }
 
 function requestSettingsDialogClose() {
@@ -493,7 +492,6 @@ function collectSettingsChanges() {
     const input = settingsForm.querySelector(`[name="${name}"]`);
     if (!input) return;
     const raw = input.value.trim();
-    const previous = settingsPayload.overrides[name] ?? null;
     let value = raw === "" ? null : raw;
     if (name !== "embedding_model" && raw !== "") {
       const integer = !FLOAT_SETTINGS.has(name);
@@ -516,7 +514,10 @@ function collectSettingsChanges() {
       }
       value = numeric;
     }
-    if (value !== previous) changes[name] = value;
+    if (raw !== formatValue(settingsBaseline[name])) {
+      const defaultValue = settingsPayload.defaults?.[name];
+      changes[name] = value === defaultValue ? null : value;
+    }
   });
   if (firstInvalid) {
     setSettingsStatus("Correct the highlighted setting before saving.", "error");
@@ -536,6 +537,12 @@ function setEmbeddingLoadingIndicator(modelName) {
 }
 
 function renderSettingsForm(payload) {
+  settingsBaseline = Object.fromEntries(
+    Object.keys(SETTING_LABELS).map((name) => [
+      name,
+      payload.overrides?.[name] ?? payload.settings?.[name] ?? payload.defaults?.[name],
+    ]),
+  );
   const fragment = document.createDocumentFragment();
   SETTING_GROUPS.forEach((group) => {
     const section = document.createElement("section");
@@ -564,35 +571,44 @@ function renderSettingsForm(payload) {
 
 function buildEmbeddingModelField(payload) {
   const field = settingsField("embedding_model");
+  const control = document.createElement("div");
+  control.className = "settings-control";
   const select = document.createElement("select");
   select.name = "embedding_model";
   select.id = "setting-embedding_model";
-  const fallback = document.createElement("option");
-  fallback.value = "";
+  const seen = new Set();
   const configured = payload.defaults.embedding_model;
-  fallback.textContent = configured
-    ? `Server default — ${configured}`
-    : "Server default (not set)";
-  select.append(fallback);
+  if (configured) {
+    const fallback = document.createElement("option");
+    fallback.value = configured;
+    fallback.textContent = configured;
+    select.append(fallback);
+    seen.add(configured);
+  }
   (payload.embedding_model_profiles || []).forEach((profile) => {
+    if (seen.has(profile.model_name)) return;
     const option = document.createElement("option");
     option.value = profile.model_name;
-    option.textContent = `${profile.model_name} · ${profile.provider} · ${profile.dimension}d`;
+    option.textContent = profile.model_name;
     select.append(option);
+    seen.add(profile.model_name);
   });
-  select.value = payload.overrides.embedding_model || "";
+  select.value = formatValue(settingsBaseline.embedding_model);
   select.addEventListener("change", () => {
     clearSettingsFieldError("embedding_model");
     updateChangedMarkers();
   });
-  field.append(select);
+  control.append(select);
+  field.append(control);
+  field.append(editHint("embedding_model"));
   field.append(field.querySelector(".settings-field-error"));
-  // The blank option already names the server default, so no hint row here.
   return field;
 }
 
 function buildNumericField(payload, name) {
   const field = settingsField(name);
+  const control = document.createElement("div");
+  control.className = "settings-control";
   const input = document.createElement("input");
   input.type = "text";
   input.inputMode = FLOAT_SETTINGS.has(name) ? "decimal" : "numeric";
@@ -604,39 +620,42 @@ function buildNumericField(payload, name) {
     input.max = limits.max;
   }
   input.autocomplete = "off";
-  input.placeholder = `default ${formatValue(payload.defaults[name])}`;
-  const override = payload.overrides[name];
-  input.value = override === undefined || override === null ? "" : override;
+  input.value = formatValue(settingsBaseline[name]);
   input.addEventListener("input", () => {
     clearSettingsFieldError(name);
     updateChangedMarkers();
   });
-  field.append(input);
-  const hint = `default ${formatValue(payload.defaults[name])}${
-    limits ? ` · ${formatNumber(limits.min)}–${formatNumber(limits.max)}` : ""
-  }`;
-  field.append(hintRow(name, payload, hint));
-  input.setAttribute("aria-describedby", `setting-${name}-hint setting-${name}-error`);
+  control.append(input);
+  if (limits) {
+    const range = document.createElement("span");
+    range.className = "settings-range";
+    range.textContent = `${formatNumber(limits.min)}–${formatNumber(limits.max)}`;
+    control.append(range);
+  }
+  field.append(control);
+  field.append(editHint(name));
+  input.setAttribute("aria-describedby", `setting-${name}-edit setting-${name}-error`);
   field.append(field.querySelector(".settings-field-error"));
   return field;
 }
 
-function hintRow(name, payload, text) {
+function editHint(name) {
   const hint = document.createElement("small");
-  hint.className = "settings-hint";
-  hint.id = `setting-${name}-hint`;
+  hint.className = "settings-edit";
+  hint.id = `setting-${name}-edit`;
+  hint.hidden = true;
   const value = document.createElement("span");
-  value.textContent = text;
+  value.className = "settings-was";
   const reset = document.createElement("button");
   reset.type = "button";
   reset.className = "reset";
-  reset.textContent = "reset";
-  reset.hidden = true;
+  reset.textContent = "undo";
   reset.addEventListener("click", () => {
     const input = settingsForm.querySelector(`[name="${name}"]`);
     if (!input) return;
-    input.value = "";
+    input.value = formatValue(settingsBaseline[name]);
     clearSettingsFieldError(name);
+    clearSettingsStatus();
     updateChangedMarkers();
   });
   hint.append(value, reset);
@@ -670,27 +689,36 @@ function updateChangedMarkers() {
     const input = settingsForm.querySelector(`[name="${name}"]`);
     const field = settingsForm.querySelector(`[data-field="${name}"]`);
     if (!input || !field) return;
-    const current = settingsPayload.overrides[name] ?? null;
-    const isChanged = input.value.trim() !== (current === null ? "" : String(current));
-    const hasOverrideValue = input.value.trim() !== "";
+    const baseline = formatValue(settingsBaseline[name]);
+    const isChanged = input.value.trim() !== baseline;
     if (isChanged) changed += 1;
     field.classList.toggle("changed", isChanged);
     const dot = field.querySelector(".changed-dot");
     const reset = field.querySelector(".reset");
+    const edit = field.querySelector(".settings-edit");
+    const was = field.querySelector(".settings-was");
     if (dot) dot.hidden = !isChanged;
-    if (reset) reset.hidden = !hasOverrideValue;
+    if (reset) reset.hidden = !isChanged;
+    if (edit) edit.hidden = !isChanged;
+    if (was) was.textContent = `was ${baseline} ·`;
   });
   settingsChanged.hidden = changed === 0;
-  settingsChanged.textContent = `${changed} unsaved change${changed === 1 ? "" : "s"}`;
+  settingsChanged.textContent = `${changed} edited`;
+  settingsResetButton.hidden = changed === 0;
+  settingsResetButton.textContent = changed === 1 ? "Undo edit" : `Undo all ${changed} edits`;
+  setSettingsControlsDisabled(Boolean(settingsOperation) || settingsLoadFailed);
 }
 
 function hasUnsavedSettingsChanges() {
-  if (!settingsPayload || settingsLoadFailed) return false;
-  return Object.keys(SETTING_LABELS).some((name) => {
+  return countSettingsChanges() > 0;
+}
+
+function countSettingsChanges() {
+  if (!settingsPayload || settingsLoadFailed) return 0;
+  return Object.keys(SETTING_LABELS).filter((name) => {
     const input = settingsForm.querySelector(`[name="${name}"]`);
-    const current = settingsPayload.overrides[name] ?? null;
-    return input && input.value.trim() !== (current === null ? "" : String(current));
-  });
+    return input && input.value.trim() !== formatValue(settingsBaseline[name]);
+  }).length;
 }
 
 function clearSettingsErrors() {
@@ -703,7 +731,7 @@ function clearSettingsFieldError(name) {
   const error = document.querySelector(`#setting-${name}-error`);
   if (input) {
     input.removeAttribute("aria-invalid");
-    input.setAttribute("aria-describedby", `setting-${name}-hint setting-${name}-error`);
+    input.setAttribute("aria-describedby", `setting-${name}-edit setting-${name}-error`);
   }
   if (field) field.classList.remove("has-error");
   if (error) {
@@ -718,7 +746,7 @@ function setSettingsFieldError(name, message) {
   const error = document.querySelector(`#setting-${name}-error`);
   if (input) {
     input.setAttribute("aria-invalid", "true");
-    input.setAttribute("aria-describedby", `setting-${name}-hint setting-${name}-error`);
+    input.setAttribute("aria-describedby", `setting-${name}-edit setting-${name}-error`);
   }
   if (field) field.classList.add("has-error");
   if (error) {

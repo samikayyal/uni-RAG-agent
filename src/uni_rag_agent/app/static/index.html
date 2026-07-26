@@ -7,7 +7,7 @@
     <meta name="theme-color" id="theme-color" content="#fdfcf9">
     <meta name="color-scheme" content="light dark">
     <title>Uni RAG Agent</title>
-    <link rel="stylesheet" href="/static/styles.css?v=mobile-layout-20260726">
+    <link rel="stylesheet" href="/static/styles.css?v=settings-redesign-20260726">
   </head>
   <body>
     <header class="topbar">
@@ -154,10 +154,8 @@
           <h2 id="settings-title" class="settings-title">Retrieval settings</h2>
           <span id="settings-changed" class="settings-changed" hidden></span>
           <p id="settings-note" class="settings-note">
-            Blank fields use the server configuration. Changes are saved on this
-            machine and apply from your next question. A selected embedding model
-            must already have a built vector index. Selecting a local profile
-            prepares it before the setting is saved.
+            Each field shows the value your next question will actually use.
+            Anything you change is marked, and stays on this machine.
           </p>
         </div>
         <div id="settings-fields" class="settings-fields">
@@ -165,7 +163,7 @@
         </div>
         <p id="settings-status" class="settings-status" role="status" hidden></p>
         <div class="settings-actions">
-          <button type="button" id="settings-reset" class="linky warn">Reset all to server defaults</button>
+          <button type="button" id="settings-reset" class="linky warn" hidden>Undo edits</button>
           <span class="settings-actions-spacer"></span>
           <button type="button" id="settings-close" class="ghost">Close</button>
           <button type="submit" id="settings-save" class="primary">Save settings</button>
@@ -174,6 +172,6 @@
     </dialog>
 
     <script src="/static/browser_state.js?v=lan-uuid-20260726" defer></script>
-    <script src="/static/app.js?v=lan-uuid-20260726" defer></script>
+    <script src="/static/app.js?v=settings-redesign-20260726" defer></script>
   </body>
 </html>

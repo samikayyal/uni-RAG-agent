@@ -87,7 +87,10 @@ The implemented pipeline is complete through evaluation hardening:
     EmbeddingGemma's lazy-load request. Settings saves are diff-based and
     locally validated, preserve field-level errors, close the dialog on
     success, retain an in-flight operation across dialog reopen, and reject a
-    selected local profile that lacks a usable vector collection. The web
+    selected local profile that lacks a usable vector collection. The settings
+    dialog now presents effective next-ask values in compact retrieval-stage
+    groups, marks edits with prior values and undo controls, and keeps its
+    actions reachable in a full-height phone layout. The web
     surface no longer serves an OpenAPI schema.
 17. The web UI and API no longer expose archive-wide index composition; index
     counts and per-course indexing state remain internal to the offline

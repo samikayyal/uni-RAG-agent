@@ -753,7 +753,8 @@ def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
     assert 'id="query-count"' in response.text
     assert 'id="clear-history"' in response.text
     assert "/static/browser_state.js?v=lan-uuid-20260726" in response.text
-    assert "/static/app.js?v=lan-uuid-20260726" in response.text
+    assert "/static/styles.css?v=settings-redesign-20260726" in response.text
+    assert "/static/app.js?v=settings-redesign-20260726" in response.text
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; base-uri 'self'; form-action 'self'; "
         "frame-ancestors 'none'; object-src 'none'; "
@@ -879,6 +880,36 @@ def test_static_ui_shows_gemma_preparation_in_the_top_bar() -> None:
     assert "settingsDialog.close();" in app_js
     assert ".embedding-loading-spinner" in styles
     assert "@keyframes spin" in styles
+
+
+def test_settings_dialog_shows_effective_values_and_tracks_current_edits() -> None:
+    repo_root = Path(__file__).parents[1]
+    index_html = (
+        repo_root / "src" / "uni_rag_agent" / "app" / "static" / "index.html"
+    ).read_text(encoding="utf-8")
+    app_js = (
+        repo_root / "src" / "uni_rag_agent" / "app" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+    styles = (
+        repo_root / "src" / "uni_rag_agent" / "app" / "static" / "styles.css"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "Each field shows the value your next question will actually use." in index_html
+    )
+    assert 'id="settings-reset" class="linky warn" hidden' in index_html
+    assert "let settingsBaseline = {};" in app_js
+    assert "payload.overrides?.[name] ?? payload.settings?.[name]" in app_js
+    assert "was ${baseline} ·" in app_js
+    assert "Undo all ${changed} edits" in app_js
+    assert "Reset all retrieval settings" not in app_js
+    assert ".settings-changed::before" in styles
+    assert ".settings-control" in styles
+    assert ".settings-range" in styles
+    assert ".settings-field.changed input:focus" in styles
+    assert "body:has(.settings-dialog[open])" in styles
+    assert "padding: calc(20px + env(safe-area-inset-top))" in styles
+    assert "padding: 14px 18px calc(14px + env(safe-area-inset-bottom))" in styles
 
 
 def test_settings_allowlist_is_one_list_across_store_api_and_ui() -> None:

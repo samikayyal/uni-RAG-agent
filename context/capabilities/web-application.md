@@ -55,7 +55,11 @@ The dialog submits only edited settings, validates numeric values in place,
 preserves edits after a rejected save, and closes after a successful save. An
 explicit local-profile preparation first verifies that the selected profile has
 at least one usable vector collection, so a model cannot be saved as ready when
-semantic retrieval has no matching index.
+semantic retrieval has no matching index. The dialog displays the effective
+value that the next ask will use, groups controls by retrieval stage, marks
+edited fields with their prior values and individual undo actions, and offers a
+single footer action to undo all current edits. Its header and footer remain
+reachable while the field list scrolls on narrow phone layouts.
 While an explicitly selected local profile is being prepared, the top bar next
 to `Uni RAG Agent` shows a live loading indicator (including a Gemma-specific
 label for EmbeddingGemma); it clears on either readiness or failure.
