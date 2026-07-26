@@ -62,6 +62,7 @@
             <span id="active-session-label">New session</span>
           </span>
           <button type="button" id="new-session" class="pill" hidden>Start new</button>
+          <span id="query-count" class="query-count" aria-live="polite"></span>
           <span class="composer-spacer"></span>
           <button type="button" id="cancel-request" class="ghost warn" hidden>Cancel</button>
           <button id="ask-button" type="submit" class="primary">
@@ -72,7 +73,7 @@
 
       <div id="status" class="status" role="status" aria-live="polite" hidden></div>
 
-      <section id="progress-panel" class="progress-panel" hidden>
+      <section id="progress-panel" class="progress-panel" role="status" aria-live="polite" aria-atomic="false" hidden>
         <div class="progress-head">
           <span class="live-dot" aria-hidden="true"></span>
           <strong id="progress-title">Working</strong>
@@ -97,7 +98,7 @@
         <div id="receipt" class="receipt" hidden></div>
         <div id="answer-notice" class="notice" hidden></div>
 
-        <article class="answer-card" id="answer-card" aria-live="polite">
+        <article class="answer-card" id="answer-card">
           <p class="answer-state" id="answer-state" hidden></p>
           <div id="answer-text" class="answer-text"></div>
         </article>

@@ -2,6 +2,7 @@ const shell = document.querySelector("#shell");
 const hero = document.querySelector("#hero");
 const form = document.querySelector("#ask-form");
 const queryInput = document.querySelector("#query");
+const queryCount = document.querySelector("#query-count");
 const askButton = document.querySelector("#ask-button");
 const statusBox = document.querySelector("#status");
 const result = document.querySelector("#result");
@@ -69,10 +70,28 @@ let submissionPending = false;
 let settingsPayload = null;
 let turnstilePromise = null;
 let quotaRemaining = null;
+let settingsOperation = null;
+let settingsLoadFailed = false;
 
 initializeTheme();
 resizeQueryInput();
+updateQueryCount();
 initializeApp();
+
+window.addEventListener("error", (event) => recoverFromClientError(event.error || event.message));
+window.addEventListener("unhandledrejection", (event) => recoverFromClientError(event.reason));
+
+function recoverFromClientError(error) {
+  const message = error instanceof Error ? error.message : "An unexpected browser error occurred.";
+  if (activeRequest) {
+    stopRequestFeedback(activeRequest);
+    activeRequest = null;
+  }
+  submissionPending = false;
+  setBusy(false);
+  setStatus(`The page recovered from an error: ${message}`, "error");
+  renderHistory();
+}
 
 function initializeTheme() {
   const savedTheme = themeStore.getItem(THEME_KEY);
@@ -94,6 +113,16 @@ function resizeQueryInput() {
   queryInput.style.height = `${queryInput.scrollHeight}px`;
 }
 
+function updateQueryCount() {
+  const limit = Number(queryInput.maxLength) || 10_000;
+  const length = queryInput.value.length;
+  queryCount.textContent = length >= limit * 0.8 ? `${length.toLocaleString()} / ${limit.toLocaleString()} characters` : "";
+}
+
+function reducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 async function initializeApp() {
   setBusy(true, "Loading application mode…");
   try {
@@ -109,6 +138,7 @@ async function initializeApp() {
     detailsToggle.checked = sessionStore.getItem(DETAILS_KEY) === "1";
     if (appMode === "public") {
       queryInput.maxLength = settingsPayload.public_limits?.query_max_chars || 4000;
+      updateQueryCount();
       settingsNote.textContent = "Settings are private to this tab and are sent only with your next question. They are not written to the server.";
       hydratePublicSettingsPayload();
     }
@@ -146,6 +176,7 @@ newSessionButton.addEventListener("click", () => {
   clearStatus();
   queryInput.value = "";
   resizeQueryInput();
+  updateQueryCount();
   renderSessionState();
   renderHistory();
   queryInput.focus();
@@ -159,7 +190,11 @@ form.addEventListener("submit", async (event) => {
     return;
   }
   const query = queryInput.value.trim();
-  if (!query) return;
+  if (!query) {
+    setStatus("Enter a question before asking.", "error");
+    queryInput.focus();
+    return;
+  }
   submissionPending = true;
   setBusy(true);
   if (appMode === "public") {
@@ -188,10 +223,10 @@ form.addEventListener("submit", async (event) => {
   };
   activeRequest = request;
   setBusy(true);
-  beginQuestion(query);
-  startRequestFeedback(request);
   const sessionId = activeSessionId && activeSessionLive ? activeSessionId : generateSessionId();
   try {
+    beginQuestion(query);
+    startRequestFeedback(request);
     current = await requestJson("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -220,6 +255,7 @@ form.addEventListener("submit", async (event) => {
     });
     queryInput.value = "";
     resizeQueryInput();
+    updateQueryCount();
     clearStatus();
   } catch (error) {
     if (!request.cancelled) {
@@ -266,7 +302,10 @@ queryInput.addEventListener("keydown", (event) => {
   }
 });
 
-queryInput.addEventListener("input", resizeQueryInput);
+queryInput.addEventListener("input", () => {
+  resizeQueryInput();
+  updateQueryCount();
+});
 
 /* ---------- retrieval settings dialog ---------- */
 
@@ -304,7 +343,13 @@ const SETTING_GROUPS = [
 settingsButton.addEventListener("click", async () => {
   settingsDialog.showModal();
   settingsCloseButton.focus();
+  if (settingsOperation) {
+    setSettingsControlsDisabled(true);
+    return;
+  }
   clearSettingsStatus();
+  clearSettingsErrors();
+  settingsLoadFailed = false;
   settingsSaveButton.disabled = true;
   settingsResetButton.disabled = true;
   settingsFields.replaceChildren(emptyMessage("Loading current settings…"));
@@ -315,67 +360,60 @@ settingsButton.addEventListener("click", async () => {
     if (appMode === "public") hydratePublicSettingsPayload();
     renderSettingsForm(settingsPayload);
   } catch (error) {
+    settingsLoadFailed = true;
     settingsFields.replaceChildren(
       emptyMessage(`Could not load settings: ${error.message}`),
     );
   } finally {
-    settingsSaveButton.disabled = false;
-    settingsResetButton.disabled = false;
+    setSettingsControlsDisabled(settingsLoadFailed);
   }
 });
 
-settingsCloseButton.addEventListener("click", () => settingsDialog.close());
+settingsCloseButton.addEventListener("click", requestSettingsDialogClose);
+settingsDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  requestSettingsDialogClose();
+});
 settingsDialog.addEventListener("close", () => settingsButton.focus());
 
 settingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!settingsPayload) return;
-  const changes = {};
-  let invalid = null;
-  Object.keys(SETTING_LABELS).forEach((name) => {
-    const input = settingsForm.querySelector(`[name="${name}"]`);
-    if (!input) return;
-    const raw = input.value.trim();
-    if (raw === "") {
-      changes[name] = null;
-      return;
-    }
-    if (name === "embedding_model") {
-      changes[name] = raw;
-      return;
-    }
-    const value = Number(raw);
-    if (!Number.isFinite(value)) {
-      invalid = invalid || `${SETTING_LABELS[name]} must be a number.`;
-      return;
-    }
-    changes[name] = value;
-  });
-  if (invalid) {
-    setSettingsStatus(invalid, "error");
+  if (!settingsPayload || settingsOperation || settingsLoadFailed) return;
+  const changes = collectSettingsChanges();
+  if (changes === null) return;
+  if (!Object.keys(changes).length) {
+    settingsDialog.close();
     return;
   }
   await submitSettings(changes, "Settings saved. They apply from your next question.");
 });
 
 settingsResetButton.addEventListener("click", async () => {
-  if (!settingsPayload) return;
+  if (!settingsPayload || settingsOperation || settingsLoadFailed) return;
+  if (!window.confirm("Reset all retrieval settings to their server defaults?")) return;
   const changes = {};
   Object.keys(SETTING_LABELS).forEach((name) => {
-    changes[name] = null;
+    if (settingsPayload.overrides[name] !== undefined) changes[name] = null;
   });
+  if (!Object.keys(changes).length) {
+    settingsDialog.close();
+    return;
+  }
   await submitSettings(changes, "All settings now follow the server configuration.");
 });
 
 async function submitSettings(changes, successMessage) {
-  settingsSaveButton.disabled = true;
-  settingsResetButton.disabled = true;
+  if (settingsOperation) return;
+  const operation = { changes, preparingModel: null };
+  settingsOperation = operation;
+  setSettingsControlsDisabled(true);
   try {
     const localModel = browserState.localEmbeddingPreparationModel(
       settingsPayload,
       changes,
     );
     if (localModel) {
+      operation.preparingModel = localModel;
       if (appMode === "public") await ensureDemoToken();
       setEmbeddingLoadingIndicator(localModel);
       setSettingsStatus(`Preparing ${localModel}…`, "working");
@@ -400,14 +438,72 @@ async function submitSettings(changes, successMessage) {
     }
     renderSettingsForm(settingsPayload);
     setSettingsStatus(successMessage, "ok");
+    settingsDialog.close();
   } catch (error) {
-    renderSettingsForm(settingsPayload);
-    setSettingsStatus(error.message, "error");
+    const message = operation.preparingModel
+      ? `Could not prepare ${operation.preparingModel}. Choose another model or try again.`
+      : error.message;
+    setSettingsStatus(message, operation.preparingModel ? "prepare-error" : "error");
   } finally {
-    setEmbeddingLoadingIndicator(null);
-    settingsSaveButton.disabled = false;
-    settingsResetButton.disabled = false;
+    if (settingsOperation === operation) {
+      setEmbeddingLoadingIndicator(null);
+      settingsOperation = null;
+      setSettingsControlsDisabled(false);
+    }
   }
+}
+
+function setSettingsControlsDisabled(disabled) {
+  settingsSaveButton.disabled = disabled;
+  settingsResetButton.disabled = disabled;
+}
+
+function requestSettingsDialogClose() {
+  if (!settingsOperation && hasUnsavedSettingsChanges()) {
+    if (!window.confirm("Discard unsaved settings changes?")) return;
+  }
+  settingsDialog.close();
+}
+
+function collectSettingsChanges() {
+  clearSettingsErrors();
+  const changes = {};
+  let firstInvalid = null;
+  Object.keys(SETTING_LABELS).forEach((name) => {
+    const input = settingsForm.querySelector(`[name="${name}"]`);
+    if (!input) return;
+    const raw = input.value.trim();
+    const previous = settingsPayload.overrides[name] ?? null;
+    let value = raw === "" ? null : raw;
+    if (name !== "embedding_model" && raw !== "") {
+      const integer = !FLOAT_SETTINGS.has(name);
+      const validFormat = integer
+        ? /^-?\d+$/.test(raw)
+        : /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(raw);
+      const numeric = Number(raw);
+      const limits = settingsPayload.limits?.[name];
+      if (!validFormat || !Number.isFinite(numeric)) {
+        const message = `${SETTING_LABELS[name]} must be ${integer ? "an integer" : "a number"}.`;
+        setSettingsFieldError(name, message);
+        firstInvalid = firstInvalid || input;
+        return;
+      }
+      if (limits && (numeric < limits.min || numeric > limits.max)) {
+        const message = `${SETTING_LABELS[name]} must be between ${formatNumber(limits.min)} and ${formatNumber(limits.max)}.`;
+        setSettingsFieldError(name, message);
+        firstInvalid = firstInvalid || input;
+        return;
+      }
+      value = numeric;
+    }
+    if (value !== previous) changes[name] = value;
+  });
+  if (firstInvalid) {
+    setSettingsStatus("Correct the highlighted setting before saving.", "error");
+    firstInvalid.focus();
+    return null;
+  }
+  return changes;
 }
 
 function setEmbeddingLoadingIndicator(modelName) {
@@ -444,7 +540,6 @@ function renderSettingsForm(payload) {
   });
   settingsFields.replaceChildren(fragment);
   updateChangedMarkers();
-  if (settingsDialog.open) settingsFields.querySelector("select, input")?.focus();
 }
 
 function buildEmbeddingModelField(payload) {
@@ -466,8 +561,12 @@ function buildEmbeddingModelField(payload) {
     select.append(option);
   });
   select.value = payload.overrides.embedding_model || "";
-  select.addEventListener("change", updateChangedMarkers);
+  select.addEventListener("change", () => {
+    clearSettingsFieldError("embedding_model");
+    updateChangedMarkers();
+  });
   field.append(select);
+  field.append(field.querySelector(".settings-field-error"));
   // The blank option already names the server default, so no hint row here.
   return field;
 }
@@ -475,7 +574,8 @@ function buildEmbeddingModelField(payload) {
 function buildNumericField(payload, name) {
   const field = settingsField(name);
   const input = document.createElement("input");
-  input.type = "number";
+  input.type = "text";
+  input.inputMode = FLOAT_SETTINGS.has(name) ? "decimal" : "numeric";
   input.name = name;
   input.id = `setting-${name}`;
   const limits = payload.limits?.[name];
@@ -483,22 +583,28 @@ function buildNumericField(payload, name) {
     input.min = limits.min;
     input.max = limits.max;
   }
-  input.step = FLOAT_SETTINGS.has(name) ? "0.05" : "1";
+  input.autocomplete = "off";
   input.placeholder = `default ${formatValue(payload.defaults[name])}`;
   const override = payload.overrides[name];
   input.value = override === undefined || override === null ? "" : override;
-  input.addEventListener("input", updateChangedMarkers);
+  input.addEventListener("input", () => {
+    clearSettingsFieldError(name);
+    updateChangedMarkers();
+  });
   field.append(input);
   const hint = `default ${formatValue(payload.defaults[name])}${
     limits ? ` · ${formatNumber(limits.min)}–${formatNumber(limits.max)}` : ""
   }`;
   field.append(hintRow(name, payload, hint));
+  input.setAttribute("aria-describedby", `setting-${name}-hint setting-${name}-error`);
+  field.append(field.querySelector(".settings-field-error"));
   return field;
 }
 
 function hintRow(name, payload, text) {
   const hint = document.createElement("small");
   hint.className = "settings-hint";
+  hint.id = `setting-${name}-hint`;
   const value = document.createElement("span");
   value.textContent = text;
   const reset = document.createElement("button");
@@ -510,6 +616,7 @@ function hintRow(name, payload, text) {
     const input = settingsForm.querySelector(`[name="${name}"]`);
     if (!input) return;
     input.value = "";
+    clearSettingsFieldError(name);
     updateChangedMarkers();
   });
   hint.append(value, reset);
@@ -528,6 +635,11 @@ function settingsField(name) {
   dot.hidden = true;
   label.append(dot);
   wrap.append(label);
+  const error = document.createElement("small");
+  error.id = `setting-${name}-error`;
+  error.className = "settings-field-error";
+  error.hidden = true;
+  wrap.append(error);
   return wrap;
 }
 
@@ -538,22 +650,68 @@ function updateChangedMarkers() {
     const input = settingsForm.querySelector(`[name="${name}"]`);
     const field = settingsForm.querySelector(`[data-field="${name}"]`);
     if (!input || !field) return;
-    const isChanged = input.value.trim() !== "";
+    const current = settingsPayload.overrides[name] ?? null;
+    const isChanged = input.value.trim() !== (current === null ? "" : String(current));
+    const hasOverrideValue = input.value.trim() !== "";
     if (isChanged) changed += 1;
     field.classList.toggle("changed", isChanged);
     const dot = field.querySelector(".changed-dot");
     const reset = field.querySelector(".reset");
     if (dot) dot.hidden = !isChanged;
-    if (reset) reset.hidden = !isChanged;
+    if (reset) reset.hidden = !hasOverrideValue;
   });
   settingsChanged.hidden = changed === 0;
-  settingsChanged.textContent = `${changed} changed`;
+  settingsChanged.textContent = `${changed} unsaved change${changed === 1 ? "" : "s"}`;
+}
+
+function hasUnsavedSettingsChanges() {
+  if (!settingsPayload || settingsLoadFailed) return false;
+  return Object.keys(SETTING_LABELS).some((name) => {
+    const input = settingsForm.querySelector(`[name="${name}"]`);
+    const current = settingsPayload.overrides[name] ?? null;
+    return input && input.value.trim() !== (current === null ? "" : String(current));
+  });
+}
+
+function clearSettingsErrors() {
+  Object.keys(SETTING_LABELS).forEach(clearSettingsFieldError);
+}
+
+function clearSettingsFieldError(name) {
+  const input = settingsForm.querySelector(`[name="${name}"]`);
+  const field = settingsForm.querySelector(`[data-field="${name}"]`);
+  const error = document.querySelector(`#setting-${name}-error`);
+  if (input) {
+    input.removeAttribute("aria-invalid");
+    input.setAttribute("aria-describedby", `setting-${name}-hint setting-${name}-error`);
+  }
+  if (field) field.classList.remove("has-error");
+  if (error) {
+    error.hidden = true;
+    error.textContent = "";
+  }
+}
+
+function setSettingsFieldError(name, message) {
+  const input = settingsForm.querySelector(`[name="${name}"]`);
+  const field = settingsForm.querySelector(`[data-field="${name}"]`);
+  const error = document.querySelector(`#setting-${name}-error`);
+  if (input) {
+    input.setAttribute("aria-invalid", "true");
+    input.setAttribute("aria-describedby", `setting-${name}-hint setting-${name}-error`);
+  }
+  if (field) field.classList.add("has-error");
+  if (error) {
+    error.textContent = message;
+    error.hidden = false;
+  }
 }
 
 function setSettingsStatus(message, kind) {
   settingsStatus.hidden = false;
   settingsStatus.textContent = message;
   settingsStatus.className = `settings-status ${kind || ""}`;
+  settingsStatus.setAttribute("aria-live", kind === "error" || kind === "prepare-error" ? "assertive" : "polite");
 }
 
 function clearSettingsStatus() {
@@ -688,7 +846,7 @@ function saveSessions() {
     SESSIONS_KEY,
     sessions,
     limit,
-    appMode === "public",
+    true,
   );
 }
 
@@ -723,7 +881,11 @@ function recordTurn(sessionId, query, answerPayload) {
 function renderSessionState() {
   const session = activeSessionId ? findSession(activeSessionId) : null;
   if (session) {
-    const prefix = activeSessionLive === true ? "Continuing" : "Checking session";
+    const prefix = activeSessionLive === true
+      ? "Continuing"
+      : activeSessionLive === null
+        ? "Checking session"
+        : "Session expired";
     activeSessionLabel.textContent = `${prefix}: ${truncate(session.title, 40)}`;
     sessionTag.classList.toggle("live", activeSessionLive === true);
     newSessionButton.hidden = false;
@@ -752,14 +914,19 @@ function renderHistory() {
     const count = session.turns.length;
     meta.textContent = `${count} question${count === 1 ? "" : "s"} · ${relativeTime(session.updated)}`;
     main.append(title, meta);
-    main.addEventListener("click", () => resumeSession(session));
+    main.disabled = Boolean(activeRequest || submissionPending);
+    main.addEventListener("click", () => {
+      if (!activeRequest && !submissionPending) resumeSession(session);
+    });
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "history-remove";
     remove.setAttribute("aria-label", "Remove this session from the log");
     remove.textContent = "✕";
+    remove.disabled = Boolean(activeRequest || submissionPending);
     remove.addEventListener("click", () => {
+      if (activeRequest || submissionPending) return;
       sessions = sessions.filter((entry) => entry.id !== session.id);
       saveSessions();
       renderHistory();
@@ -927,8 +1094,8 @@ function clearResult() {
 }
 
 function truncate(text, max) {
-  const value = String(text);
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+  const characters = Array.from(String(text));
+  return characters.length > max ? `${characters.slice(0, max - 1).join("")}…` : characters.join("");
 }
 
 function relativeTime(timestamp) {
@@ -1036,7 +1203,6 @@ function beginQuestion(query) {
   currentMeta = null;
   packetLoadedFor = null;
   shell.classList.remove("has-answer");
-  indexPanel.hidden = true;
   result.hidden = false;
   questionIndexLabel.textContent = `Question ${String(turnIndex).padStart(2, "0")}`;
   questionMetaDetail.textContent = "asking now";
@@ -1173,7 +1339,6 @@ function renderAnswer(payload, queryText, meta = {}) {
   currentPacket = appMode === "public" ? payload.evidence_packet || null : null;
   hero.hidden = true;
   progressPanel.hidden = true;
-  indexPanel.hidden = true;
   shell.classList.add("has-answer");
   result.hidden = false;
 
@@ -1213,7 +1378,7 @@ function renderAnswer(payload, queryText, meta = {}) {
     loadEvidencePacket();
   }
   applyDetailsVisibility();
-  result.scrollIntoView({ behavior: "smooth", block: "start" });
+  result.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
 }
 
 function describeRun(payload, meta) {
@@ -1371,8 +1536,11 @@ function citationChip(citationId) {
 
 function revealEvidence(citationId) {
   const card = document.querySelector(`[data-evidence="${citationId}"]`);
-  if (!card) return;
-  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (!card) {
+    setStatus(`Evidence ${citationId} is not available in this answer.`, "error");
+    return;
+  }
+  card.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "center" });
   card.classList.add("flash");
   window.setTimeout(() => card.classList.remove("flash"), 1600);
 }
@@ -1681,12 +1849,13 @@ function renderTrace(payload) {
   const links = document.createElement("div");
   links.className = "api-links";
   [
-    ["Answer JSON", `/api/answers/${payload.answer_id}`],
-    ["Coverage JSON", `/api/search-runs/${payload.search_run_id}/coverage`],
-    ["Evidence packet JSON", `/api/evidence-packets/${payload.evidence_packet_id}`],
-  ].forEach(([label, href]) => {
+    ["Answer JSON", payload.answer_id, (id) => `/api/answers/${id}`],
+    ["Coverage JSON", payload.search_run_id, (id) => `/api/search-runs/${id}/coverage`],
+    ["Evidence packet JSON", payload.evidence_packet_id, (id) => `/api/evidence-packets/${id}`],
+  ].forEach(([label, id, makeHref]) => {
+    if (!Number.isInteger(id) || id <= 0) return;
     const a = document.createElement("a");
-    a.href = href;
+    a.href = makeHref(id);
     a.target = "_blank";
     a.rel = "noreferrer";
     a.textContent = label;
@@ -1809,7 +1978,7 @@ function emptyMessage(text) {
 
 function setPanel(selector, node) {
   const root = document.querySelector(selector);
-  root.replaceChildren(node);
+  if (root) root.replaceChildren(node);
 }
 
 function setPanelMeta(selector, text) {
@@ -1853,6 +2022,7 @@ function setBusy(busy, message = "") {
     cancelRequestButton.disabled = false;
   }
   if (message) setStatus(message, "working");
+  renderHistory();
 }
 
 function setStatus(message, kind) {

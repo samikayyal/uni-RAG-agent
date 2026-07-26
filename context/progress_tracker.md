@@ -75,7 +75,11 @@ The implemented pipeline is complete through evaluation hardening:
     light/dark appearance choice locally in the browser.
     Preparing an explicitly selected local embedding profile also shows a
     top-bar loading indicator, with an explicit Gemma label for
-    EmbeddingGemma's lazy-load request.
+    EmbeddingGemma's lazy-load request. Settings saves are diff-based and
+    locally validated, preserve field-level errors, close the dialog on
+    success, retain an in-flight operation across dialog reopen, and reject a
+    selected local profile that lacks a usable vector collection. The web
+    surface no longer serves an OpenAPI schema.
 17. The web UI and API no longer expose archive-wide index composition; index
     counts and per-course indexing state remain internal to the offline
     inventory, extraction, and retrieval workflows.

@@ -54,7 +54,7 @@
   color-scheme: light;
   --canvas: #fdfcf9;
   --surface: #f1ece5;
-  --border: #ddd6cb;
+  --border: #aaa196;
   --muted: #6b635c;
   --text: #1e1a17;
   --accent: #10736a;
@@ -72,7 +72,7 @@
   color-scheme: dark;
   --canvas: #1c1916;
   --surface: #26221d;
-  --border: #3d352c;
+  --border: #70665a;
   --muted: #a8a29a;
   --text: #eae4d9;
   --accent: #2fd5b5;
@@ -435,8 +435,9 @@ button {
   margin-bottom: 11px;
 }
 
-.composer textarea:focus {
-  outline: none;
+.composer textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .composer textarea::placeholder {
@@ -1353,6 +1354,28 @@ button {
   color: var(--warn);
 }
 
+.settings-status.prepare-error {
+  color: var(--warn);
+  font-weight: 500;
+}
+
+.settings-field.has-error input,
+.settings-field.has-error select {
+  border-color: var(--warn);
+}
+
+.settings-field-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--warn);
+  font: 400 11px var(--mono);
+}
+
+.query-count {
+  color: var(--muted);
+  font: 400 11px var(--mono);
+}
+
 .settings-status.ok {
   color: var(--accent);
 }
@@ -1379,12 +1402,18 @@ button {
     gap: 10px;
   }
 
-  .topbar .chip {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  #embedding-loading-label {
     display: none;
   }
 
-  .embedding-loading-label {
-    display: none;
+  .topbar .chip {
+    display: block;
+    order: 3;
+    width: 100%;
   }
 
   .toggle-label {
@@ -1404,6 +1433,12 @@ button {
   .theme-toggle {
     width: 44px;
     height: 44px;
+    flex: 0 0 44px;
+  }
+
+  .settings-actions > button,
+  .settings-hint .reset {
+    min-height: 44px;
   }
 
   .shell {

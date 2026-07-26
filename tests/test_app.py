@@ -745,11 +745,12 @@ def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
 
     assert '<meta name="description"' in response.text
     assert '<meta name="theme-color"' in response.text
-    assert 'id="progress-panel" class="progress-panel" hidden>' in response.text
+    assert 'id="progress-panel" class="progress-panel" role="status"' in response.text
     assert 'id="embedding-loading-indicator"' in response.text
     assert 'role="status"' in response.text
     assert '<section id="result" hidden>' in response.text
-    assert 'id="answer-card" aria-live="polite"' in response.text
+    assert 'id="answer-card"' in response.text
+    assert 'id="query-count"' in response.text
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; base-uri 'self'; form-action 'self'; "
         "frame-ancestors 'none'; object-src 'none'; "
@@ -776,6 +777,9 @@ def test_static_ui_guards_one_active_ask_and_preserves_shift_enter_newlines() ->
     assert 'event.key === "Enter" && !event.shiftKey && !event.isComposing' in app_js
     assert "form.requestSubmit(askButton);" in app_js
     assert "newSessionButton.disabled = busy;" in app_js
+    assert "indexPanel" not in app_js
+    assert "beginQuestion(query);" in app_js
+    assert 'window.addEventListener("unhandledrejection"' in app_js
 
 
 def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
@@ -796,6 +800,8 @@ def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
     assert "resize: none;" in styles
     assert "max-height: 360px;" in styles
     assert "font-size: 16px;" in styles
+    assert "#embedding-loading-label" in styles
+    assert "min-height: 44px;" in styles
 
 
 def test_static_ui_grows_the_composer_and_persists_the_selected_theme() -> None:
@@ -809,8 +815,9 @@ def test_static_ui_grows_the_composer_and_persists_the_selected_theme() -> None:
     ).read_text(encoding="utf-8")
 
     assert 'const THEME_KEY = "uni-rag-theme";' in app_js
-    assert 'queryInput.addEventListener("input", resizeQueryInput);' in app_js
+    assert 'queryInput.addEventListener("input", () => {' in app_js
     assert "queryInput.style.height = `${queryInput.scrollHeight}px`;" in app_js
+    assert "updateQueryCount();" in app_js
     assert "themeStore.setItem(THEME_KEY, nextTheme);" in app_js
 
 
@@ -830,6 +837,8 @@ def test_static_ui_shows_gemma_preparation_in_the_top_bar() -> None:
     assert "setEmbeddingLoadingIndicator(localModel);" in app_js
     assert "setEmbeddingLoadingIndicator(null);" in app_js
     assert 'modelName === "google/embeddinggemma-300m"' in app_js
+    assert "let settingsOperation = null;" in app_js
+    assert "settingsDialog.close();" in app_js
     assert ".embedding-loading-spinner" in styles
     assert "@keyframes spin" in styles
 
@@ -969,9 +978,16 @@ def test_settings_update_rejects_coerced_boolean_string_and_float_values(
     ):
         response = client.put("/api/settings", json=body)
         assert response.status_code == 422
-        assert response.json()["error"]["code"] == "validation_error"
+        assert response.json()["error"]["code"] == "settings_validation_error"
 
     assert client.get("/api/settings").json()["overrides"] == {}
+
+
+def test_openapi_schema_is_not_exposed() -> None:
+    response = TestClient(create_app()).get("/openapi.json")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
 
 
 def test_settings_null_clears_one_override_and_keeps_others(tmp_path: Path) -> None:

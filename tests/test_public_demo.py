@@ -47,6 +47,27 @@ def _public_config(tmp_path: Path, **changes: object):
     return replace(config, **values)
 
 
+def _profile_vector_client(profile):
+    logical_index = next(iter(LOGICAL_INDEX_TO_SOURCE_TYPE))
+    name = physical_collection_name(
+        logical_index,
+        provider=profile.provider,
+        model_name=profile.model_name,
+        dimension=profile.dimension,
+        metric=profile.metric,
+    )
+
+    class Client:
+        def list_collections(self):
+            return [type("Collection", (), {"name": name})()]
+
+        def get_collection(self, requested):
+            assert requested == name
+            return type("Collection", (), {"count": lambda self: 1})()
+
+    return Client()
+
+
 def _public_client(
     tmp_path: Path,
     *,
@@ -1052,7 +1073,7 @@ def test_public_embedding_profile_preparation_is_authenticated_and_quota_free(
             builds.append(model)
             or BuiltEmbeddingModel(object(), profile, profile.dimension)
         ),
-        chroma_builder=lambda _config, *, error: object(),
+        chroma_builder=lambda _config, *, error: _profile_vector_client(profile),
     )
     client, _, quota = _public_client(tmp_path, embedding_registry=registry)
     body = {"embedding_model": profile.model_name}
@@ -1082,6 +1103,38 @@ def test_public_embedding_profile_preparation_is_authenticated_and_quota_free(
     assert invalid.json()["error"]["code"] == "embedding_profile_invalid"
 
 
+def test_embedding_profile_preparation_requires_a_usable_vector_index(
+    tmp_path: Path,
+) -> None:
+    profile = EMBEDDING_PROFILES["google/embeddinggemma-300m"]
+    builds: list[str] = []
+
+    class EmptyClient:
+        def list_collections(self):
+            return []
+
+    registry = EmbeddingRegistry(
+        embedding_builder=lambda _config, model, *, error: (
+            builds.append(model)
+            or BuiltEmbeddingModel(object(), profile, profile.dimension)
+        ),
+        chroma_builder=lambda _config, *, error: EmptyClient(),
+    )
+    client, _, _ = _public_client(tmp_path, embedding_registry=registry)
+    response = client.post(
+        "/api/embedding-profiles/prepare",
+        headers=_authorize(client),
+        json={"embedding_model": profile.model_name},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == {
+        "code": "embedding_profile_index_unavailable",
+        "message": "The embedding profile does not have a usable vector index.",
+    }
+    assert builds == []
+
+
 def test_explicit_embedding_profile_preparation_retries_cached_failure(
     tmp_path: Path,
 ) -> None:
@@ -1098,7 +1151,7 @@ def test_explicit_embedding_profile_preparation_retries_cached_failure(
 
     registry = EmbeddingRegistry(
         embedding_builder=build,
-        chroma_builder=lambda _config, *, error: object(),
+        chroma_builder=lambda _config, *, error: _profile_vector_client(profile),
     )
     client, _, _ = _public_client(tmp_path, embedding_registry=registry)
     headers = _authorize(client)

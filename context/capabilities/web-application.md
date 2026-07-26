@@ -51,6 +51,11 @@ session-limit, and timeout settings are not web-settable. In public mode the
 same dialog is per tab and request scoped: it never reads or writes
 `data/app_settings.json`, is bounded more tightly, and can select only
 EmbeddingGemma, Gemini Embedding, or Qwen/Nebius profiles that were deployed.
+The dialog submits only edited settings, validates numeric values in place,
+preserves edits after a rejected save, and closes after a successful save. An
+explicit local-profile preparation first verifies that the selected profile has
+at least one usable vector collection, so a model cannot be saved as ready when
+semantic retrieval has no matching index.
 While an explicitly selected local profile is being prepared, the top bar next
 to `Uni RAG Agent` shows a live loading indicator (including a Gemma-specific
 label for EmbeddingGemma); it clears on either readiness or failure.
@@ -89,6 +94,8 @@ server-side state.
   /api/settings` accepts a partial update of allowlisted settings only
   (`null` clears one override); out-of-bounds or unknown-profile values are a
   422 `settings_validation_error`, and any non-allowlisted field is rejected.
+- API documentation and schemas are not served by the application, including
+  `/openapi.json`.
 
 ## Source, tests, and artifacts
 

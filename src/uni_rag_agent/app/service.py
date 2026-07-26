@@ -188,6 +188,18 @@ class EmbeddingRegistry:
             self.clear_failure(profile.model_name)
         self._model(config, profile.model_name)
 
+    def profile_vector_index_ready(self, config: Config, model_name: str) -> bool:
+        """Return whether a selected profile has at least one usable vector collection."""
+        try:
+            profile = resolve_embedding_profile(
+                config, model_name, error=SemanticSearchError
+            )
+            return self._expected_indexes_ready(
+                self._client(config), (profile.model_name,)
+            )
+        except Exception:
+            return False
+
     def clear_failure(self, model_name: str | None = None) -> None:
         """Allow an operator/test to retry a corrected runtime dependency."""
         with self._state_lock:

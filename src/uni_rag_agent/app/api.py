@@ -62,6 +62,8 @@ from .service import (
     SessionRegistry,
 )
 from .settings import (
+    FLOAT_SETTINGS,
+    INT_SETTINGS,
     SettingsError,
     WebSettingsStore,
     apply_public_settings,
@@ -264,6 +266,7 @@ def create_app(
         title="Uni RAG Agent",
         docs_url=None,
         redoc_url=None,
+        openapi_url=None,
         lifespan=lifespan,
     )
 
@@ -287,8 +290,29 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(
-        _: Request, __: RequestValidationError
+        request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        if request.url.path == "/api/settings":
+            for error in exc.errors():
+                location = error.get("loc", ())
+                name = location[-1] if location else None
+                if name in INT_SETTINGS:
+                    bounds = INT_SETTINGS[name]
+                    return _error_response(
+                        422,
+                        "settings_validation_error",
+                        f"{name} must be an integer between "
+                        f"{int(bounds.minimum)} and {int(bounds.maximum)}.",
+                    )
+                if name in FLOAT_SETTINGS:
+                    bounds = FLOAT_SETTINGS[name]
+                    return _error_response(
+                        422,
+                        "settings_validation_error",
+                        f"{name} must be a number between "
+                        f"{bounds.minimum} and {bounds.maximum}.",
+                    )
+            return _error_response(422, "validation_error", "The request is invalid.")
         return _error_response(422, "validation_error", "The request is invalid.")
 
     @app.exception_handler(StarletteHTTPException)
@@ -484,6 +508,16 @@ def create_app(
                 502,
                 "embedding_profile_unavailable",
                 "The embedding profile is currently unavailable.",
+            )
+        if not await asyncio.to_thread(
+            resolved_embedding_registry.profile_vector_index_ready,
+            config,
+            profile.model_name,
+        ):
+            raise ApiError(
+                422,
+                "embedding_profile_index_unavailable",
+                "The embedding profile does not have a usable vector index.",
             )
         try:
             await asyncio.to_thread(
