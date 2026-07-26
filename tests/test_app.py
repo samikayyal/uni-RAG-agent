@@ -746,6 +746,8 @@ def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
     assert '<meta name="description"' in response.text
     assert '<meta name="theme-color"' in response.text
     assert 'id="progress-panel" class="progress-panel" hidden>' in response.text
+    assert 'id="embedding-loading-indicator"' in response.text
+    assert 'role="status"' in response.text
     assert '<section id="result" hidden>' in response.text
     assert 'id="answer-card" aria-live="polite"' in response.text
     assert response.headers["content-security-policy"] == (
@@ -810,6 +812,26 @@ def test_static_ui_grows_the_composer_and_persists_the_selected_theme() -> None:
     assert 'queryInput.addEventListener("input", resizeQueryInput);' in app_js
     assert "queryInput.style.height = `${queryInput.scrollHeight}px`;" in app_js
     assert "themeStore.setItem(THEME_KEY, nextTheme);" in app_js
+
+
+def test_static_ui_shows_gemma_preparation_in_the_top_bar() -> None:
+    repo_root = Path(__file__).parents[1]
+    app_js = (
+        repo_root / "src" / "uni_rag_agent" / "app" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+    styles = (
+        repo_root / "src" / "uni_rag_agent" / "app" / "static" / "styles.css"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        'const embeddingLoadingIndicator = document.querySelector("#embedding-loading-indicator");'
+        in app_js
+    )
+    assert "setEmbeddingLoadingIndicator(localModel);" in app_js
+    assert "setEmbeddingLoadingIndicator(null);" in app_js
+    assert 'modelName === "google/embeddinggemma-300m"' in app_js
+    assert ".embedding-loading-spinner" in styles
+    assert "@keyframes spin" in styles
 
 
 def test_settings_allowlist_is_one_list_across_store_api_and_ui() -> None:

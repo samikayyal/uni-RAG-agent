@@ -73,6 +73,9 @@ The implemented pipeline is complete through evaluation hardening:
     noise, applies strict settings input/resource-id HTTP validation, grows the
     non-resizable composer with typed content, and preserves an explicit
     light/dark appearance choice locally in the browser.
+    Preparing an explicitly selected local embedding profile also shows a
+    top-bar loading indicator, with an explicit Gemma label for
+    EmbeddingGemma's lazy-load request.
 17. The web UI and API no longer expose archive-wide index composition; index
     counts and per-course indexing state remain internal to the offline
     inventory, extraction, and retrieval workflows.

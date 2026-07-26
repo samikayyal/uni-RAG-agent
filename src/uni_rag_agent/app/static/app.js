@@ -29,6 +29,8 @@ const themeColor = document.querySelector("#theme-color");
 const turnstilePanel = document.querySelector("#turnstile-panel");
 const turnstileWidget = document.querySelector("#turnstile-widget");
 const indexChip = document.querySelector("#index-chip");
+const embeddingLoadingIndicator = document.querySelector("#embedding-loading-indicator");
+const embeddingLoadingLabel = document.querySelector("#embedding-loading-label");
 const progressPanel = document.querySelector("#progress-panel");
 const progressTitle = document.querySelector("#progress-title");
 const progressStage = document.querySelector("#progress-stage");
@@ -375,6 +377,7 @@ async function submitSettings(changes, successMessage) {
     );
     if (localModel) {
       if (appMode === "public") await ensureDemoToken();
+      setEmbeddingLoadingIndicator(localModel);
       setSettingsStatus(`Preparing ${localModel}…`, "working");
       await requestJson("/api/embedding-profiles/prepare", {
         method: "POST",
@@ -401,9 +404,19 @@ async function submitSettings(changes, successMessage) {
     renderSettingsForm(settingsPayload);
     setSettingsStatus(error.message, "error");
   } finally {
+    setEmbeddingLoadingIndicator(null);
     settingsSaveButton.disabled = false;
     settingsResetButton.disabled = false;
   }
+}
+
+function setEmbeddingLoadingIndicator(modelName) {
+  const label = modelName === "google/embeddinggemma-300m"
+    ? "Loading Gemma…"
+    : "Loading embedding model…";
+  embeddingLoadingLabel.textContent = label;
+  embeddingLoadingIndicator.setAttribute("aria-label", label);
+  embeddingLoadingIndicator.hidden = !modelName;
 }
 
 function renderSettingsForm(payload) {

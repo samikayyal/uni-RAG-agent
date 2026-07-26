@@ -15,6 +15,17 @@
         <span class="brand-mark" aria-hidden="true"></span>
         <span class="brand-name">Uni RAG Agent</span>
       </div>
+      <span
+        id="embedding-loading-indicator"
+        class="embedding-loading"
+        role="status"
+        aria-live="polite"
+        aria-label="Loading embedding model"
+        hidden
+      >
+        <span class="embedding-loading-spinner" aria-hidden="true"></span>
+        <span id="embedding-loading-label">Loading embedding model…</span>
+      </span>
       <span id="index-chip" class="chip" hidden></span>
       <div class="topbar-actions">
         <label class="toggle" for="details-toggle" title="Show everything recorded for this query">

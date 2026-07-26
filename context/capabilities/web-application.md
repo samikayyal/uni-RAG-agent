@@ -51,6 +51,9 @@ session-limit, and timeout settings are not web-settable. In public mode the
 same dialog is per tab and request scoped: it never reads or writes
 `data/app_settings.json`, is bounded more tightly, and can select only
 EmbeddingGemma, Gemini Embedding, or Qwen/Nebius profiles that were deployed.
+While an explicitly selected local profile is being prepared, the top bar next
+to `Uni RAG Agent` shows a live loading indicator (including a Gemma-specific
+label for EmbeddingGemma); it clears on either readiness or failure.
 
 The composer grows with the typed question up to its visible maximum instead of
 being manually resizable. A top-bar light/dark control persists the selected

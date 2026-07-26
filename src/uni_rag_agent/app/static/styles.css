@@ -232,6 +232,26 @@ button {
   background: var(--accent);
 }
 
+.embedding-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.embedding-loading-spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 2px solid var(--border);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
 .chip {
   font: 500 10.5px/1 var(--mono);
   letter-spacing: 0.06em;
@@ -641,10 +661,17 @@ button {
   }
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .live-dot,
   .stage.active .stage-mark,
-  .skeleton span {
+  .skeleton span,
+  .embedding-loading-spinner {
     animation: none;
   }
 }
@@ -1353,6 +1380,10 @@ button {
   }
 
   .topbar .chip {
+    display: none;
+  }
+
+  .embedding-loading-label {
     display: none;
   }
 
