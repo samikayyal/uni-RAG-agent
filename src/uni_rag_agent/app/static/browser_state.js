@@ -35,6 +35,12 @@
     return retained;
   }
 
+  function clearSessions(store, sessionsKey, activeKey) {
+    store.removeItem(sessionsKey);
+    store.removeItem(activeKey);
+    return [];
+  }
+
   function tokenState(store, tokenKey, expiryKey, nowSeconds, leewaySeconds = 15) {
     const token = store.getItem(tokenKey);
     const expiresAt = Number(store.getItem(expiryKey) || 0);
@@ -68,6 +74,7 @@
   }
 
   return {
+    clearSessions,
     loadSessions,
     localEmbeddingPreparationModel,
     publicResumeDecision,

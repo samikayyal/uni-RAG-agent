@@ -10,6 +10,7 @@ const detailsToggle = document.querySelector("#details-toggle");
 const detailsSection = document.querySelector("#details");
 const historySection = document.querySelector("#history");
 const historyList = document.querySelector("#history-list");
+const clearHistoryButton = document.querySelector("#clear-history");
 const activeSessionLabel = document.querySelector("#active-session-label");
 const sessionTag = activeSessionLabel.closest(".session-tag");
 const newSessionButton = document.querySelector("#new-session");
@@ -180,6 +181,22 @@ newSessionButton.addEventListener("click", () => {
   renderSessionState();
   renderHistory();
   queryInput.focus();
+});
+
+clearHistoryButton.addEventListener("click", () => {
+  if (activeRequest || submissionPending) return;
+  sessions = browserState.clearSessions(sessionStore, SESSIONS_KEY, ACTIVE_KEY);
+  activeSessionId = null;
+  activeSessionLive = false;
+  queryInput.value = "";
+  resizeQueryInput();
+  updateQueryCount();
+  clearResult();
+  clearStatus();
+  renderSessionState();
+  renderHistory();
+  queryInput.focus({ preventScroll: true });
+  window.scrollTo({ top: 0, behavior: "auto" });
 });
 
 form.addEventListener("submit", async (event) => {
@@ -902,7 +919,7 @@ function renderSessionState() {
 function renderHistory() {
   historyList.replaceChildren();
   const previous = sessions.filter((session) => session.id !== activeSessionId);
-  historySection.hidden = !previous.length;
+  historySection.hidden = !sessions.length;
   previous.forEach((session) => {
     const item = document.createElement("article");
     item.className = "history-item";
@@ -1450,7 +1467,6 @@ function renderReceipt(payload, meta, isFailure = false) {
 }
 
 function renderNotice(payload, answerStatus) {
-  const coverage = payload.coverage || {};
   if (answerStatus === "insufficient_evidence") {
     setNotice(
       "hard",
@@ -1467,24 +1483,7 @@ function renderNotice(payload, answerStatus) {
     );
     return;
   }
-  const missed = [
-    ...(coverage.courses_without_chunk_hits || []),
-    ...(coverage.indexes_without_chunk_hits || []),
-  ];
-  const hit = [
-    ...(coverage.courses_with_chunk_hits || []),
-    ...(coverage.indexes_with_chunk_hits || []),
-  ];
-  if (!missed.length) {
-    answerNotice.hidden = true;
-    return;
-  }
-  const planned = missed.length + hit.length;
-  setNotice(
-    "soft",
-    `Partial coverage — ${hit.length} of the ${planned} planned source${planned === 1 ? "" : "s"} returned evidence`,
-    `${missed.join(", ")} produced no chunk-backed matches, so this answer speaks only for ${hit.join(", ") || "the remaining sources"}.`,
-  );
+  answerNotice.hidden = true;
 }
 
 function setNotice(kind, title, body) {
@@ -2020,6 +2019,7 @@ function setBusy(busy, message = "") {
   askButton.disabled = busy;
   askButton.querySelector(".button-label").textContent = busy ? "Working…" : "Ask";
   newSessionButton.disabled = busy;
+  clearHistoryButton.disabled = busy;
   if (!busy) {
     cancelRequestButton.hidden = true;
     cancelRequestButton.disabled = false;

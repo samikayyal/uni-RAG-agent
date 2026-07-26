@@ -81,6 +81,21 @@ test("invalid stored session history is removed after a safe empty fallback", ()
   assert.equal(store.getItem(sessionsKey), null);
 });
 
+test("clearing history removes stored sessions and the active session", () => {
+  const store = new MemoryStorage();
+  store.setItem(sessionsKey, JSON.stringify([{ id: "session-one" }]));
+  store.setItem("active-session", "session-one");
+  store.setItem("theme", "dark");
+
+  assert.deepEqual(
+    state.clearSessions(store, sessionsKey, "active-session"),
+    [],
+  );
+  assert.equal(store.getItem(sessionsKey), null);
+  assert.equal(store.getItem("active-session"), null);
+  assert.equal(store.getItem("theme"), "dark");
+});
+
 test("expired token detaches server context without deleting restored answer", () => {
   const store = new MemoryStorage();
   store.setItem("token", "signed-token");

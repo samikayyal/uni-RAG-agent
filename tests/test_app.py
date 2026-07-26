@@ -751,6 +751,9 @@ def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
     assert '<section id="result" hidden>' in response.text
     assert 'id="answer-card"' in response.text
     assert 'id="query-count"' in response.text
+    assert 'id="clear-history"' in response.text
+    assert "/static/browser_state.js?v=clear-history-20260726" in response.text
+    assert "/static/app.js?v=clear-history-20260726" in response.text
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; base-uri 'self'; form-action 'self'; "
         "frame-ancestors 'none'; object-src 'none'; "
@@ -777,9 +780,21 @@ def test_static_ui_guards_one_active_ask_and_preserves_shift_enter_newlines() ->
     assert 'event.key === "Enter" && !event.shiftKey && !event.isComposing' in app_js
     assert "form.requestSubmit(askButton);" in app_js
     assert "newSessionButton.disabled = busy;" in app_js
+    assert "clearHistoryButton.disabled = busy;" in app_js
+    assert (
+        "browserState.clearSessions(sessionStore, SESSIONS_KEY, ACTIVE_KEY)" in app_js
+    )
+    clear_history_handler = app_js.split(
+        'clearHistoryButton.addEventListener("click"', maxsplit=1
+    )[1].split('form.addEventListener("submit"', maxsplit=1)[0]
+    assert "confirm(" not in clear_history_handler
+    assert 'queryInput.value = "";' in clear_history_handler
+    assert "queryInput.focus({ preventScroll: true });" in clear_history_handler
+    assert 'window.scrollTo({ top: 0, behavior: "auto" });' in clear_history_handler
     assert "indexPanel" not in app_js
     assert "beginQuestion(query);" in app_js
     assert 'window.addEventListener("unhandledrejection"' in app_js
+    assert "Partial coverage" not in app_js
 
 
 def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
@@ -802,6 +817,7 @@ def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
     assert "max-height: 360px;" in styles
     assert "font-size: 16px;" in styles
     assert "#embedding-loading-label" in styles
+    assert ".history-clear" in styles
     assert "min-height: 44px;" in styles
 
 

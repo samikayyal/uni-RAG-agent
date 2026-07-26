@@ -64,7 +64,12 @@ The composer grows with the typed question up to its visible maximum instead of
 being manually resizable. Once a nonempty question is accepted for submission,
 the composer clears immediately while the request is in progress. A top-bar light/dark control persists the selected
 appearance in browser-local state; it does not affect retrieval settings or any
-server-side state.
+server-side state. A history-header control immediately clears all browser-held
+session history, detaches the active conversation, clears the draft and rendered
+answer state, and returns the viewport to the initial question screen without a
+confirmation dialog. It does not delete persisted answer records or change
+settings or theme state. Versioned static asset URLs prevent an updated HTML
+shell from reusing an older clear-history script.
 
 ## Public entry points
 
@@ -121,8 +126,8 @@ server-side state.
   for the UI while retaining the canonical rendered `answer_text`. The UI shows
   references and limitations once, preserves single-newline paragraphs, uses
   automatic bidirectional text direction, and visually distinguishes validation
-  failures and insufficient-evidence outcomes. Coverage and packet weaknesses
-  are shown only when they are not already present in structured limitations.
+  failures and insufficient-evidence outcomes. Coverage remains available in
+  the inspection views and is not displayed as an automatic answer warning.
 - `[E<n>]` markers in `answer_body` render as inline chips that reveal the
   matching cited-evidence card. Those cards quote the packet, so the evidence
   packet is fetched once per answer rather than only when the trace is open; a
