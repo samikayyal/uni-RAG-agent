@@ -350,12 +350,8 @@ button {
   order: 5;
 }
 
-#index-panel {
-  order: 7;
-}
-
 #history {
-  order: 8;
+  order: 7;
 }
 
 /* Once an answer is on screen the composer becomes the follow-up field. */
@@ -1111,43 +1107,6 @@ button {
 .trace-lines b {
   color: var(--accent);
   font-weight: 500;
-}
-
-/* ---------- index panel ---------- */
-
-.index-panel {
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
-}
-
-.chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-
-.course-chip {
-  font: 400 12px var(--sans);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 5px 11px;
-}
-
-.course-chip span {
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11px;
-}
-
-.course-chip.pending {
-  border-color: var(--warn);
-  color: var(--warn);
-}
-
-.index-note {
-  font-size: 12.5px;
-  color: var(--muted);
-  margin-top: 12px;
 }
 
 /* ---------- history ---------- */

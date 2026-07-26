@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -10,7 +9,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from tests.sqlite_helpers import TEST_TIMESTAMP, insert_minimal_chunk
+from tests.sqlite_helpers import insert_minimal_chunk
 from tests.support import initialized_connection, make_config
 from uni_rag_agent.answering import AnswerCitation, AnswerGenerationError, AnswerResult
 from uni_rag_agent.app import AppServices, create_app
@@ -974,107 +973,11 @@ def test_settings_ignores_corrupted_or_tampered_settings_file(
     assert client.get("/config").status_code == 200
 
 
-def _inventoried_course_without_chunks(connection, config, name: str) -> None:
-    """Insert a course and file that were inventoried but never extracted."""
-    course_id = connection.execute(
-        """
-        INSERT INTO courses (name, path, file_count, total_bytes, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (name, str(config.courses_root / name), 1, 10, TEST_TIMESTAMP, TEST_TIMESTAMP),
-    ).lastrowid
-    connection.execute(
-        """
-        INSERT INTO files (
-            course_id, path, relative_path, filename, extension, size_bytes,
-            category, index_status, discovered_at, last_seen_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            course_id,
-            str(config.courses_root / name / "syllabus.pdf"),
-            "syllabus.pdf",
-            "syllabus.pdf",
-            ".pdf",
-            10,
-            "document",
-            "not_indexed",
-            TEST_TIMESTAMP,
-            TEST_TIMESTAMP,
-        ),
-    )
-
-
-def test_index_status_reports_indexed_and_pending_courses(tmp_path: Path) -> None:
+def test_index_status_endpoint_is_not_available(tmp_path: Path) -> None:
     config = make_config(tmp_path)
-    with initialized_connection(config) as connection:
-        insert_minimal_chunk(connection, config, course_name="Information Retrieval")
-        _inventoried_course_without_chunks(connection, config, "Intro to DS")
-        connection.commit()
 
-    payload = (
-        TestClient(create_app(config_loader=lambda: config))
-        .get("/api/index-status")
-        .json()
-    )
-
-    assert payload["totals"] == {
-        "courses": 2,
-        "indexed_courses": 1,
-        "files": 2,
-        "indexed_files": 1,
-        "chunks": 1,
-        "embedded_chunks": 0,
-    }
-    assert payload["courses"] == [
-        {
-            "course": "Information Retrieval",
-            "file_count": 1,
-            "indexed_file_count": 1,
-            "chunk_count": 1,
-            "indexed": True,
-        },
-        {
-            "course": "Intro to DS",
-            "file_count": 1,
-            "indexed_file_count": 0,
-            "chunk_count": 0,
-            "indexed": False,
-        },
-    ]
-    assert payload["last_indexed_at"] == TEST_TIMESTAMP
-    # The projection carries course labels only, never host paths.
-    assert str(tmp_path) not in str(payload)
-
-
-def test_index_status_reports_an_empty_index_without_a_database(tmp_path: Path) -> None:
-    config = make_config(tmp_path)
     response = TestClient(create_app(config_loader=lambda: config)).get(
         "/api/index-status"
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["courses"] == []
-    assert payload["last_indexed_at"] is None
-    assert payload["totals"]["courses"] == 0
-    assert payload["totals"]["chunks"] == 0
-
-
-def test_index_status_is_read_only_and_survives_a_partial_schema(
-    tmp_path: Path,
-) -> None:
-    config = make_config(tmp_path)
-    config.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(config.sqlite_path) as connection:
-        connection.execute("CREATE TABLE courses (id INTEGER PRIMARY KEY, name TEXT)")
-
-    payload = (
-        TestClient(create_app(config_loader=lambda: config))
-        .get("/api/index-status")
-        .json()
-    )
-
-    assert payload["totals"]["courses"] == 0
-    assert payload["courses"] == []
+    assert response.status_code == 404

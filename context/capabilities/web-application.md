@@ -32,8 +32,8 @@ durations are measured in the browser from observed phase transitions, so they
 are approximate and are labeled as such rather than presented as server-recorded
 timings. The user can cancel the active ask, which abandons the response and
 prevents a late answer write while in-flight provider work unwinds. Before a
-question is asked the screen shows read-only index composition from
-`/api/index-status`. Public mode returns the complete
+question is asked the screen does not expose archive-wide indexing composition.
+Public mode returns the complete
 safe packet and remaining-quota projection with the ask response, so it never
 needs to expose historical numeric answer, packet, or coverage lookups.
 
@@ -56,7 +56,6 @@ EmbeddingGemma, Gemini Embedding, or Qwen/Nebius profiles that were deployed.
 
 - `uv run -m uni_rag_agent app serve [--host 127.0.0.1] [--port 8000]`.
 - Local routes: `GET /health`, `GET /config`, `GET/PUT /api/settings`,
-  `GET /api/index-status`,
   `POST /api/ask`,
   `GET /api/asks/{request_id}/progress`,
   `POST /api/asks/{request_id}/cancel`,
@@ -65,11 +64,6 @@ EmbeddingGemma, Gemini Embedding, or Qwen/Nebius profiles that were deployed.
   `GET /api/evidence-packets/{evidence_packet_id}`, and
   `GET /api/answers/{answer_id}`. `/` serves the UI and `/static` serves its
   assets.
-- `GET /api/index-status` reports course names with file and chunk counts,
-  archive totals, and the newest chunk timestamp, read-only from SQLite. It
-  never traverses `Courses/`, never triggers ingestion or indexing, and returns
-  an empty index rather than failing when the database or a table is missing.
-  It returns 404 in public mode.
 - Public-only `POST /api/demo/session` verifies a single-use Turnstile token
   and returns a signed 30-minute demo token. Protected public routes require
   `Authorization: Bearer <demo-token>` and bind that token to a privacy-safe

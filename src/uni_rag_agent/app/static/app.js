@@ -26,10 +26,6 @@ const settingsNote = document.querySelector("#settings-note");
 const turnstilePanel = document.querySelector("#turnstile-panel");
 const turnstileWidget = document.querySelector("#turnstile-widget");
 const indexChip = document.querySelector("#index-chip");
-const indexPanel = document.querySelector("#index-panel");
-const indexSummary = document.querySelector("#index-summary");
-const indexCourses = document.querySelector("#index-courses");
-const indexNote = document.querySelector("#index-note");
 const progressPanel = document.querySelector("#progress-panel");
 const progressTitle = document.querySelector("#progress-title");
 const progressStage = document.querySelector("#progress-stage");
@@ -52,8 +48,6 @@ const DETAILS_KEY = "uni-rag-details";
 const PUBLIC_SETTINGS_KEY = "uni-rag-public-settings";
 const DEMO_TOKEN_KEY = "uni-rag-demo-token";
 const DEMO_TOKEN_EXP_KEY = "uni-rag-demo-token-exp";
-const INDEX_CHIP_LIMIT = 10;
-
 let current = null;
 let currentPacket = null;
 let currentMeta = null;
@@ -67,7 +61,6 @@ let activeRequest = null;
 let submissionPending = false;
 let settingsPayload = null;
 let turnstilePromise = null;
-let indexStatus = null;
 let quotaRemaining = null;
 
 initializeApp();
@@ -91,7 +84,6 @@ async function initializeApp() {
     applyDetailsVisibility();
     renderSessionState();
     renderHistory();
-    await loadIndexStatus();
     await restoreActiveSession();
     clearStatus();
   } catch (error) {
@@ -609,81 +601,6 @@ function loadTurnstileScript() {
   });
 }
 
-/* ---------- index status ---------- */
-
-async function loadIndexStatus() {
-  if (appMode === "public") {
-    renderTopChip();
-    return;
-  }
-  try {
-    indexStatus = await requestJson("/api/index-status");
-  } catch {
-    indexStatus = null;
-  }
-  renderIndexStatus();
-}
-
-function renderIndexStatus() {
-  renderTopChip();
-  if (!indexStatus) {
-    indexPanel.hidden = true;
-    return;
-  }
-  const totals = indexStatus.totals || {};
-  const courses = indexStatus.courses || [];
-  indexPanel.hidden = false;
-  indexCourses.replaceChildren();
-  if (!totals.courses) {
-    indexSummary.textContent = "nothing indexed yet";
-    indexNote.hidden = false;
-    indexNote.textContent =
-      "No course files have been inventoried and indexed yet. Build the index with the command-line workflow, then reload this page.";
-    return;
-  }
-  indexNote.hidden = totals.indexed_courses === totals.courses;
-  indexNote.textContent =
-    "Courses without chunks are inventoried but not yet extracted or indexed, so they cannot appear in an answer.";
-  const parts = [
-    `${formatCount(totals.chunks)} chunk${totals.chunks === 1 ? "" : "s"}`,
-    `${formatCount(totals.indexed_files)} of ${formatCount(totals.files)} files`,
-  ];
-  if (totals.embedded_chunks) {
-    parts.push(`${formatCount(totals.embedded_chunks)} embedded`);
-  }
-  if (indexStatus.last_indexed_at) {
-    const built = Date.parse(indexStatus.last_indexed_at);
-    if (!Number.isNaN(built)) parts.push(`built ${relativeTime(built)}`);
-  }
-  indexSummary.textContent = parts.join(" · ");
-  // An archive can hold dozens of courses; lead with the largest and keep the
-  // not-yet-indexed ones visible, then collapse the rest into a count.
-  const indexed = courses
-    .filter((course) => course.indexed)
-    .sort((a, b) => b.chunk_count - a.chunk_count);
-  const pending = courses.filter((course) => !course.indexed);
-  const shown = [...indexed.slice(0, INDEX_CHIP_LIMIT), ...pending.slice(0, 3)];
-  shown.forEach((course) => {
-    const chip = document.createElement("span");
-    chip.className = course.indexed ? "course-chip" : "course-chip pending";
-    chip.title = `${formatCount(course.indexed_file_count)} of ${formatCount(course.file_count)} files indexed`;
-    chip.append(document.createTextNode(`${course.course} `));
-    const count = document.createElement("span");
-    count.textContent = course.indexed
-      ? formatCount(course.chunk_count)
-      : "not indexed yet";
-    chip.append(count);
-    indexCourses.append(chip);
-  });
-  const hidden = courses.length - shown.length;
-  if (hidden > 0) {
-    const more = document.createElement("span");
-    more.className = "course-chip";
-    more.textContent = `+${hidden} more course${hidden === 1 ? "" : "s"}`;
-    indexCourses.append(more);
-  }
-}
-
 function renderTopChip() {
   if (activeRequest) {
     indexChip.hidden = false;
@@ -703,19 +620,7 @@ function renderTopChip() {
     indexChip.textContent = `${quotaRemaining.client_day} asks left today · ${quotaRemaining.minute} this minute`;
     return;
   }
-  if (!indexStatus) {
-    indexChip.hidden = true;
-    return;
-  }
-  const totals = indexStatus.totals || {};
-  indexChip.hidden = false;
-  if (!totals.courses) {
-    indexChip.className = "chip warn";
-    indexChip.textContent = "No index yet";
-    return;
-  }
-  indexChip.className = "chip";
-  indexChip.textContent = `${totals.courses} course${totals.courses === 1 ? "" : "s"} · ${formatCount(totals.indexed_files)} files indexed`;
+  indexChip.hidden = true;
 }
 
 /* ---------- session log (client-side; the server keeps no session listing) ---------- */
@@ -967,7 +872,6 @@ function clearResult() {
   progressPanel.hidden = true;
   hero.hidden = false;
   shell.classList.remove("has-answer");
-  indexPanel.hidden = !indexStatus;
 }
 
 function truncate(text, max) {
@@ -1521,13 +1425,8 @@ function coverageRows(coverage) {
     name.className = "row-name";
     name.textContent = source;
     const value = document.createElement("span");
-    const indexed = indexStatus?.courses?.find((course) => course.course === source);
     value.className = hits.has(source) ? "row-value hit" : "row-value miss";
-    value.textContent = hits.has(source)
-      ? "evidence found"
-      : indexed
-        ? `${formatCount(indexed.file_count)} files · no hits`
-        : "no hits";
+    value.textContent = hits.has(source) ? "evidence found" : "no hits";
     row.append(name, value);
     rows.append(row);
   });
