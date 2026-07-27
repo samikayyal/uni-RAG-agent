@@ -376,26 +376,31 @@ button {
   order: 2;
 }
 
-#status {
+/* Example prompts sit under the composer on the initial screen only. */
+#suggestions {
   order: 3;
+}
+
+#status {
+  order: 4;
 }
 
 /* The question header stays above the live stage panel while work runs. */
 #result {
-  order: 4;
-}
-
-#progress-panel {
   order: 5;
 }
 
+#progress-panel {
+  order: 6;
+}
+
 #history {
-  order: 7;
+  order: 8;
 }
 
 /* Once an answer is on screen the composer becomes the follow-up field. */
 .shell.has-answer .composer {
-  order: 6;
+  order: 7;
 }
 
 .hero h1 {
@@ -487,6 +492,45 @@ button {
 
 .session-tag.live .session-dot {
   background: var(--accent);
+}
+
+/* ---------- suggested prompts ---------- */
+
+.suggestions-label {
+  font: 400 11px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 9px;
+}
+
+.suggestion-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.suggestion {
+  font: 400 13px var(--sans);
+  text-align: left;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 13px;
+  min-height: 34px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.suggestion:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.suggestion:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .turnstile-panel {
@@ -1497,6 +1541,13 @@ body:has(.settings-dialog[open]) {
 
   #embedding-loading-label {
     display: none;
+  }
+
+  /* Suggested prompts stay comfortable touch targets on phones. */
+  .suggestion {
+    min-height: 44px;
+    width: 100%;
+    border-radius: 12px;
   }
 
   .topbar .chip {

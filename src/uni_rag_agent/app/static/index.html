@@ -7,7 +7,7 @@
     <meta name="theme-color" id="theme-color" content="#fdfcf9">
     <meta name="color-scheme" id="color-scheme" content="only light">
     <title>Uni RAG Agent</title>
-    <link rel="stylesheet" href="/static/styles.css?v=force-dark-optout-20260726">
+    <link rel="stylesheet" href="/static/styles.css?v=suggested-prompts-20260727">
   </head>
   <body>
     <header class="topbar">
@@ -55,7 +55,7 @@
           <div id="turnstile-widget"></div>
         </div>
         <textarea id="query" name="query" maxlength="10000" rows="3"
-          placeholder="e.g. Explain MapReduce from my courses" aria-label="Question"></textarea>
+          placeholder="e.g. Explain the Apriori algorithm from my Data Mining materials" aria-label="Question"></textarea>
         <div class="composer-foot">
           <span class="session-tag">
             <span class="session-dot" aria-hidden="true"></span>
@@ -70,6 +70,32 @@
           </button>
         </div>
       </form>
+
+      <section id="suggestions" class="suggestions" aria-label="Example questions">
+        <p class="suggestions-label">Try one of these</p>
+        <div class="suggestion-list">
+          <button
+            type="button"
+            class="suggestion"
+            data-query="Explain the transformer architecture and the attention mechanism from my NLP course materials."
+          >Explain transformers and attention</button>
+          <button
+            type="button"
+            class="suggestion"
+            data-query="How is Naive Bayes text classification covered across my Information Retrieval, NLP, and Data Mining courses?"
+          >Compare Naive Bayes across three courses</button>
+          <button
+            type="button"
+            class="suggestion"
+            data-query="Find the Dynamic Programming exercises in my Algorithms Design and Analysis past papers and outline how to approach them."
+          >Find Dynamic Programming exam practice</button>
+          <button
+            type="button"
+            class="suggestion"
+            data-query="What do my NLP materials say about large language models and how they are trained?"
+          >How are large language models trained?</button>
+        </div>
+      </section>
 
       <div id="status" class="status" role="status" aria-live="polite" hidden></div>
 
@@ -172,6 +198,6 @@
     </dialog>
 
     <script src="/static/browser_state.js?v=lan-uuid-20260726" defer></script>
-    <script src="/static/app.js?v=force-dark-optout-20260726" defer></script>
+    <script src="/static/app.js?v=example-prompts-20260727" defer></script>
   </body>
 </html>

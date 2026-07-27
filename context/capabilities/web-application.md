@@ -78,7 +78,16 @@ being manually resizable. Once a nonempty question is accepted for submission,
 the composer clears while the request is in progress, then restores that draft
 if the user cancels or the request fails so it can be edited and retried. Empty
 submissions use the app's visible status message instead of browser-native
-validation. A top-bar light/dark control persists the selected
+validation. Directly below the composer the initial screen offers four fixed
+example prompts. They share the hero's visibility, so they appear only before a
+question is asked and return with it when history is cleared. Selecting one
+fills the composer and focuses it rather than submitting, so the question stays
+editable and no ask or public quota is spent before the tab is verified; a
+selection is ignored while a request is active. A further nine example
+questions cycle through the composer's placeholder every six seconds, starting
+from a random entry. Rotation pauses whenever the composer holds text or an ask
+is in flight, and does not run at all under a reduced-motion preference; the
+served HTML keeps one static example as its no-script fallback. A top-bar light/dark control persists the selected
 appearance in browser-local state; it does not affect retrieval settings or any
 server-side state. A history-header control immediately clears all browser-held
 session history, detaches the active conversation, clears the draft and rendered

@@ -755,8 +755,8 @@ def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
     assert 'id="query-count"' in response.text
     assert 'id="clear-history"' in response.text
     assert "/static/browser_state.js?v=lan-uuid-20260726" in response.text
-    assert "/static/styles.css?v=force-dark-optout-20260726" in response.text
-    assert "/static/app.js?v=force-dark-optout-20260726" in response.text
+    assert "/static/styles.css?v=suggested-prompts-20260727" in response.text
+    assert "/static/app.js?v=example-prompts-20260727" in response.text
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; base-uri 'self'; form-action 'self'; "
         "frame-ancestors 'none'; object-src 'none'; "
@@ -854,6 +854,69 @@ def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
     assert "@media (max-width: 720px) and (max-height: 480px)" in styles
     assert "padding-top: 4px;" in styles
     assert "gap: 8px;" in styles
+
+
+def test_static_ui_offers_example_prompts_on_the_initial_screen_only() -> None:
+    repo_root = Path(__file__).parents[1]
+    static_root = repo_root / "src" / "uni_rag_agent" / "app" / "static"
+    markup = (static_root / "index.html").read_text(encoding="utf-8")
+    styles = (static_root / "styles.css").read_text(encoding="utf-8")
+    app_js = (static_root / "app.js").read_text(encoding="utf-8")
+
+    assert '<section id="suggestions" class="suggestions"' in markup
+    assert markup.index('id="suggestions"') > markup.index('id="ask-form"')
+    assert markup.count('class="suggestion"') == 4
+    # The composer keeps a supported example rather than an unindexed topic.
+    assert "MapReduce" not in markup
+
+    # Suggestions occupy their own slot between the composer and the status line.
+    assert "#suggestions {\n  order: 3;\n}" in styles
+    assert "#status {\n  order: 4;\n}" in styles
+    assert ".shell.has-answer .composer {\n  order: 7;\n}" in styles
+    assert ".suggestion:focus-visible" in styles
+
+    # One helper owns initial-screen visibility for both the hero and the chips.
+    assert "function setHeroVisible(visible) {\n  hero.hidden = !visible;" in app_js
+    assert "suggestions.hidden = !visible;" in app_js
+    assert app_js.count("hero.hidden") == 1
+    assert "setHeroVisible(true);" in app_js
+    assert "setHeroVisible(false);" in app_js
+    # A suggestion fills the composer instead of submitting an ask.
+    assert 'suggestions.addEventListener("click"' in app_js
+    assert "restoreQueryDraft(suggestion.dataset.query" in app_js
+    assert "if (activeRequest || submissionPending) return;" in app_js
+    # The click handler fills the composer and stops; it never submits.
+    suggestion_handler = app_js.split('suggestions.addEventListener("click"', maxsplit=1)[
+        1
+    ].split("});", maxsplit=1)[0]
+    assert "requestSubmit" not in suggestion_handler
+    assert "queryInput.focus();" in suggestion_handler
+
+
+def test_static_ui_rotates_example_questions_through_the_empty_composer() -> None:
+    repo_root = Path(__file__).parents[1]
+    app_js = (
+        repo_root / "src" / "uni_rag_agent" / "app" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "const EXAMPLE_QUESTIONS = [" in app_js
+    examples = app_js.split("const EXAMPLE_QUESTIONS = [", maxsplit=1)[1].split("];", maxsplit=1)[0]
+    assert examples.count('  "') == 9
+
+    # The list is declared before the startup call that reads it.
+    assert app_js.index("const EXAMPLE_QUESTIONS") < app_js.index(
+        "initializeExamplePlaceholders();"
+    )
+
+    # A typed draft or a running ask is never disturbed.
+    assert (
+        """function rotateExamplePlaceholder() {
+  if (queryInput.value || activeRequest || submissionPending) return;"""
+        in app_js
+    )
+    assert "queryInput.placeholder = `e.g. ${EXAMPLE_QUESTIONS[exampleIndex]}`;" in app_js
+    assert "if (reducedMotion()) return;" in app_js
+    assert "window.setInterval(rotateExamplePlaceholder, EXAMPLE_ROTATION_MS);" in app_js
 
 
 def test_static_ui_grows_the_composer_and_persists_the_selected_theme() -> None:

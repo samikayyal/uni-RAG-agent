@@ -1,5 +1,6 @@
 const shell = document.querySelector("#shell");
 const hero = document.querySelector("#hero");
+const suggestions = document.querySelector("#suggestions");
 const form = document.querySelector("#ask-form");
 const queryInput = document.querySelector("#query");
 const queryCount = document.querySelector("#query-count");
@@ -57,6 +58,22 @@ const PUBLIC_SETTINGS_KEY = "uni-rag-public-settings";
 const DEMO_TOKEN_KEY = "uni-rag-demo-token";
 const DEMO_TOKEN_EXP_KEY = "uni-rag-demo-token-exp";
 const THEME_KEY = "uni-rag-theme";
+/* Questions measured against the live ask path that answer well but are less
+   distinctive than the four suggestion chips. They cycle through the empty
+   composer so the screen keeps teaching supported phrasing. */
+const EXAMPLE_QUESTIONS = [
+  "What does reinforcement learning look like across my Artificial Intelligence and Machine Learning courses?",
+  "How is TF-IDF explained in my Information Retrieval materials compared to my NLP materials?",
+  "Explain the difference between RDF, RDFS, and OWL from my Knowledge Graphs course.",
+  "Compare how precision and recall are taught in my Data Mining materials versus my Information Retrieval materials.",
+  "What feature engineering techniques appear in my Data Engineering and Machine Learning materials?",
+  "Explain word vectors and embeddings from my NLP course materials.",
+  "Explain the Apriori algorithm from my Data Mining materials.",
+  "How do my Data Engineering materials say to handle imbalanced data?",
+  "Compare the CPU scheduling algorithms covered in my Operating Systems slides.",
+];
+const EXAMPLE_ROTATION_MS = 6000;
+let exampleIndex = Math.floor(Math.random() * EXAMPLE_QUESTIONS.length);
 let current = null;
 let currentPacket = null;
 let currentMeta = null;
@@ -79,6 +96,7 @@ let settingsBaseline = {};
 initializeTheme();
 resizeQueryInput();
 updateQueryCount();
+initializeExamplePlaceholders();
 initializeApp();
 
 window.addEventListener("error", (event) => recoverFromClientError(event.error || event.message));
@@ -337,6 +355,41 @@ function restoreQueryDraft(query) {
   resizeQueryInput();
   updateQueryCount();
 }
+
+function applyExamplePlaceholder() {
+  queryInput.placeholder = `e.g. ${EXAMPLE_QUESTIONS[exampleIndex]}`;
+}
+
+/* Rotate only while the composer is genuinely idle and empty, so a typed draft
+   or a running ask is never disturbed. */
+function rotateExamplePlaceholder() {
+  if (queryInput.value || activeRequest || submissionPending) return;
+  exampleIndex = (exampleIndex + 1) % EXAMPLE_QUESTIONS.length;
+  applyExamplePlaceholder();
+}
+
+function initializeExamplePlaceholders() {
+  applyExamplePlaceholder();
+  if (reducedMotion()) return;
+  window.setInterval(rotateExamplePlaceholder, EXAMPLE_ROTATION_MS);
+}
+
+/* The hero and its example prompts belong to the initial question screen. */
+function setHeroVisible(visible) {
+  hero.hidden = !visible;
+  suggestions.hidden = !visible;
+}
+
+/* A suggestion fills the composer so the question stays editable and no ask
+   is spent before the tab is verified. */
+suggestions.addEventListener("click", (event) => {
+  const suggestion = event.target.closest(".suggestion");
+  if (!suggestion) return;
+  if (activeRequest || submissionPending) return;
+  restoreQueryDraft(suggestion.dataset.query || "");
+  clearStatus();
+  queryInput.focus();
+});
 
 /* ---------- retrieval settings dialog ---------- */
 
@@ -1151,7 +1204,7 @@ function clearResult() {
   packetLoadedFor = null;
   result.hidden = true;
   progressPanel.hidden = true;
-  hero.hidden = false;
+  setHeroVisible(true);
   shell.classList.remove("has-answer");
 }
 
@@ -1259,7 +1312,7 @@ function defaultStages() {
 function beginQuestion(query) {
   const session = activeSessionId ? findSession(activeSessionId) : null;
   const turnIndex = (session?.turns.length || 0) + 1;
-  hero.hidden = true;
+  setHeroVisible(false);
   current = null;
   currentPacket = null;
   currentMeta = null;
@@ -1399,7 +1452,7 @@ function renderStages(request, now) {
 function renderAnswer(payload, queryText, meta = {}) {
   currentMeta = meta;
   currentPacket = appMode === "public" ? payload.evidence_packet || null : null;
-  hero.hidden = true;
+  setHeroVisible(false);
   progressPanel.hidden = true;
   shell.classList.add("has-answer");
   result.hidden = false;
@@ -1910,7 +1963,7 @@ function renderTrace(payload) {
 }
 
 function showRequestFailure(query, error) {
-  hero.hidden = true;
+  setHeroVisible(false);
   result.hidden = false;
   progressPanel.hidden = true;
   shell.classList.add("has-answer");

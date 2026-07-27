@@ -119,6 +119,13 @@ The implemented pipeline is complete through evaluation hardening:
     legacy schema-v1 rows bootstrap compatibly. Incremental sync uses inclusive
     high-water marks and transactional upserts, location snapshots are frozen
     unless explicitly refreshed, and offline/stale-cache operation is explicit.
+21. The initial question screen now offers four fixed example prompts below the
+    composer. They share the hero's visibility and fill the composer instead of
+    submitting, so no ask or public quota is spent on a stray selection. The
+    prompts were chosen by measuring candidate questions against the live `ask`
+    path and keeping those with substantive multi-source answers and minimal
+    limitations. Nine further measured questions rotate through the composer
+    placeholder while it is empty and idle.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and
