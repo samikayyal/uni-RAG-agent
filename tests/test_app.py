@@ -754,9 +754,18 @@ def test_static_ui_has_accessible_metadata_and_security_headers() -> None:
     assert 'id="answer-card"' in response.text
     assert 'id="query-count"' in response.text
     assert 'id="clear-history"' in response.text
-    assert "/static/browser_state.js?v=lan-uuid-20260726" in response.text
-    assert "/static/styles.css?v=suggested-prompts-20260727" in response.text
-    assert "/static/app.js?v=example-prompts-20260727" in response.text
+    asset_tags = dict(
+        re.findall(
+            r"/static/(browser_state\.js|styles\.css|app\.js)\?v=([A-Za-z0-9-]+)",
+            response.text,
+        )
+    )
+    assert set(asset_tags) == {"browser_state.js", "styles.css", "app.js"}, (
+        "every static asset reference must carry a cache-busting version tag"
+    )
+    assert asset_tags["styles.css"] == asset_tags["app.js"], (
+        "styles.css and app.js must share one tag so a UI change busts both caches"
+    )
     assert response.headers["content-security-policy"] == (
         "default-src 'self'; base-uri 'self'; form-action 'self'; "
         "frame-ancestors 'none'; object-src 'none'; "
@@ -856,6 +865,20 @@ def test_static_ui_has_mobile_overflow_and_focus_safeguards() -> None:
     assert "gap: 8px;" in styles
 
 
+def _shell_order(styles: str, selector: str) -> int:
+    """Return the flex order a shell selector declares, however it is formatted."""
+    match = re.search(re.escape(selector) + r"\s*\{[^}]*?\border:\s*(\d+);", styles)
+    assert match, f"{selector} must declare a flex order in the shell"
+    return int(match.group(1))
+
+
+def _js_block(app_js: str, opener: str, description: str) -> str:
+    """Return the body of the first block that starts with ``opener``."""
+    match = re.search(re.escape(opener) + r"(.*?)\n\}", app_js, re.DOTALL)
+    assert match, description
+    return match.group(1)
+
+
 def test_static_ui_offers_example_prompts_on_the_initial_screen_only() -> None:
     repo_root = Path(__file__).parents[1]
     static_root = repo_root / "src" / "uni_rag_agent" / "app" / "static"
@@ -864,33 +887,56 @@ def test_static_ui_offers_example_prompts_on_the_initial_screen_only() -> None:
     app_js = (static_root / "app.js").read_text(encoding="utf-8")
 
     assert '<section id="suggestions" class="suggestions"' in markup
-    assert markup.index('id="suggestions"') > markup.index('id="ask-form"')
+    assert markup.index('id="suggestions"') > markup.index('id="ask-form"'), (
+        "the example prompts render below the composer"
+    )
     assert markup.count('class="suggestion"') == 4
-    # The composer keeps a supported example rather than an unindexed topic.
-    assert "MapReduce" not in markup
+    assert "MapReduce" not in markup, (
+        "the composer placeholder must show a supported example, not an unindexed topic"
+    )
 
-    # Suggestions occupy their own slot between the composer and the status line.
-    assert "#suggestions {\n  order: 3;\n}" in styles
-    assert "#status {\n  order: 4;\n}" in styles
-    assert ".shell.has-answer .composer {\n  order: 7;\n}" in styles
+    # Suggestions occupy their own slot between the composer and the status line,
+    # and the composer still moves below them once an answer is on screen.
+    assert (
+        _shell_order(styles, ".composer")
+        < _shell_order(styles, "#suggestions")
+        < _shell_order(styles, "#status")
+        < _shell_order(styles, ".shell.has-answer .composer")
+        < _shell_order(styles, "#history")
+    ), "shell sections must keep their relative visual order"
     assert ".suggestion:focus-visible" in styles
 
     # One helper owns initial-screen visibility for both the hero and the chips.
-    assert "function setHeroVisible(visible) {\n  hero.hidden = !visible;" in app_js
-    assert "suggestions.hidden = !visible;" in app_js
-    assert app_js.count("hero.hidden") == 1
-    assert "setHeroVisible(true);" in app_js
-    assert "setHeroVisible(false);" in app_js
-    # A suggestion fills the composer instead of submitting an ask.
-    assert 'suggestions.addEventListener("click"' in app_js
-    assert "restoreQueryDraft(suggestion.dataset.query" in app_js
-    assert "if (activeRequest || submissionPending) return;" in app_js
-    # The click handler fills the composer and stops; it never submits.
-    suggestion_handler = app_js.split('suggestions.addEventListener("click"', maxsplit=1)[
-        1
-    ].split("});", maxsplit=1)[0]
-    assert "requestSubmit" not in suggestion_handler
-    assert "queryInput.focus();" in suggestion_handler
+    helper = _js_block(
+        app_js,
+        "function setHeroVisible(visible) {",
+        "one helper must own initial-screen visibility",
+    )
+    assert "hero.hidden" in helper and "suggestions.hidden" in helper, (
+        "the hero and the suggestion chips must show and hide together"
+    )
+    assert app_js.count("hero.hidden") == 1, (
+        "call sites must go through setHeroVisible, never write hero.hidden directly"
+    )
+    assert "setHeroVisible(true)" in app_js and "setHeroVisible(false)" in app_js
+
+    handler = re.search(
+        r'suggestions\.addEventListener\("click",(.*?)\n\}\);', app_js, re.DOTALL
+    )
+    assert handler, "the suggestion list must handle clicks via one delegated listener"
+    handler_body = handler.group(1)
+    assert "restoreQueryDraft(" in handler_body, (
+        "a chip fills the composer through the shared draft helper"
+    )
+    assert "activeRequest" in handler_body and "submissionPending" in handler_body, (
+        "chips are inert while an ask is active or queued"
+    )
+    assert "requestSubmit" not in handler_body, (
+        "a chip must never submit an ask on the user's behalf"
+    )
+    assert "queryInput.focus" in handler_body, (
+        "selection returns focus to the composer so the question stays editable"
+    )
 
 
 def test_static_ui_rotates_example_questions_through_the_empty_composer() -> None:
@@ -899,24 +945,40 @@ def test_static_ui_rotates_example_questions_through_the_empty_composer() -> Non
         repo_root / "src" / "uni_rag_agent" / "app" / "static" / "app.js"
     ).read_text(encoding="utf-8")
 
-    assert "const EXAMPLE_QUESTIONS = [" in app_js
-    examples = app_js.split("const EXAMPLE_QUESTIONS = [", maxsplit=1)[1].split("];", maxsplit=1)[0]
-    assert examples.count('  "') == 9
+    examples = re.search(r"const EXAMPLE_QUESTIONS = \[(.*?)\];", app_js, re.DOTALL)
+    assert examples, "the rotating example questions must live in one declared list"
+    questions = re.findall(r'"([^"]+)"', examples.group(1))
+    assert len(questions) == 9, "nine measured questions rotate through the placeholder"
 
-    # The list is declared before the startup call that reads it.
     assert app_js.index("const EXAMPLE_QUESTIONS") < app_js.index(
         "initializeExamplePlaceholders();"
-    )
+    ), "the list is declared before the startup call that reads it"
 
-    # A typed draft or a running ask is never disturbed.
-    assert (
-        """function rotateExamplePlaceholder() {
-  if (queryInput.value || activeRequest || submissionPending) return;"""
-        in app_js
+    rotate = _js_block(
+        app_js,
+        "function rotateExamplePlaceholder() {",
+        "placeholder rotation must be a named, guarded step",
     )
-    assert "queryInput.placeholder = `e.g. ${EXAMPLE_QUESTIONS[exampleIndex]}`;" in app_js
-    assert "if (reducedMotion()) return;" in app_js
-    assert "window.setInterval(rotateExamplePlaceholder, EXAMPLE_ROTATION_MS);" in app_js
+    for guard in ("queryInput.value", "activeRequest", "submissionPending"):
+        assert guard in rotate, (
+            f"rotation must check {guard} so a typed draft or a running ask "
+            "is never disturbed"
+        )
+    assert re.search(
+        r"queryInput\.placeholder\s*=.*EXAMPLE_QUESTIONS\[exampleIndex\]", app_js
+    ), "the placeholder must read the currently cycled example"
+
+    init = _js_block(
+        app_js,
+        "function initializeExamplePlaceholders() {",
+        "placeholder setup must be a named startup step",
+    )
+    assert "reducedMotion()" in init, (
+        "rotation must not start under a reduced-motion preference"
+    )
+    assert "setInterval(rotateExamplePlaceholder" in init, (
+        "rotation runs on the shared interval, starting from the initial example"
+    )
 
 
 def test_static_ui_grows_the_composer_and_persists_the_selected_theme() -> None:

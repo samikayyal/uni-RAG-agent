@@ -368,39 +368,41 @@ button {
   gap: 26px;
 }
 
+/* Shell slots are spaced by tens so a new section slots in without
+   renumbering its neighbours. */
 .hero {
-  order: 1;
+  order: 10;
 }
 
 .composer {
-  order: 2;
+  order: 20;
 }
 
 /* Example prompts sit under the composer on the initial screen only. */
 #suggestions {
-  order: 3;
+  order: 30;
 }
 
 #status {
-  order: 4;
+  order: 40;
 }
 
 /* The question header stays above the live stage panel while work runs. */
 #result {
-  order: 5;
+  order: 50;
 }
 
 #progress-panel {
-  order: 6;
+  order: 60;
 }
 
 #history {
-  order: 8;
+  order: 80;
 }
 
 /* Once an answer is on screen the composer becomes the follow-up field. */
 .shell.has-answer .composer {
-  order: 7;
+  order: 70;
 }
 
 .hero h1 {
