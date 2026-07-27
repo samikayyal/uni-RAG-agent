@@ -417,8 +417,11 @@ def test_signed_token_rejects_tampering_expiry_and_client_rebinding() -> None:
     )
     token, claims = manager.issue("client-a")
     assert manager.verify(token, "client-a").nonce == claims.nonce
-    with pytest.raises(DemoAuthorizationError):
+    with pytest.raises(DemoAuthorizationError) as invalid_error:
         manager.verify(token + "x", "client-a")
+    assert str(invalid_error.value) == (
+        "The demo token is invalid or expired. Please refresh the page."
+    )
     with pytest.raises(DemoAuthorizationError):
         manager.verify(token, "client-b")
     current[0] += timedelta(seconds=61)

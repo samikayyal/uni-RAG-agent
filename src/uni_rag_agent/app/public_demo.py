@@ -17,6 +17,9 @@ from typing import Any, Protocol
 from ..config import Config
 
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+DEMO_TOKEN_INVALID_MESSAGE = (
+    "The demo token is invalid or expired. Please refresh the page."
+)
 
 
 class DemoAuthorizationError(ValueError):
@@ -129,11 +132,9 @@ class SignedDemoTokenManager:
         try:
             value = self._serializer.loads(token)
         except Exception as exc:
-            raise DemoAuthorizationError(
-                "The demo token is invalid or expired."
-            ) from exc
+            raise DemoAuthorizationError(DEMO_TOKEN_INVALID_MESSAGE) from exc
         if not isinstance(value, dict) or value.get("v") != 1:
-            raise DemoAuthorizationError("The demo token is invalid or expired.")
+            raise DemoAuthorizationError(DEMO_TOKEN_INVALID_MESSAGE)
         try:
             claims = DemoTokenClaims(
                 nonce=str(value["nonce"]),
@@ -142,9 +143,7 @@ class SignedDemoTokenManager:
                 expires_at=int(value["exp"]),
             )
         except (KeyError, TypeError, ValueError) as exc:
-            raise DemoAuthorizationError(
-                "The demo token is invalid or expired."
-            ) from exc
+            raise DemoAuthorizationError(DEMO_TOKEN_INVALID_MESSAGE) from exc
         now = int(self._clock().timestamp())
         if (
             not claims.nonce
@@ -153,7 +152,7 @@ class SignedDemoTokenManager:
             or claims.expires_at - claims.issued_at > self._ttl_seconds
             or not hmac.compare_digest(claims.client_hash, client_hash)
         ):
-            raise DemoAuthorizationError("The demo token is invalid or expired.")
+            raise DemoAuthorizationError(DEMO_TOKEN_INVALID_MESSAGE)
         return claims
 
 
