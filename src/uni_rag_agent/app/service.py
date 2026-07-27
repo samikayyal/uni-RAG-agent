@@ -310,6 +310,8 @@ class PersistenceGate:
         self._evidence_packet_id: int | None = None
         self._phase: str | None = None
         self._started_at = monotonic()
+        self._phase_started_at: float | None = None
+        self._completed_phases: list[dict[str, object]] = []
 
     @property
     def trace_ids(self) -> tuple[int | None, int | None]:
@@ -333,7 +335,38 @@ class PersistenceGate:
     def set_phase(self, phase: str) -> None:
         with self._lock:
             if not self._cancelled:
+                now = monotonic()
+                if (
+                    self._phase is not None
+                    and self._phase_started_at is not None
+                    and phase != self._phase
+                ):
+                    self._completed_phases.append(
+                        {
+                            "phase": self._phase,
+                            "duration_seconds": now - self._phase_started_at,
+                        }
+                    )
+                if phase != self._phase:
+                    self._phase_started_at = now
                 self._phase = phase
+
+    def audit_timing(self) -> dict[str, object]:
+        """Return the complete in-process phase timeline for durable auditing."""
+        with self._lock:
+            now = monotonic()
+            phases = [dict(item) for item in self._completed_phases]
+            if self._phase is not None and self._phase_started_at is not None:
+                phases.append(
+                    {
+                        "phase": self._phase,
+                        "duration_seconds": now - self._phase_started_at,
+                    }
+                )
+            return {
+                "elapsed_seconds": now - self._started_at,
+                "phases": phases,
+            }
 
     def record_evidence(self, search_run_id: int, evidence_packet_id: int) -> None:
         with self._lock:

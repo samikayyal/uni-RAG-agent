@@ -1,0 +1,55 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "query",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "requested_retrieval_settings",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "effective_settings",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "models",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "client",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "quota_remaining",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "trace_ids",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "timing",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "error",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "demo_asks",
+      "fieldPath": "response",
+      "indexes": []
+    }
+  ]
+}

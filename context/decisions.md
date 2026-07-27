@@ -267,6 +267,19 @@ process ask slots; subsequent provider failure or client cancellation still
 counts. Cloud Run request concurrency is four so control/static requests remain
 responsive while two asks run.
 
+Every authenticated public ask submission is also retained indefinitely in a
+separate Firestore `demo_asks` document. Recording begins after bearer-token
+validation but before replay, capacity, session-ownership, or quota decisions,
+so valid rejected attempts are visible alongside accepted asks. The terminal
+record contains the raw query and raw client IP, bounded User-Agent/language
+metadata, requested/effective safe settings, model identities, quota state,
+sanitized error state, trace ids, phase timings, and—when completed—the full
+safe public response including answer, citations, limitations, coverage, and
+evidence packet. Unauthenticated requests and payloads rejected by FastAPI
+schema validation are not retained. Audit writes fail closed. The audit store
+never receives bearer tokens, Turnstile responses, authorization headers,
+secrets, raw exception details, or stack traces.
+
 A request id is a one-shot acceptance identity within its signed demo-token
 nonce. A completed replay returns a stable conflict and cannot start retrieval,
 consume capacity, or mutate session ownership, even though the existing
@@ -288,14 +301,19 @@ runbook.
 **Why:** A public unauthenticated demo has materially different privacy, abuse,
 cost, memory, and state-lifetime risks from the private local UI. Making that
 mode explicit keeps local workflows compatible while enforcing server-owned
-limits.
+limits. A durable cross-instance ledger is required to inspect every
+authenticated submission and its outcome after Cloud Run instances disappear.
 
 **Constraints/consequences:** Public startup fails closed when Turnstile,
 signing, Firestore, offline-model, or upper-bound configuration is missing or
-unsafe. Firestore may hold only quota counters, idempotency reservations, UTC
-buckets, and keyed client digests—not queries, raw IP addresses, evidence,
-answers, tokens, or browser settings. Selecting, reviewing, and staging the
-SQLite database, Chroma indexes, and accepted offline model are operator
+unsafe. The `demo_asks` collection is server/admin-only, has no public listing
+route, and is intentionally exempted from indexing for large/nested fields;
+only fields needed for dashboard ordering/filtering remain indexed. Retention
+is indefinite by explicit product choice, the public UI discloses raw-IP/full
+trace retention, and IP-derived locations are resolved only by the separate
+localhost dashboard using an operator-supplied GeoLite2 database. Local mode
+does not upload private asks. Selecting, reviewing, and staging the SQLite
+database, Chroma indexes, and accepted offline model are operator
 responsibilities; the application does not scan or certify deployment inputs.
 GCP budget alerts are warnings, not spending caps; provider and platform limits
 remain operator responsibilities.

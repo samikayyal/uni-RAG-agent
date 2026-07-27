@@ -40,6 +40,10 @@ from ..retrieval import (
     load_evidence_packet,
 )
 from ..storage import StorageError, check_storage
+from .ask_audit import (
+    AskAuditError,
+    FirestoreAskAuditStore,
+)
 from .public_demo import (
     AbuseServiceError,
     CloudflareTurnstileVerifier,
@@ -179,6 +183,7 @@ def create_app(
     token_manager: Any = None,
     turnstile_verifier: Any = None,
     quota_store: Any = None,
+    ask_audit_store: Any = None,
     client_resolver: Any = resolve_client_address,
     now: Any = None,
 ) -> FastAPI:
@@ -237,6 +242,9 @@ def create_app(
                     or CloudflareTurnstileVerifier(config.turnstile_secret_key or "")
                 )
                 runtime["quota_store"] = quota_store or FirestoreQuotaStore(config)
+                runtime["ask_audit_store"] = ask_audit_store or FirestoreAskAuditStore(
+                    config
+                )
                 runtime["semaphore"] = asyncio.Semaphore(config.public_ask_capacity)
                 runtime["session_owners"] = {}
             return runtime
@@ -373,7 +381,7 @@ def create_app(
         except SettingsError as exc:
             raise ApiError(422, "settings_validation_error", str(exc)) from exc
 
-    def _client_hash(request: Request, config: Config) -> str:
+    def _client_identity(request: Request, config: Config) -> tuple[str, str]:
         try:
             address = client_resolver(request, hosted_mode=config.hosted_mode)
         except AbuseServiceError:
@@ -382,21 +390,27 @@ def create_app(
             raise AbuseServiceError(
                 "The public client address could not be verified."
             ) from exc
-        return hash_client_address(
+        return (
             address,
-            config.demo_token_signing_secret or "",
+            hash_client_address(
+                address,
+                config.demo_token_signing_secret or "",
+            ),
         )
 
-    def _authorize(request: Request, config: Config) -> tuple[Any, str]:
+    def _client_hash(request: Request, config: Config) -> str:
+        return _client_identity(request, config)[1]
+
+    def _authorize(request: Request, config: Config) -> tuple[Any, str, str]:
         header = request.headers.get("authorization", "")
         scheme, _, token = header.partition(" ")
         if scheme.casefold() != "bearer" or not token.strip():
             raise DemoAuthorizationError("A valid demo token is required.")
-        client_hash = _client_hash(request, config)
+        client_address, client_hash = _client_identity(request, config)
         claims = _demo_runtime(config)["token_manager"].verify(
             token.strip(), client_hash
         )
-        return claims, client_hash
+        return claims, client_hash, client_address
 
     def _claim_public_owner(session_id: str, claims: Any) -> tuple[bool, bool]:
         with runtime_lock:
@@ -566,35 +580,165 @@ def create_app(
             "remaining": remaining.as_dict(),
         }
 
+    async def _start_ask_audit(
+        *,
+        components: dict[str, Any],
+        payload: AskRequest,
+        request: Request,
+        request_id: str,
+        claims: Any,
+        client_hash: str,
+        client_address: str,
+        received_at: datetime,
+        config: Config,
+    ) -> str:
+        record: dict[str, object] = {
+            "schema_version": 1,
+            "received_at": received_at,
+            "finished_at": None,
+            "status": "received",
+            "query": payload.query,
+            "request_id": request_id,
+            "session_id": payload.session_id,
+            "requested_retrieval_settings": (
+                payload.retrieval_settings.model_dump(exclude_unset=True)
+                if payload.retrieval_settings is not None
+                else {}
+            ),
+            "client": {
+                "ip_address": client_address,
+                "client_digest": client_hash,
+                "demo_session_digest": hash_client_address(
+                    claims.nonce,
+                    config.demo_token_signing_secret or "",
+                ),
+                "user_agent": request.headers.get("user-agent", "")[:512],
+                "accept_language": request.headers.get("accept-language", "")[:256],
+            },
+        }
+        try:
+            return await asyncio.to_thread(
+                components["ask_audit_store"].start,
+                record,
+            )
+        except AskAuditError as exc:
+            raise ApiError(
+                503,
+                "ask_audit_unavailable",
+                "The authenticated ask could not be recorded.",
+            ) from exc
+
+    async def _update_ask_audit(
+        components: dict[str, Any],
+        audit_id: str,
+        fields: dict[str, object],
+    ) -> None:
+        try:
+            await asyncio.to_thread(
+                components["ask_audit_store"].update,
+                audit_id,
+                fields,
+            )
+        except AskAuditError as exc:
+            raise ApiError(
+                503,
+                "ask_audit_unavailable",
+                "The ask audit record could not be completed.",
+            ) from exc
+
+    def _audit_terminal_fields(
+        *,
+        status: str,
+        started_at: datetime,
+        gate: PersistenceGate | None = None,
+        error: ApiError | None = None,
+        response: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        finished_at = clock()
+        fields: dict[str, object] = {
+            "status": status,
+            "finished_at": finished_at,
+            "duration_ms": max(
+                0,
+                int((finished_at - started_at).total_seconds() * 1_000),
+            ),
+        }
+        if gate is not None:
+            search_run_id, evidence_packet_id = gate.trace_ids
+            fields["trace_ids"] = {
+                "search_run_id": search_run_id,
+                "evidence_packet_id": evidence_packet_id,
+            }
+            fields["timing"] = gate.audit_timing()
+        if error is not None:
+            fields["error"] = {
+                "http_status": error.status_code,
+                "code": error.code,
+                "message": error.message,
+            }
+        if response is not None:
+            fields["response"] = response
+        return fields
+
     @app.post("/api/ask")
     async def ask(payload: AskRequest, request: Request) -> dict[str, object]:
         base_config = await asyncio.to_thread(_base_config)
-        config = await asyncio.to_thread(
-            _request_config, base_config, payload.retrieval_settings
-        )
-        public = config.public_demo_enabled
+        public = base_config.public_demo_enabled
         claims: Any = None
         client_hash: str | None = None
+        client_address: str | None = None
         remaining: QuotaRemaining | None = None
         components: dict[str, Any] | None = None
         request_id = payload.request_id or (
             secrets.token_urlsafe(18) if public else None
         )
         reservation_id: str | None = None
+        audit_id: str | None = None
+        audit_started_at = clock()
         if public:
-            if len(payload.query) > config.public_query_max_chars:
+            try:
+                claims, client_hash, client_address = _authorize(request, base_config)
+            except DemoAuthorizationError as exc:
+                raise ApiError(401, "demo_authorization_error", str(exc)) from exc
+            except AbuseServiceError as exc:
+                raise ApiError(503, "abuse_service_unavailable", str(exc)) from exc
+            components = _demo_runtime(base_config)
+            audit_id = await _start_ask_audit(
+                components=components,
+                payload=payload,
+                request=request,
+                request_id=request_id or "",
+                claims=claims,
+                client_hash=client_hash,
+                client_address=client_address,
+                received_at=audit_started_at,
+                config=base_config,
+            )
+
+        try:
+            config = await asyncio.to_thread(
+                _request_config, base_config, payload.retrieval_settings
+            )
+            if public and len(payload.query) > config.public_query_max_chars:
                 raise ApiError(
                     422,
                     "settings_validation_error",
                     f"query must contain at most {config.public_query_max_chars} characters.",
                 )
-            try:
-                claims, client_hash = _authorize(request, config)
-            except DemoAuthorizationError as exc:
-                raise ApiError(401, "demo_authorization_error", str(exc)) from exc
-            except AbuseServiceError as exc:
-                raise ApiError(503, "abuse_service_unavailable", str(exc)) from exc
-            components = _demo_runtime(config)
+        except ApiError as exc:
+            if components is not None and audit_id is not None:
+                await _update_ask_audit(
+                    components,
+                    audit_id,
+                    _audit_terminal_fields(
+                        status="rejected_validation",
+                        started_at=audit_started_at,
+                        error=exc,
+                    ),
+                )
+            raise
+
+        if public:
             reservation_id = f"{claims.nonce}:{request_id}"
             try:
                 existing_reservation = await asyncio.to_thread(
@@ -602,24 +746,54 @@ def create_app(
                     reservation_id,
                 )
             except AbuseServiceError as exc:
-                raise ApiError(503, "abuse_service_unavailable", str(exc)) from exc
+                error = ApiError(503, "abuse_service_unavailable", str(exc))
+                await _update_ask_audit(
+                    components,
+                    audit_id or "",
+                    _audit_terminal_fields(
+                        status="failed_infrastructure",
+                        started_at=audit_started_at,
+                        error=error,
+                    ),
+                )
+                raise error from exc
             if existing_reservation is not None:
-                raise ApiError(
+                error = ApiError(
                     409,
                     "request_already_accepted",
                     "This public demo request id was already accepted.",
                 )
+                await _update_ask_audit(
+                    components,
+                    audit_id or "",
+                    _audit_terminal_fields(
+                        status="rejected_replay",
+                        started_at=audit_started_at,
+                        error=error,
+                    ),
+                )
+                raise error
             try:
                 await asyncio.wait_for(
                     components["semaphore"].acquire(),
                     timeout=config.public_capacity_wait_seconds,
                 )
             except TimeoutError as exc:
-                raise ApiError(
+                error = ApiError(
                     503,
                     "ask_capacity_busy",
                     "The public demo is busy. Please try again shortly.",
-                ) from exc
+                )
+                await _update_ask_audit(
+                    components,
+                    audit_id or "",
+                    _audit_terminal_fields(
+                        status="rejected_busy",
+                        started_at=audit_started_at,
+                        error=error,
+                    ),
+                )
+                raise error from exc
 
         owner_claimed = False
         if public and payload.session_id is not None:
@@ -628,9 +802,19 @@ def create_app(
             )
             if not owner_allowed:
                 components["semaphore"].release()
-                raise ApiError(
+                error = ApiError(
                     404, "not_found", "The requested resource does not exist."
                 )
+                await _update_ask_audit(
+                    components,
+                    audit_id or "",
+                    _audit_terminal_fields(
+                        status="rejected_session_owner",
+                        started_at=audit_started_at,
+                        error=error,
+                    ),
+                )
+                raise error
 
         gate = PersistenceGate()
         owner = claims.nonce if public else None
@@ -639,11 +823,23 @@ def create_app(
                 components["semaphore"].release()
                 if owner_claimed:
                     _release_public_owner_claim(payload.session_id, claims)
-            raise ApiError(
+            error = ApiError(
                 409,
                 "request_in_progress",
                 "An ask request with this request id is already active.",
             )
+            if components is not None and audit_id is not None:
+                await _update_ask_audit(
+                    components,
+                    audit_id,
+                    _audit_terminal_fields(
+                        status="rejected_in_progress",
+                        started_at=audit_started_at,
+                        gate=gate,
+                        error=error,
+                    ),
+                )
+            raise error
         if public:
             try:
                 reservation = await asyncio.to_thread(
@@ -659,29 +855,91 @@ def create_app(
                     components["semaphore"].release()
                     if owner_claimed:
                         _release_public_owner_claim(payload.session_id, claims)
-                    raise ApiError(
+                    error = ApiError(
                         409,
                         "request_already_accepted",
                         "This public demo request id was already accepted.",
                     )
+                    await _update_ask_audit(
+                        components,
+                        audit_id or "",
+                        _audit_terminal_fields(
+                            status="rejected_replay",
+                            started_at=audit_started_at,
+                            gate=gate,
+                            error=error,
+                        ),
+                    )
+                    raise error
             except DemoQuotaError as exc:
                 if request_id is not None:
                     active_asks.complete(request_id, gate)
                 components["semaphore"].release()
                 if owner_claimed:
                     _release_public_owner_claim(payload.session_id, claims)
-                raise ApiError(
+                error = ApiError(
                     429,
                     "demo_quota_exhausted",
                     "The public demo ask limit has been reached.",
-                ) from exc
+                )
+                await _update_ask_audit(
+                    components,
+                    audit_id or "",
+                    _audit_terminal_fields(
+                        status="rejected_quota",
+                        started_at=audit_started_at,
+                        gate=gate,
+                        error=error,
+                    ),
+                )
+                raise error from exc
             except AbuseServiceError as exc:
                 if request_id is not None:
                     active_asks.complete(request_id, gate)
                 components["semaphore"].release()
                 if owner_claimed:
                     _release_public_owner_claim(payload.session_id, claims)
-                raise ApiError(503, "abuse_service_unavailable", str(exc)) from exc
+                error = ApiError(503, "abuse_service_unavailable", str(exc))
+                await _update_ask_audit(
+                    components,
+                    audit_id or "",
+                    _audit_terminal_fields(
+                        status="failed_infrastructure",
+                        started_at=audit_started_at,
+                        gate=gate,
+                        error=error,
+                    ),
+                )
+                raise error from exc
+            try:
+                await _update_ask_audit(
+                    components,
+                    audit_id or "",
+                    {
+                        "status": "accepted",
+                        "accepted_at": clock(),
+                        "effective_settings": describe_public_settings(config)[
+                            "settings"
+                        ],
+                        "models": {
+                            "embedding_model": config.embedding_model,
+                            "planner_provider": config.llm_provider,
+                            "planner_model": config.llm_model,
+                            "answer_provider": config.answer_llm_provider,
+                            "answer_model": config.answer_llm_model,
+                        },
+                        "quota_remaining": (
+                            remaining.as_dict() if remaining is not None else {}
+                        ),
+                    },
+                )
+            except ApiError:
+                if request_id is not None:
+                    active_asks.complete(request_id, gate)
+                components["semaphore"].release()
+                if owner_claimed:
+                    _release_public_owner_claim(payload.session_id, claims)
+                raise
         task = asyncio.create_task(
             asyncio.to_thread(
                 orchestrator.ask,
@@ -712,24 +970,75 @@ def create_app(
                         f"The ask request timed out after evidence packet {packet_id} "
                         "was stored; the packet remains available."
                     )
-                raise ApiError(
+                error = ApiError(
                     504,
                     "ask_timeout",
                     message,
                 )
+                if components is not None and audit_id is not None:
+                    await _update_ask_audit(
+                        components,
+                        audit_id,
+                        _audit_terminal_fields(
+                            status="timed_out",
+                            started_at=audit_started_at,
+                            gate=gate,
+                            error=error,
+                        ),
+                    )
+                raise error
             answer, coverage, packet = await task
         except AskCancelled:
             if gate.cancel_reason == "cancelled":
-                raise ApiError(499, "ask_cancelled", "The ask request was cancelled.")
-            raise ApiError(504, "ask_timeout", "The ask request timed out.")
+                error = ApiError(499, "ask_cancelled", "The ask request was cancelled.")
+                status = "cancelled"
+            else:
+                error = ApiError(504, "ask_timeout", "The ask request timed out.")
+                status = "timed_out"
+            if components is not None and audit_id is not None:
+                await _update_ask_audit(
+                    components,
+                    audit_id,
+                    _audit_terminal_fields(
+                        status=status,
+                        started_at=audit_started_at,
+                        gate=gate,
+                        error=error,
+                    ),
+                )
+            raise error
         except SessionCapacityError:
-            raise ApiError(
+            error = ApiError(
                 503,
                 "session_capacity",
                 "All in-process session slots are currently active.",
             )
+            if components is not None and audit_id is not None:
+                await _update_ask_audit(
+                    components,
+                    audit_id,
+                    _audit_terminal_fields(
+                        status="failed",
+                        started_at=audit_started_at,
+                        gate=gate,
+                        error=error,
+                    ),
+                )
+            raise error
         except Exception as exc:
-            raise _domain_error(exc, lookup=False, trace_ids=gate.trace_ids) from exc
+            error = _domain_error(exc, lookup=False, trace_ids=gate.trace_ids)
+            if components is not None and audit_id is not None:
+                await _update_ask_audit(
+                    components,
+                    audit_id,
+                    _audit_terminal_fields(
+                        status="failed",
+                        started_at=audit_started_at,
+                        gate=gate,
+                        error=error,
+                    ),
+                )
+            raise error from exc
         response = _public_answer(
             answer,
             coverage,
@@ -738,6 +1047,19 @@ def create_app(
         if public:
             response["request_id"] = request_id
             response["remaining"] = remaining.as_dict() if remaining else {}
+            terminal = _audit_terminal_fields(
+                status="completed",
+                started_at=audit_started_at,
+                gate=gate,
+                response=response,
+            )
+            terminal["outcome"] = response["answer_status"]
+            terminal["trace_ids"] = {
+                "search_run_id": answer.search_run_id,
+                "evidence_packet_id": answer.evidence_packet_id,
+                "answer_id": answer.answer_id,
+            }
+            await _update_ask_audit(components, audit_id or "", terminal)
         return response
 
     @app.get("/api/asks/{request_id}/progress")
@@ -781,7 +1103,7 @@ def create_app(
         config = await asyncio.to_thread(_base_config)
         if config.public_demo_enabled:
             try:
-                claims, _ = _authorize(request, config)
+                claims, _, _ = _authorize(request, config)
             except DemoAuthorizationError as exc:
                 raise ApiError(401, "demo_authorization_error", str(exc)) from exc
             except AbuseServiceError as exc:

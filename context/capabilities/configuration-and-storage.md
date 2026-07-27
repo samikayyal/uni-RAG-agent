@@ -63,9 +63,14 @@ operators may lower them but cannot silently deploy broader values.
 - Deployment input review and staging are operator responsibilities documented
   in [deployment.md](../deployment.md); the application has no deployment-preparation
   or secret-scanning command.
-- Firestore stores only quota counters, request-id reservations, UTC buckets,
-  and keyed client digests. It is not an answer, query, evidence, IP-address,
-  or application-settings store.
+- In public-demo mode, Firestore is both the cross-instance abuse-control store
+  and the durable authenticated-ask ledger. `demo_asks` retains the raw query,
+  raw client IP, bounded browser metadata, requested/effective safe settings,
+  model identities, quota state, phase timings, sanitized failures, trace ids,
+  and the complete safe response (answer, citations, limitations, coverage,
+  and evidence packet). Records have no automatic expiry. Bearer tokens,
+  Turnstile responses, raw authorization/request headers, secrets, and stack
+  traces are never stored.
 
 Binding decisions: [DEC-009/021](../decisions.md#dec-009021--uv-and-environment-configuration),
 [DEC-011](../decisions.md#dec-011--sqlite-authority-with-chroma-logical-indexes),

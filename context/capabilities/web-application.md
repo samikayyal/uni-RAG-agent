@@ -36,6 +36,13 @@ question is asked the screen does not expose archive-wide indexing composition.
 Public mode returns the complete
 safe packet and remaining-quota projection with the ask response, so it never
 needs to expose historical numeric answer, packet, or coverage lookups.
+Every authenticated public submission also creates a separate durable
+Firestore `demo_asks` record before replay, capacity, or quota decisions. The
+record reaches a terminal completed, rejected, failed, timed-out, or cancelled
+state and retains the raw query/client IP plus the complete safe response and
+phase timeline. Unauthenticated and request-schema-invalid HTTP traffic is not
+recorded. Audit failure is fail-closed; an authenticated ask is not accepted
+unless its initial record exists.
 
 A Settings dialog lets the user adjust a bounded allowlist of retrieval tuning
 values: the embedding model (reviewed profiles only, aliases canonicalized),
@@ -112,17 +119,24 @@ not expose `crypto.randomUUID()`.
   422 `settings_validation_error`, and any non-allowlisted field is rejected.
 - API documentation and schemas are not served by the application, including
   `/openapi.json`.
+- `uv run -m uni_rag_agent app audit-dashboard` starts a separate reader on
+  `127.0.0.1:8001`. It is not a route in either local or public application
+  mode. The reader paginates `demo_asks`, exposes complete records only to the
+  local browser, and optionally resolves retained IPs with a local GeoLite2
+  City database without sending them to a geolocation service.
 
 ## Source, tests, and artifacts
 
-- Source: `src/uni_rag_agent/app/{api,service,public_demo,settings}.py` and
-  `src/uni_rag_agent/app/static/`.
+- Source:
+  `src/uni_rag_agent/app/{api,service,public_demo,settings,ask_audit,audit_dashboard}.py`
+  and `src/uni_rag_agent/app/static/`.
 - Tests: `tests/test_app.py` (local route projections, validation, sessions,
   cancellation, timeout, settings overrides, and sanitized failures) and
   `tests/test_public_demo.py` (mode split, authentication, quotas, public
   settings, browser state, and embedding registry behavior).
 - Artifacts: routes read/write through the evidence and answering stores;
-  web settings overrides persist in `data/app_settings.json`.
+  web settings overrides persist in `data/app_settings.json`; public ask audit
+  records persist in Firestore `demo_asks`.
 
 ## Invariants and failure boundaries
 
@@ -160,7 +174,9 @@ not expose `crypto.randomUUID()`.
   `PersistenceGate` protects the final write while preserving an evidence packet
   already committed. Active-request progress is transient, contains only a
   phase, elapsed seconds, and cancellation state, and disappears when work
-  finishes; it is not persisted or exposed as session history. The browser
+  finishes. Its completed phase-duration snapshot is copied into the
+  server-only Firestore audit record but is not exposed as public session
+  history. The browser
   permits one active submission only, disables starting a new session until it
   settles, and maps Enter to submit while Shift+Enter adds a newline.
 - `/ready` validates storage and, in hosted mode, confirms only the effective
@@ -183,8 +199,13 @@ not expose `crypto.randomUUID()`.
   EmbeddingGemma preparation does not serialize unrelated Gemini/Nebius asks.
   Failed constructions are cached for ordinary asks, while an explicit
   preparation request retries that profile.
-- Turnstile and Firestore read/write infrastructure failures use the stable 503
-  `abuse_service_unavailable` envelope; none fall through as generic 500s.
+- Turnstile and quota-store infrastructure failures use the stable 503
+  `abuse_service_unavailable` envelope. Ask-ledger initialization or completion
+  failures use the safe `ask_audit_unavailable` 503 boundary; none fall through
+  as generic 500s.
+- Raw IPs, queries, evidence, and answers in `demo_asks` are intentionally
+  retained indefinitely. The public composer discloses that retention.
+  Firestore reads remain server/admin-only; no public audit-list route exists.
 
 Binding decisions: [DEC-036/017](../decisions.md#dec-036017--thin-local-web-app-with-process-scoped-models),
 [DEC-035/020](../decisions.md#dec-035020--strict-packet-only-answers-and-citations),

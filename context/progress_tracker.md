@@ -103,6 +103,15 @@ The implemented pipeline is complete through evaluation hardening:
     cancels older builds for the deployment image, handles requests that arrive
     during the large source upload, and retains an explicit dry-run-capable
     submission shortcut with local logs.
+19. Public mode now writes one indefinite Firestore `demo_asks` audit document
+    for every authenticated submission, including valid rejected attempts, raw
+    IP/browser analytics metadata, safe settings/models, sanitized outcomes,
+    server phase timings, trace ids, and the complete safe evidence/answer
+    response. The fail-closed ledger has no public read route. A separate
+    localhost-only paginated dashboard reads complete records and resolves
+    approximate locations from an operator-supplied local GeoLite2 City
+    database; the repository includes operator-only Firestore index-exemption
+    instructions and performs no GCP control-plane actions.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

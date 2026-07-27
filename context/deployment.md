@@ -24,7 +24,7 @@ must be rechecked before a change.
 | Serving revision at last verification | `uni-rag-agent-00005-v2q` | 100% traffic at the time stated above. |
 | Artifact Registry repository | `europe-west1-docker.pkg.dev/uni-rag-agent/uni-rag` | Release images use immutable tags/digests, never `latest`. |
 | Runtime service account | `uni-rag-runtime@uni-rag-agent.iam.gserviceaccount.com` | Attached to the Cloud Run revision. |
-| Firestore database | `(default)` Native mode | Holds public-demo abuse controls only. |
+| Firestore database | `(default)` Native mode | Holds public-demo abuse controls and the durable authenticated-ask ledger. |
 
 Cloud Run is intentionally the public ingress. The service is unauthenticated
 at the platform layer because a browser demo must reach it, but application
@@ -135,9 +135,13 @@ session's ask, progress, cancellation, or liveness routes.
 
 Firestore is the cross-instance enforcement store for quota counters,
 client-digest UTC buckets, minute buckets, and idempotent request reservations.
-It must not hold queries, raw IP addresses, evidence packets, answers, tokens,
-or browser settings. The relevant collections are `demo_quota_global`,
-`demo_quota_clients`, `demo_quota_minutes`, and `demo_quota_reservations`.
+It also retains every authenticated ask attempt in `demo_asks`, including the
+raw query and client IP, requested/effective safe settings, model identities,
+outcome/timing metadata, sanitized errors, and the complete safe response with
+evidence and answer content. These records have no expiry. Tokens, Turnstile
+responses, authorization headers, secrets, and raw exceptions remain excluded.
+The quota collections are `demo_quota_global`, `demo_quota_clients`,
+`demo_quota_minutes`, and `demo_quota_reservations`.
 
 Quota is reserved atomically only after an ask obtains one of the two in-process
 ask slots. Invalid, unauthorized, over-limit, and capacity-rejected requests do
@@ -145,6 +149,81 @@ not consume quota; accepted provider failures and cancellations do. A completed
 request-ID replay is rejected before it starts provider work. Turnstile or
 Firestore infrastructure failure produces the safe 503
 `abuse_service_unavailable` response.
+
+### Operator steps for the ask ledger
+
+Application code never changes Firestore indexes or IAM. Before deploying the
+first image that writes `demo_asks`, the operator must exempt its large/nested
+fields from automatic indexing. Run these commands from an authenticated local
+PowerShell session; none are executed by the application:
+
+```powershell
+$ProjectId = "uni-rag-agent"
+$Database = "(default)"
+$Collection = "demo_asks"
+$UnindexedFields = @(
+  "query",
+  "requested_retrieval_settings",
+  "effective_settings",
+  "models",
+  "client",
+  "quota_remaining",
+  "trace_ids",
+  "timing",
+  "error",
+  "response"
+)
+
+foreach ($Field in $UnindexedFields) {
+  gcloud.cmd firestore indexes fields update $Field `
+    --project=$ProjectId `
+    --database=$Database `
+    --collection-group=$Collection `
+    --disable-indexes
+}
+```
+
+The same intended exemptions are recorded in
+[`deployment/firestore.ask-audit-indexes.json`](../deployment/firestore.ask-audit-indexes.json)
+for review. Keep the ordinary automatic index on `received_at`; the local
+dashboard orders and paginates by that field. Verify the applied exemptions:
+
+```powershell
+gcloud.cmd firestore indexes fields list `
+  --project="uni-rag-agent" `
+  --database="(default)" `
+  --filter='collectionGroup:demo_asks'
+```
+
+No new runtime IAM role is required: the existing
+`roles/datastore.user` grant lets the runtime create/update audit documents.
+The collection is created by the first authenticated submission after the new
+revision is serving.
+
+For local dashboard access, authenticate Application Default Credentials and
+install both optional dependency groups:
+
+```powershell
+gcloud.cmd auth application-default login
+uv sync --extra public-demo --extra dashboard
+```
+
+Download the MaxMind GeoLite2 City `.mmdb` database after accepting its license,
+place it at `data/GeoLite2-City.mmdb`, and keep it out of Git. Then set the
+Firestore project in `.env` and start the loopback-only viewer:
+
+```dotenv
+UNI_RAG_FIRESTORE_PROJECT_ID=uni-rag-agent
+UNI_RAG_FIRESTORE_DATABASE=(default)
+```
+
+```powershell
+uv run -m uni_rag_agent app audit-dashboard
+```
+
+Open `http://127.0.0.1:8001`. Use `--geoip-db <path>` for a different database
+location and `--port <port>` for a different loopback port. GeoLite2 locations
+are approximate analytics signals, not household/address identification.
 
 ## Cloudflare and DNS
 
@@ -204,7 +283,8 @@ references that exact version, validates it, then disables the old version only
 after rollback is no longer needed. Rotating the signing secret immediately
 invalidates active demo tokens. Quota documents normally expire by their UTC
 minute/day scope; manual Firestore deletion must be restricted to confirmed test
-documents, never an entire quota collection.
+documents, never an entire quota collection. `demo_asks` records intentionally
+do not expire; deletion is a deliberate operator action.
 
 Use Cloud Run's revision-specific logs and metrics for startup, request-error,
 latency, and instance-count investigation. Before attributing a failure to the

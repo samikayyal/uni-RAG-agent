@@ -66,6 +66,9 @@ uv run -m uni_rag_agent ask "Explain MapReduce" --model BAAI/bge-m3 --json
 # Local FastAPI/HTML question surface.
 uv run -m uni_rag_agent app serve
 
+# Localhost-only Firestore ask-audit viewer.
+uv run -m uni_rag_agent app audit-dashboard
+
 # Fixture evaluation (prepare once; real archive is explicit).
 uv run -m uni_rag_agent eval prepare-fixtures
 uv run -m uni_rag_agent eval run

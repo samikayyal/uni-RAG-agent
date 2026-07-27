@@ -144,6 +144,7 @@ Available command shapes:
   uv run -m uni_rag_agent ask "Explain MapReduce from my courses"
   uv run -m uni_rag_agent eval run
   uv run -m uni_rag_agent app serve
+  uv run -m uni_rag_agent app audit-dashboard
 """
 
 
@@ -209,7 +210,11 @@ def build_parser() -> argparse.ArgumentParser:
         prepare_handler=_handle_eval_prepare_fixtures,
         run_handler=_handle_eval_run,
     )
-    app_commands.register_commands(subparsers, handler=_handle_app_serve)
+    app_commands.register_commands(
+        subparsers,
+        serve_handler=_handle_app_serve,
+        dashboard_handler=_handle_app_audit_dashboard,
+    )
     return parser
 
 
@@ -444,6 +449,10 @@ def _handle_eval_run(args: argparse.Namespace) -> int:
 
 def _handle_app_serve(args: argparse.Namespace) -> int:
     return app_commands.handle_serve(args)
+
+
+def _handle_app_audit_dashboard(args: argparse.Namespace) -> int:
+    return app_commands.handle_audit_dashboard(args)
 
 
 def _answer_with_ids(

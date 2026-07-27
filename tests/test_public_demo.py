@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from tests.support import make_config, make_initialized_config
 from tests.test_app import _services
 from uni_rag_agent.app import create_app
+from uni_rag_agent.app.ask_audit import AskAuditError, InMemoryAskAuditStore
 from uni_rag_agent.app.public_demo import (
     AbuseServiceError,
     DemoAuthorizationError,
@@ -73,6 +74,7 @@ def _public_client(
     *,
     services=None,
     quota_store=None,
+    ask_audit_store=None,
     embedding_registry=None,
     raise_server_exceptions: bool = True,
     **config_changes: object,
@@ -85,6 +87,7 @@ def _public_client(
         clock=lambda: now,
     )
     quota = quota_store or InMemoryQuotaStore(config)
+    audit = ask_audit_store or InMemoryAskAuditStore()
     client = TestClient(
         create_app(
             config_loader=lambda: config,
@@ -94,6 +97,7 @@ def _public_client(
                 "Verifier", (), {"verify": lambda self, value: value == "valid"}
             )(),
             quota_store=quota,
+            ask_audit_store=audit,
             embedding_registry=embedding_registry,
             client_resolver=lambda request, hosted_mode: "203.0.113.9",
             now=lambda: now,
@@ -182,6 +186,140 @@ def test_public_ask_requires_token_validates_bounds_and_contains_packet(
         "client_day": 9,
         "global_day": 99,
     }
+
+
+def test_authenticated_asks_store_full_firestore_audit_traces(
+    tmp_path: Path,
+) -> None:
+    audit = InMemoryAskAuditStore()
+    client, _, _ = _public_client(tmp_path, ask_audit_store=audit)
+    body = {
+        "query": "Explain MapReduce",
+        "session_id": "session-one",
+        "request_id": "request-one",
+        "retrieval_settings": {
+            "embedding_model": "google/gemini-embedding-001",
+            "final_top_k": 4,
+        },
+    }
+
+    assert client.post("/api/ask", json=body).status_code == 401
+    assert audit.records() == ()
+
+    headers = _authorize(client)
+    invalid = client.post(
+        "/api/ask",
+        headers=headers,
+        json={
+            **body,
+            "request_id": "invalid-settings",
+            "retrieval_settings": {"final_top_k": 16},
+        },
+    )
+    completed = client.post("/api/ask", headers=headers, json=body)
+
+    assert invalid.status_code == 422
+    assert completed.status_code == 200
+    by_request = {record["request_id"]: record for record in audit.records()}
+    rejected = by_request["invalid-settings"]
+    assert rejected["query"] == "Explain MapReduce"
+    assert rejected["status"] == "rejected_validation"
+    assert rejected["error"]["code"] == "settings_validation_error"
+    assert rejected["client"]["ip_address"] == "203.0.113.9"
+
+    stored = by_request["request-one"]
+    assert stored["status"] == "completed"
+    assert stored["outcome"] == completed.json()["answer_status"]
+    assert stored["models"]["embedding_model"] == "google/gemini-embedding-001"
+    assert stored["trace_ids"] == {
+        "search_run_id": 11,
+        "evidence_packet_id": 22,
+        "answer_id": 33,
+    }
+    assert stored["response"] == completed.json()
+    assert stored["response"]["evidence_packet"] == completed.json()["evidence_packet"]
+    assert stored["client"]["ip_address"] == "203.0.113.9"
+    assert "authorization" not in str(stored).lower()
+    assert "timing" in stored
+
+
+def test_authenticated_replay_and_provider_failure_get_separate_audit_records(
+    tmp_path: Path,
+) -> None:
+    audit = InMemoryAskAuditStore()
+    base_services = _services()
+    calls = 0
+
+    def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("private provider detail")
+        return base_services.build_evidence(*args, **kwargs)
+
+    client, _, _ = _public_client(
+        tmp_path,
+        ask_audit_store=audit,
+        services=replace(base_services, build_evidence=fail_second),
+    )
+    headers = _authorize(client)
+    first_body = {"query": "first", "request_id": "same-id"}
+
+    first = client.post("/api/ask", headers=headers, json=first_body)
+    replay = client.post("/api/ask", headers=headers, json=first_body)
+    failed = client.post(
+        "/api/ask",
+        headers=headers,
+        json={"query": "second", "request_id": "different-id"},
+    )
+
+    assert first.status_code == 200
+    assert replay.status_code == 409
+    assert failed.status_code == 500
+    records = audit.records()
+    assert len(records) == 3
+    same_id_statuses = {
+        record["status"] for record in records if record["request_id"] == "same-id"
+    }
+    assert same_id_statuses == {"completed", "rejected_replay"}
+    failed_record = next(
+        record for record in records if record["request_id"] == "different-id"
+    )
+    assert failed_record["status"] == "failed"
+    assert failed_record["error"]["code"] == "internal_error"
+    assert "private provider detail" not in str(failed_record)
+
+
+def test_audit_acceptance_failure_releases_capacity_for_the_next_request(
+    tmp_path: Path,
+) -> None:
+    class FailOnceAuditStore(InMemoryAskAuditStore):
+        failed = False
+
+        def update(self, audit_id, fields):
+            if fields.get("status") == "accepted" and not self.failed:
+                self.failed = True
+                raise AskAuditError("offline")
+            super().update(audit_id, fields)
+
+    audit = FailOnceAuditStore()
+    client, _, _ = _public_client(tmp_path, ask_audit_store=audit)
+    headers = _authorize(client)
+
+    failed = client.post(
+        "/api/ask",
+        headers=headers,
+        json={"query": "first", "request_id": "audit-failed"},
+    )
+    next_request = client.post(
+        "/api/ask",
+        headers=headers,
+        json={"query": "second", "request_id": "audit-recovered"},
+    )
+
+    assert failed.status_code == 503
+    assert failed.json()["error"]["code"] == "ask_audit_unavailable"
+    assert next_request.status_code == 200
 
 
 def test_completed_request_id_replay_is_rejected_without_new_work_or_quota(
@@ -361,6 +499,7 @@ def test_busy_third_ask_does_not_consume_quota(tmp_path: Path) -> None:
         clock=lambda: now,
     )
     quota = InMemoryQuotaStore(config)
+    audit = InMemoryAskAuditStore()
     client = TestClient(
         create_app(
             config_loader=lambda: config,
@@ -370,6 +509,7 @@ def test_busy_third_ask_does_not_consume_quota(tmp_path: Path) -> None:
                 "Verifier", (), {"verify": lambda self, value: value == "valid"}
             )(),
             quota_store=quota,
+            ask_audit_store=audit,
             client_resolver=lambda request, hosted_mode: "203.0.113.9",
             now=lambda: now,
         )

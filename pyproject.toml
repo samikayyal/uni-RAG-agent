@@ -48,6 +48,9 @@ public-demo = [
     "google-cloud-firestore>=2.28.0",
     "itsdangerous>=2.2.0",
 ]
+dashboard = [
+    "geoip2>=5.3.0",
+]
 
 [dependency-groups]
 dev = [
