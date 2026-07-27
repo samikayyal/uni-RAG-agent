@@ -38,11 +38,13 @@ safe packet and remaining-quota projection with the ask response, so it never
 needs to expose historical numeric answer, packet, or coverage lookups.
 Every authenticated public submission also creates a separate durable
 Firestore `demo_asks` record before replay, capacity, or quota decisions. The
-record reaches a terminal completed, rejected, failed, timed-out, or cancelled
-state and retains the raw query/client IP plus the complete safe response and
-phase timeline. Unauthenticated and request-schema-invalid HTTP traffic is not
-recorded. Audit failure is fail-closed; an authenticated ask is not accepted
-unless its initial record exists.
+record is schema-v2 and uses Firestore server timestamps for `updated_at` on
+creation and every later update. It reaches a terminal completed, rejected,
+failed, timed-out, or cancelled state and retains the raw query/client IP plus
+the complete safe response and phase timeline. Unauthenticated and
+request-schema-invalid HTTP traffic is not recorded. Audit failure is
+fail-closed; an authenticated ask is not accepted unless its initial record
+exists.
 
 A Settings dialog lets the user adjust a bounded allowlist of retrieval tuning
 values: the embedding model (reviewed profiles only, aliases canonicalized),
@@ -121,14 +123,17 @@ not expose `crypto.randomUUID()`.
   `/openapi.json`.
 - `uv run -m uni_rag_agent app audit-dashboard` starts a separate reader on
   `127.0.0.1:8001`. It is not a route in either local or public application
-  mode. The reader paginates `demo_asks`, exposes complete records only to the
-  local browser, and optionally resolves retained IPs with a local GeoLite2
-  City database without sending them to a geolocation service.
+  mode. Startup synchronizes Firestore into the separate generated SQLite cache
+  `data/ask_audit_cache.sqlite`; all list/detail/search reads are then local.
+  `--offline` serves only the existing cache, `--rebuild-cache` reconstructs it
+  from the ledger, and `--refresh-locations` re-resolves cached IPs. The local
+  API has `GET /api/asks`, `GET /api/asks/{audit_id}`, enriched `GET /api/meta`,
+  and local-only `POST /api/sync`.
 
 ## Source, tests, and artifacts
 
 - Source:
-  `src/uni_rag_agent/app/{api,service,public_demo,settings,ask_audit,audit_dashboard}.py`
+  `src/uni_rag_agent/app/{api,service,public_demo,settings,ask_audit,audit_cache,audit_dashboard}.py`
   and `src/uni_rag_agent/app/static/`.
 - Tests: `tests/test_app.py` (local route projections, validation, sessions,
   cancellation, timeout, settings overrides, and sanitized failures) and
@@ -136,7 +141,9 @@ not expose `crypto.randomUUID()`.
   settings, browser state, and embedding registry behavior).
 - Artifacts: routes read/write through the evidence and answering stores;
   web settings overrides persist in `data/app_settings.json`; public ask audit
-  records persist in Firestore `demo_asks`.
+  records persist in Firestore `demo_asks`; the local dashboard cache is
+  `data/ask_audit_cache.sqlite` and is sensitive because it retains raw
+  questions, responses, and IP addresses.
 
 ## Invariants and failure boundaries
 
@@ -206,6 +213,9 @@ not expose `crypto.randomUUID()`.
 - Raw IPs, queries, evidence, and answers in `demo_asks` are intentionally
   retained indefinitely. The public composer discloses that retention.
   Firestore reads remain server/admin-only; no public audit-list route exists.
+- Dashboard GeoLite2 values freeze the first successful local interpretation;
+  missing/unopenable databases remain retryable, while private and not-found
+  outcomes are frozen. This is not event-time geography.
 
 Binding decisions: [DEC-036/017](../decisions.md#dec-036017--thin-local-web-app-with-process-scoped-models),
 [DEC-035/020](../decisions.md#dec-035020--strict-packet-only-answers-and-citations),

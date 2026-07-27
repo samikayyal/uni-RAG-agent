@@ -64,12 +64,17 @@ not expose ingestion, indexing, evaluation, uploads, or source mutation.
 
 View durable public ask records with `uv run -m uni_rag_agent app
 audit-dashboard`. This is a separate server hard-bound to `127.0.0.1` on port
-8001, not an application route. It requires
+8001, not an application route. It initializes the sensitive generated cache
+`data/ask_audit_cache.sqlite`, synchronizes Firestore, then serves list/detail
+data only from SQLite. It requires
 `UNI_RAG_FIRESTORE_PROJECT_ID`, Application Default Credentials, and the
 `public-demo` dependency extra. Install the `dashboard` extra and place a
 GeoLite2 City database at `data/GeoLite2-City.mmdb` for local country/region/city
 resolution; without the database, raw retained IPs and all other audit fields
-remain visible. Full setup and Firestore index-exemption commands are in
+remain visible and later syncs retry the lookup. Use `--offline` to avoid
+Firestore, `--rebuild-cache` for exact reconstruction (never with `--offline`),
+or `--refresh-locations` to replace normally frozen snapshots. The first local
+lookup is not true event-time geography. Full setup and Firestore index-exemption commands are in
 [deployment.md](deployment.md#operator-steps-for-the-ask-ledger).
 
 Public Cloud Run deployment is a separate, explicit operator workflow. After

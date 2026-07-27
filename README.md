@@ -66,8 +66,8 @@ uv run -m uni_rag_agent ask "Explain MapReduce" --model BAAI/bge-m3 --json
 # Local FastAPI/HTML question surface.
 uv run -m uni_rag_agent app serve
 
-# Localhost-only Firestore ask-audit viewer.
-uv run -m uni_rag_agent app audit-dashboard
+# Localhost-only SQLite-cached Firestore ask-audit viewer.
+uv run -m uni_rag_agent app audit-dashboard --cache-db data/ask_audit_cache.sqlite
 
 # Fixture evaluation (prepare once; real archive is explicit).
 uv run -m uni_rag_agent eval prepare-fixtures
@@ -81,6 +81,14 @@ no CAPTCHA or shared public quota is involved. Public demo mode is enabled only
 through deployment environment configuration; it uses Turnstile, signed
 per-tab sessions, Firestore-backed quotas, bounded request-scoped settings, and
 three predeployed embedding profiles.
+
+The audit dashboard first synchronizes the authoritative Firestore ledger into
+the ignored, sensitive `data/ask_audit_cache.sqlite`, then serves its list and
+detail views only from SQLite. `--offline` avoids Firestore completely;
+`--rebuild-cache` reconstructs the cache; and `--refresh-locations` refreshes
+the normally frozen local GeoLite2 snapshots. The cache contains raw questions,
+responses, and IP addresses. No command in this repository creates or modifies
+GCP resources, IAM, Firestore indexes, or deployed services.
 
 For the public deployment, the image reads `data/uni_rag.sqlite` and
 `data/indexes/vector/` directly and retains an accepted local EmbeddingGemma

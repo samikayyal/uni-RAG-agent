@@ -593,7 +593,7 @@ def create_app(
         config: Config,
     ) -> str:
         record: dict[str, object] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "received_at": received_at,
             "finished_at": None,
             "status": "received",

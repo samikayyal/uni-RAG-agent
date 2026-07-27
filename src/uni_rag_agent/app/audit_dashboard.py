@@ -1,8 +1,8 @@
-"""Localhost-only Firestore ask-audit dashboard."""
+"""Localhost-only SQLite-backed Firestore ask-audit dashboard."""
 
 from __future__ import annotations
 
-import ipaddress
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,64 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..config import Config, load_config
 from .ask_audit import AskAuditError, FirestoreAskAuditStore
-
-
-class GeoIpResolver:
-    """Resolve retained client IPs locally without sending them to another API."""
-
-    def __init__(self, database_path: Path | None) -> None:
-        self.database_path = database_path
-        self._reader: Any = None
-        self.error: str | None = None
-        if database_path is None or not database_path.is_file():
-            self.error = (
-                "GeoLite2 City database not found; IP addresses are still available."
-            )
-            return
-        try:
-            import geoip2.database
-
-            self._reader = geoip2.database.Reader(str(database_path))
-        except ImportError:
-            self.error = (
-                "The dashboard extra is not installed; run "
-                "'uv sync --extra public-demo --extra dashboard'."
-            )
-        except Exception:
-            self.error = "The GeoLite2 City database could not be opened."
-
-    @property
-    def ready(self) -> bool:
-        return self._reader is not None
-
-    def resolve(self, address: object) -> dict[str, object] | None:
-        if self._reader is None or not isinstance(address, str):
-            return None
-        try:
-            parsed = ipaddress.ip_address(address)
-            if parsed.is_private or parsed.is_loopback or parsed.is_unspecified:
-                return {
-                    "country_code": None,
-                    "country": "Private/local address",
-                    "region": None,
-                    "city": None,
-                    "latitude": None,
-                    "longitude": None,
-                    "time_zone": None,
-                }
-            result = self._reader.city(address)
-        except Exception:
-            return None
-        subdivision = result.subdivisions.most_specific
-        return {
-            "country_code": result.country.iso_code,
-            "country": result.country.name,
-            "region": subdivision.name,
-            "city": result.city.name,
-            "latitude": result.location.latitude,
-            "longitude": result.location.longitude,
-            "time_zone": result.location.time_zone,
-        }
+from .audit_cache import AuditCache, AuditCacheError, GeoIpResolver
 
 
 def create_audit_dashboard(
@@ -77,16 +20,37 @@ def create_audit_dashboard(
     config_loader: Any = load_config,
     store: Any = None,
     geoip_database: Path | None = None,
+    cache_database: Path = Path("data/ask_audit_cache.sqlite"),
+    offline: bool = False,
+    rebuild_cache: bool = False,
+    refresh_locations: bool = False,
 ) -> FastAPI:
-    """Create the local audit viewer; callers must bind it to loopback."""
+    """Create the local viewer after synchronizing its generated SQLite cache."""
 
-    config: Config = config_loader()
-    if not config.firestore_project_id:
-        raise RuntimeError(
-            "UNI_RAG_FIRESTORE_PROJECT_ID is required for the ask dashboard."
-        )
-    audit_store = store or FirestoreAskAuditStore(config)
+    if offline and rebuild_cache:
+        raise ValueError("--rebuild-cache cannot be used with --offline.")
+    cache = AuditCache(cache_database)
+    cache.initialize()
     geo = GeoIpResolver(geoip_database)
+    config: Config | None = None
+    audit_store = None
+    if not offline:
+        config = config_loader()
+        if not config.firestore_project_id:
+            raise RuntimeError(
+                "UNI_RAG_FIRESTORE_PROJECT_ID is required for the ask dashboard."
+            )
+        audit_store = store or FirestoreAskAuditStore(config)
+        try:
+            cache.sync(audit_store, geo, rebuild=rebuild_cache)
+        except Exception as exc:
+            if cache.count() == 0:
+                raise RuntimeError(
+                    "Firestore synchronization failed and the audit cache is empty. "
+                    "Verify credentials/connectivity, or use --offline with an existing cache."
+                ) from exc
+    if refresh_locations:
+        cache.refresh_locations(geo)
     app = FastAPI(
         title="Uni RAG Ask Audit",
         docs_url=None,
@@ -108,7 +72,8 @@ def create_audit_dashboard(
         return response
 
     @app.exception_handler(AskAuditError)
-    async def handle_audit_error(_: Any, exc: AskAuditError) -> JSONResponse:
+    @app.exception_handler(AuditCacheError)
+    async def handle_audit_error(_: Any, exc: Exception) -> JSONResponse:
         return JSONResponse(
             status_code=503,
             content={
@@ -123,19 +88,41 @@ def create_audit_dashboard(
     async def dashboard() -> HTMLResponse:
         return HTMLResponse(DASHBOARD_HTML)
 
-    @app.get("/api/meta")
-    async def metadata() -> dict[str, object]:
+    sync_lock = asyncio.Lock()
+    sync_in_progress = False
+
+    def _metadata() -> dict[str, object]:
+        state = cache.state()
         return {
-            "project": config.firestore_project_id,
-            "database": config.firestore_database,
+            "project": config.firestore_project_id if config is not None else None,
+            "database": config.firestore_database if config is not None else None,
+            "cache_path": str(cache.path),
+            "offline": offline,
+            "cached_count": cache.count(),
+            "last_successful_sync": state["last_success_at"],
+            "last_error": state["last_error"],
+            "sync_state": (
+                "offline"
+                if offline
+                else "synchronizing"
+                if sync_in_progress
+                else "stale"
+                if state["last_error"]
+                else "current"
+            ),
             "geoip": {
                 "ready": geo.ready,
                 "database_path": (
                     str(geo.database_path) if geo.database_path is not None else None
                 ),
+                "build_epoch": geo.build_epoch,
                 "message": geo.error,
             },
         }
+
+    @app.get("/api/meta")
+    async def metadata() -> dict[str, object]:
+        return _metadata()
 
     @app.get("/api/asks")
     async def list_asks(
@@ -146,13 +133,10 @@ def create_audit_dashboard(
             before_value = _parse_cursor(before)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        page = audit_store.list_recent(limit=limit, before=before_value)
-        records = [_enrich_record(record, geo) for record in page.records]
+        records, next_before = cache.list_recent(limit=limit, before=before_value)
         return {
             "records": records,
-            "next_before": (
-                page.next_before.isoformat() if page.next_before is not None else None
-            ),
+            "next_before": next_before,
         }
 
     @app.get("/api/asks/{audit_id}", response_model=None)
@@ -164,13 +148,37 @@ def create_audit_dashboard(
                 status_code=404,
                 content={"error": {"code": "not_found", "message": "Ask not found."}},
             )
-        record = audit_store.get(audit_id)
+        record = cache.get(audit_id)
         if record is None:
             return JSONResponse(
                 status_code=404,
                 content={"error": {"code": "not_found", "message": "Ask not found."}},
             )
-        return _enrich_record(record, geo)
+        return record
+
+    @app.post("/api/sync")
+    async def synchronize() -> dict[str, object]:
+        nonlocal sync_in_progress
+        if offline:
+            return _metadata()
+        assert audit_store is not None
+        async with sync_lock:
+            sync_in_progress = True
+            try:
+                await asyncio.to_thread(cache.sync, audit_store, geo)
+            except Exception as exc:
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "error": {
+                            "code": "ask_audit_unavailable",
+                            "message": "Firestore synchronization failed; cached data may be stale.",
+                        }
+                    },
+                )
+            finally:
+                sync_in_progress = False
+        return _metadata()
 
     return app
 
@@ -185,17 +193,6 @@ def _parse_cursor(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         raise ValueError("before must include a timezone")
     return parsed.astimezone(UTC)
-
-
-def _enrich_record(
-    record: dict[str, object],
-    geo: GeoIpResolver,
-) -> dict[str, object]:
-    enriched = dict(record)
-    client = enriched.get("client")
-    address = client.get("ip_address") if isinstance(client, dict) else None
-    enriched["location"] = geo.resolve(address)
-    return enriched
 
 
 DASHBOARD_HTML = r"""<!doctype html>
@@ -274,7 +271,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 <body>
   <main class="shell">
     <header>
-      <div><div class="eyebrow">Local Firestore viewer</div><h1>Ask audit</h1></div>
+      <div><div class="eyebrow">Local SQLite audit cache</div><h1>Ask audit</h1></div>
       <div class="meta" id="meta">Connecting…</div>
     </header>
     <div class="notice" id="notice"></div>
@@ -313,8 +310,8 @@ DASHBOARD_HTML = r"""<!doctype html>
       if (!g) return "Unresolved";
       return [g.city, g.region, g.country].filter(Boolean).join(", ") || "Unresolved";
     };
-    async function request(path) {
-      const response = await fetch(path, { cache: "no-store" });
+    async function request(path, options = {}) {
+      const response = await fetch(path, { cache: "no-store", ...options });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error?.message || "Request failed");
       return data;
@@ -406,8 +403,19 @@ DASHBOARD_HTML = r"""<!doctype html>
     async function boot() {
       try {
         const meta = await request("/api/meta");
-        $("meta").textContent = `${meta.project} · ${meta.database}`;
-        if (!meta.geoip.ready) {
+        $("notice").style.display = "none";
+        const source = meta.offline ? "Offline cache" : `${meta.project} · ${meta.database}`;
+        $("meta").textContent = `${source} · ${meta.cached_count.toLocaleString()} cached`;
+        if (meta.sync_state === "synchronizing") {
+          $("notice").textContent = "Synchronizing Firestore into the local SQLite cache…";
+          $("notice").style.display = "block";
+        } else if (meta.sync_state === "stale") {
+          $("notice").textContent = `Stale cached data. Last successful sync: ${time(meta.last_successful_sync)}. ${meta.last_error || ""}`;
+          $("notice").style.display = "block";
+        } else if (meta.offline) {
+          $("notice").textContent = "Offline mode: Refresh reloads only the local SQLite cache.";
+          $("notice").style.display = "block";
+        } else if (!meta.geoip.ready) {
           $("notice").textContent = meta.geoip.message;
           $("notice").style.display = "block";
         }
@@ -416,7 +424,12 @@ DASHBOARD_HTML = r"""<!doctype html>
     }
     $("search").addEventListener("input", render);
     $("status").addEventListener("change", render);
-    $("refresh").addEventListener("click", () => load(true));
+    $("refresh").addEventListener("click", async () => {
+      $("notice").textContent = "Synchronizing Firestore into the local SQLite cache…";
+      $("notice").style.display = "block";
+      try { await request("/api/sync", { method: "POST" }); } catch (_) { /* metadata exposes stale state */ }
+      await boot();
+    });
     $("more").addEventListener("click", () => load(false));
     $("close").addEventListener("click", () => $("detail").close());
     boot();

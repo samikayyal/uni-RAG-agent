@@ -112,6 +112,13 @@ The implemented pipeline is complete through evaluation hardening:
     approximate locations from an operator-supplied local GeoLite2 City
     database; the repository includes operator-only Firestore index-exemption
     instructions and performs no GCP control-plane actions.
+20. The local audit dashboard now synchronizes the authoritative Firestore
+    ledger into the separate ignored sensitive SQLite cache
+    `data/ask_audit_cache.sqlite`, then serves all dashboard reads locally.
+    New audit documents are schema-v2 with Firestore `updated_at` timestamps;
+    legacy schema-v1 rows bootstrap compatibly. Incremental sync uses inclusive
+    high-water marks and transactional upserts, location snapshots are frozen
+    unless explicitly refreshed, and offline/stale-cache operation is explicit.
 
 This documentation layer now mirrors those live contracts through
 `context/README.md`, the compact overview/architecture/glossary/operations and

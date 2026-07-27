@@ -90,6 +90,17 @@ def test_app_serve_help_exposes_host_and_port() -> None:
     assert "--port" in result.stdout
 
 
+def test_audit_dashboard_help_and_conflicting_flags_expose_cache_contract() -> None:
+    help_result = run_cli("app", "audit-dashboard", "--help")
+    conflict = run_cli("app", "audit-dashboard", "--offline", "--rebuild-cache")
+
+    assert help_result.returncode == 0
+    for flag in ("--cache-db", "--offline", "--rebuild-cache", "--refresh-locations"):
+        assert flag in help_result.stdout
+    assert conflict.returncode == cli.CONFIG_ERROR
+    assert "cannot be used" in conflict.stderr
+
+
 def test_app_serve_handler_starts_uvicorn_with_local_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

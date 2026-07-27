@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from ..cli_support.constants import SUCCESS
+from ..cli_support.constants import CONFIG_ERROR, SUCCESS
 
 
 def register_commands(
@@ -60,6 +61,27 @@ def register_commands(
             "Local MaxMind GeoLite2 City .mmdb path (default: data/GeoLite2-City.mmdb)."
         ),
     )
+    dashboard_parser.add_argument(
+        "--cache-db",
+        type=Path,
+        default=Path("data/ask_audit_cache.sqlite"),
+        help="Generated local SQLite cache path (default: data/ask_audit_cache.sqlite).",
+    )
+    dashboard_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Serve the existing SQLite cache without initializing Firestore.",
+    )
+    dashboard_parser.add_argument(
+        "--rebuild-cache",
+        action="store_true",
+        help="Rebuild the local cache from every Firestore audit record.",
+    )
+    dashboard_parser.add_argument(
+        "--refresh-locations",
+        action="store_true",
+        help="Re-resolve every cached IP using the current local GeoLite2 database.",
+    )
     dashboard_parser.set_defaults(handler=dashboard_handler)
 
 
@@ -87,7 +109,16 @@ def handle_audit_dashboard(args: argparse.Namespace) -> int:
 
     from ..app.audit_dashboard import create_audit_dashboard
 
-    app = create_audit_dashboard(geoip_database=args.geoip_db.resolve())
+    if args.offline and args.rebuild_cache:
+        print("--rebuild-cache cannot be used with --offline.", file=sys.stderr)
+        return CONFIG_ERROR
+    app = create_audit_dashboard(
+        geoip_database=args.geoip_db.resolve(),
+        cache_database=args.cache_db.resolve(),
+        offline=args.offline,
+        rebuild_cache=args.rebuild_cache,
+        refresh_locations=args.refresh_locations,
+    )
     uvicorn.run(
         app,
         host="127.0.0.1",

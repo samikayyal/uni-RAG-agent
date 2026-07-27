@@ -280,6 +280,16 @@ schema validation are not retained. Audit writes fail closed. The audit store
 never receives bearer tokens, Turnstile responses, authorization headers,
 secrets, raw exception details, or stack traces.
 
+New ledger documents use `schema_version: 2` and Firestore server timestamps
+for `updated_at` both on creation and every later update; schema-v1 records
+without that field remain readable. The local audit dashboard synchronizes this
+indefinite ledger into the separate, generated, sensitive SQLite cache
+`data/ask_audit_cache.sqlite`. Bootstrap imports all records; later runs query
+ascending `updated_at` from an inclusive timestamp high-water mark and use
+idempotent upserts, so equal timestamps, retries, and terminal updates are not
+lost. Firestore deletion is intentionally not mirrored during ordinary sync;
+`--rebuild-cache` is the explicit exact reconstruction operation.
+
 A request id is a one-shot acceptance identity within its signed demo-token
 nonce. A completed replay returns a stable conflict and cannot start retrieval,
 consume capacity, or mutate session ownership, even though the existing
@@ -312,7 +322,9 @@ only fields needed for dashboard ordering/filtering remain indexed. Retention
 is indefinite by explicit product choice, the public UI discloses raw-IP/full
 trace retention, and IP-derived locations are resolved only by the separate
 localhost dashboard using an operator-supplied GeoLite2 database. Local mode
-does not upload private asks. Selecting, reviewing, and staging the SQLite
+does not upload private asks. Locations are the first successful local lookup
+snapshot—not true event-time geography—and are frozen across ordinary syncs;
+`--refresh-locations` is explicit. Selecting, reviewing, and staging the SQLite
 database, Chroma indexes, and accepted offline model are operator
 responsibilities; the application does not scan or certify deployment inputs.
 GCP budget alerts are warnings, not spending caps; provider and platform limits

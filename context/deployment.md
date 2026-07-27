@@ -185,8 +185,12 @@ foreach ($Field in $UnindexedFields) {
 
 The same intended exemptions are recorded in
 [`deployment/firestore.ask-audit-indexes.json`](../deployment/firestore.ask-audit-indexes.json)
-for review. Keep the ordinary automatic index on `received_at`; the local
-dashboard orders and paginates by that field. Verify the applied exemptions:
+for review. Keep the ordinary automatic indexes on both `received_at` and
+`updated_at`; the local cache bootstraps legacy records and incrementally orders
+new records by `updated_at`. Do not add either timestamp to the exemptions.
+The implementation runs no `gcloud` command and never creates or modifies GCP
+resources, IAM, Firestore indexes, or deployed services. Verify the applied
+exemptions:
 
 ```powershell
 gcloud.cmd firestore indexes fields list `
@@ -218,12 +222,20 @@ UNI_RAG_FIRESTORE_DATABASE=(default)
 ```
 
 ```powershell
-uv run -m uni_rag_agent app audit-dashboard
+uv run -m uni_rag_agent app audit-dashboard `
+  --cache-db data/ask_audit_cache.sqlite `
+  --geoip-db data/GeoLite2-City.mmdb `
+  --port 8001
 ```
 
 Open `http://127.0.0.1:8001`. Use `--geoip-db <path>` for a different database
-location and `--port <port>` for a different loopback port. GeoLite2 locations
-are approximate analytics signals, not household/address identification.
+location and `--port <port>` for a different loopback port. `--offline` skips
+Firestore and serves the existing cache, `--rebuild-cache` performs an exact
+ledger reconstruction (and cannot be combined with `--offline`), and
+`--refresh-locations` explicitly recomputes frozen local GeoLite2 snapshots.
+The cache is ignored, generated, and sensitive: it contains raw questions,
+responses, and IP addresses. GeoLite2 locations are approximate analytics
+signals, not household/address identification or true event-time geography.
 
 ## Cloudflare and DNS
 

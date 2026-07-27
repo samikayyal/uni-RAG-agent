@@ -44,7 +44,10 @@ operators may lower them but cannot silently deploy broader values.
 - Tests: `tests/test_config.py`, `tests/test_logging_config.py`,
   `tests/test_storage.py`, `tests/test_cli.py`.
 - Generated: SQLite database, extracted-text directory, Chroma directory, and
-  command JSONL logs under `data/`.
+  command JSONL logs under `data/`. The separate ignored
+  `data/ask_audit_cache.sqlite` is a sensitive generated Firestore audit cache
+  containing raw queries, responses, and IP addresses; it is never part of
+  `data/uni_rag.sqlite`.
 - Schema authority: [`storage/core.py`](../../src/uni_rag_agent/storage/core.py);
   this page intentionally lists no duplicate DDL.
 
@@ -71,6 +74,9 @@ operators may lower them but cannot silently deploy broader values.
   and evidence packet). Records have no automatic expiry. Bearer tokens,
   Turnstile responses, raw authorization/request headers, secrets, and stack
   traces are never stored.
+- `demo_asks.received_at` and `demo_asks.updated_at` must retain ordinary
+  automatic Firestore indexes. Large/nested audit fields remain exempted; the
+  local cache's incremental sync depends on `updated_at` ordering.
 
 Binding decisions: [DEC-009/021](../decisions.md#dec-009021--uv-and-environment-configuration),
 [DEC-011](../decisions.md#dec-011--sqlite-authority-with-chroma-logical-indexes),
